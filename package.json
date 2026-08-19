@@ -1,0 +1,33 @@
+{
+  "name": "erp-imobiliario",
+  "version": "0.1.0",
+  "description": "ERP de viabilidade e gestao financeira de empreendimentos imobiliarios - motor multiempreendimento",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "import:splendido": "tsx src/import/importadorSplendido.ts",
+    "import:ficticio": "tsx src/import/importadorFicticio.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "prisma": "^6.19.3",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "decimal.js": "^10.6.0"
+  },
+  "allowScripts": {
+    "@prisma/engines@7.9.1": true,
+    "esbuild@0.28.2": true,
+    "prisma@7.9.1": true
+  }
+}

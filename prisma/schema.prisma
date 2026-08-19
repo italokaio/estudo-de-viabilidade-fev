@@ -1,0 +1,256 @@
+// Fase 0 — fundacao do ERP de viabilidade e gestao financeira de empreendimentos imobiliarios.
+//
+// Convencao deste schema: todo valor monetario ou percentual e armazenado como
+// String (texto decimal), nunca Float/Real. SQLite nao possui tipo Decimal nativo
+// no Prisma, e ponto flutuante binario pode introduzir deriva de arredondamento
+// entre execucoes — o que violaria o principio de motor financeiro deterministico
+// (ver docs/ARQUITETURA.md, principio B). A camada core/ converte para Decimal.js
+// na fronteira de leitura/escrita.
+//
+// Nenhuma tabela abaixo tem coluna ou valor especifico do Splendido — Splendido
+// e apenas o primeiro conjunto de linhas inserido nestas tabelas genericas.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Empreendimento {
+  id                    String    @id @default(cuid())
+  nome                  String
+  incorporador          String?
+  endereco              String?
+  statusFase            String?
+  dataPrevistaConclusao DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  cenarios            Cenario[]
+  terreno             Terreno?
+  tipologias          Tipologia[]
+  unidades            Unidade[]
+  condicoesPagamento  CondicaoPagamento[]
+  premissasVelocidade PremissaVelocidadeVendas[]
+  vendas              Venda[]
+  categoriasCusto     CategoriaCusto[]
+  custos              Custo[]
+  cronograma          CronogramaFisicoFinanceiro[]
+
+  @@map("empreendimento")
+}
+
+model Cenario {
+  id                     String   @id @default(cuid())
+  empreendimentoId       String
+  tipo                   String // base | otimista | pessimista | personalizado
+  nome                   String
+  derivadoDeCenarioId    String?
+  horizonteProjecaoMeses Int
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
+  derivadoDe     Cenario?       @relation("CenarioDerivado", fields: [derivadoDeCenarioId], references: [id])
+  derivados      Cenario[]      @relation("CenarioDerivado")
+
+  premissasVelocidade PremissaVelocidadeVendas[]
+  vendas              Venda[]
+  custos              Custo[]
+  cronograma          CronogramaFisicoFinanceiro[]
+
+  @@map("cenario")
+}
+
+model Terreno {
+  id                  String   @id @default(cuid())
+  empreendimentoId    String   @unique
+  areaValor           String? // decimal-as-string; nulo = nao validado/conflitante
+  areaUnidade         String   @default("m2")
+  areaStatusValidacao String   @default("pendente") // pendente | validado | conflitante
+  areaObservacao      String?
+  formaAquisicao      String? // compra | permuta | misto
+  createdAt           DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
+
+  @@map("terreno")
+}
+
+model Tipologia {
+  id                  String   @id @default(cuid())
+  empreendimentoId    String
+  nome                String
+  areaPrivativaPadrao String?
+  precoUnitarioPadrao String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  empreendimento      Empreendimento             @relation(fields: [empreendimentoId], references: [id])
+  unidades            Unidade[]
+  condicoesPagamento  CondicaoPagamento[]
+  premissasVelocidade PremissaVelocidadeVendas[]
+
+  @@map("tipologia")
+}
+
+model Unidade {
+  id               String   @id @default(cuid())
+  empreendimentoId String
+  tipologiaId      String
+  numero           String
+  andar            Int?
+  orientacao       String?
+  areaPrivativa    String?
+  precoVenda       String?
+  status           String   @default("estoque") // estoque | reservada | vendida | permutada | distratada | indisponivel
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
+  tipologia      Tipologia      @relation(fields: [tipologiaId], references: [id])
+  vendas         Venda[]
+
+  @@map("unidade")
+}
+
+model CondicaoPagamento {
+  id               String   @id @default(cuid())
+  empreendimentoId String
+  tipologiaId      String?
+  nome             String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  empreendimento Empreendimento        @relation(fields: [empreendimentoId], references: [id])
+  tipologia      Tipologia?            @relation(fields: [tipologiaId], references: [id])
+  modalidades    ModalidadePagamento[]
+  vendas         Venda[]
+
+  @@map("condicao_pagamento")
+}
+
+model ModalidadePagamento {
+  id                   String   @id @default(cuid())
+  condicaoPagamentoId  String
+  nome                 String
+  percentual           String // decimal-as-string, 0..1
+  tipoDistribuicao     String // unica | nivelada | periodica | sobre_total
+  periodicidadeMeses   Int?
+  mesFixo              Int?
+  repeticoesSobreTotal Int      @default(1)
+  geraEventoParcial    Boolean  @default(false)
+  ordem                Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  condicaoPagamento CondicaoPagamento      @relation(fields: [condicaoPagamentoId], references: [id])
+  recebimentos      RecebimentoProjetado[]
+
+  @@map("modalidade_pagamento")
+}
+
+model PremissaVelocidadeVendas {
+  id                String @id @default(cuid())
+  empreendimentoId  String
+  cenarioId         String
+  tipologiaId       String
+  mes               Int
+  unidadesPrevistas String // decimal-as-string
+
+  empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
+  cenario        Cenario        @relation(fields: [cenarioId], references: [id])
+  tipologia      Tipologia      @relation(fields: [tipologiaId], references: [id])
+
+  @@map("premissa_velocidade_vendas")
+}
+
+model Venda {
+  id                  String   @id @default(cuid())
+  empreendimentoId    String
+  cenarioId           String
+  unidadeId           String
+  mesOrigem           Int
+  valorVenda          String // decimal-as-string
+  condicaoPagamentoId String
+  status              String   @default("ativa") // ativa | distratada
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  empreendimento    Empreendimento         @relation(fields: [empreendimentoId], references: [id])
+  cenario           Cenario                @relation(fields: [cenarioId], references: [id])
+  unidade           Unidade                @relation(fields: [unidadeId], references: [id])
+  condicaoPagamento CondicaoPagamento      @relation(fields: [condicaoPagamentoId], references: [id])
+  recebimentos      RecebimentoProjetado[]
+
+  @@map("venda")
+}
+
+model RecebimentoProjetado {
+  id             String  @id @default(cuid())
+  vendaId        String
+  modalidadeId   String
+  mesCompetencia Int
+  valorPrevisto  String // decimal-as-string
+  valorRealizado String?
+  status         String  @default("previsto") // previsto | recebido | atrasado
+
+  venda      Venda               @relation(fields: [vendaId], references: [id])
+  modalidade ModalidadePagamento @relation(fields: [modalidadeId], references: [id])
+
+  @@map("recebimento_projetado")
+}
+
+model CategoriaCusto {
+  id               String  @id @default(cuid())
+  empreendimentoId String? // nulo = categoria padrao do sistema, reutilizavel entre empreendimentos
+  nome             String
+  tipoIncidencia   String // fixo | pct_vgv | pct_execucao | pct_recebido
+
+  empreendimento Empreendimento? @relation(fields: [empreendimentoId], references: [id])
+  custos         Custo[]
+
+  @@map("categoria_custo")
+}
+
+model Custo {
+  id                  String   @id @default(cuid())
+  empreendimentoId    String
+  cenarioId           String
+  categoriaId         String
+  valorPrevisto       String? // decimal-as-string, absoluto (quando incidencia = fixo)
+  percentual          String? // decimal-as-string, 0..1 (quando incidencia = percentual)
+  competenciaMes      Int?
+  vencimentoMes       Int?
+  recorrencia         String   @default("unico") // unico | mensal
+  valorRealizado      String?
+  participaFluxoCaixa Boolean  @default(true)
+  status              String   @default("previsto")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
+  cenario        Cenario        @relation(fields: [cenarioId], references: [id])
+  categoria      CategoriaCusto @relation(fields: [categoriaId], references: [id])
+
+  @@map("custo")
+}
+
+model CronogramaFisicoFinanceiro {
+  id                       String @id @default(cuid())
+  empreendimentoId         String
+  cenarioId                String
+  mes                      Int
+  percentualExecucaoMensal String // decimal-as-string
+  previstoRealizado        String @default("previsto")
+
+  empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
+  cenario        Cenario        @relation(fields: [cenarioId], references: [id])
+
+  @@unique([cenarioId, mes])
+  @@map("cronograma_fisico_financeiro")
+}

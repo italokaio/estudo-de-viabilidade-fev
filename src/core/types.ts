@@ -1,0 +1,93 @@
+/**
+ * Tipos do motor financeiro puro.
+ *
+ * Nada neste arquivo importa Prisma, banco de dados ou qualquer coisa de I/O.
+ * O motor recebe estas estruturas como entrada e devolve estas estruturas
+ * como saida — a camada de persistencia (src/db) e a unica responsavel por
+ * traduzir linhas de tabela para/de estes tipos.
+ */
+import { Decimal } from "decimal.js";
+
+export type TipoDistribuicao = "unica_na_venda" | "nivelada" | "periodica" | "mes_fixo";
+
+/** Uma fatia de uma condicao de pagamento (ex.: "Entrada", "Parcela mensal"). */
+export interface ModalidadePagamento {
+  id: string;
+  nome: string;
+  /** 0..1 */
+  percentual: Decimal;
+  tipoDistribuicao: TipoDistribuicao;
+  /** obrigatorio para tipoDistribuicao = "periodica" */
+  periodicidadeMeses?: number;
+  /** obrigatorio para tipoDistribuicao = "mes_fixo" */
+  mesFixo?: number;
+  /** para "mes_fixo": em quantas parcelas iguais o valor e dividido, a partir de mesFixo */
+  repeticoesSobreTotal: number;
+  /** para "periodica": gerar evento com valor proporcional mesmo sem ciclo completo restante */
+  geraEventoParcial: boolean;
+  ordem: number;
+}
+
+export interface CondicaoPagamento {
+  id: string;
+  nome: string;
+  modalidades: ModalidadePagamento[];
+}
+
+export interface VendaInput {
+  id: string;
+  unidadeId: string;
+  mesOrigem: number;
+  valorVenda: Decimal;
+  condicaoPagamento: CondicaoPagamento;
+}
+
+export interface RecebimentoGerado {
+  vendaId: string;
+  modalidadeId: string;
+  mesCompetencia: number;
+  valorPrevisto: Decimal;
+}
+
+export type TipoIncidenciaCusto = "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao";
+
+export interface CustoInput {
+  id: string;
+  categoriaNome: string;
+  tipoIncidencia: TipoIncidenciaCusto;
+  /** valor absoluto — usado quando tipoIncidencia = "fixo" */
+  valorPrevisto?: Decimal;
+  /** 0..1 — usado quando tipoIncidencia != "fixo" */
+  percentual?: Decimal;
+  /** mes de lancamento — usado quando tipoIncidencia = "fixo" e recorrencia = "unico" */
+  competenciaMes?: number;
+  recorrencia: "unico" | "mensal";
+  participaFluxoCaixa: boolean;
+}
+
+export interface PontoCronograma {
+  mes: number;
+  percentualExecucaoMensal: Decimal;
+}
+
+export interface DesembolsoMensal {
+  custoId: string;
+  mes: number;
+  valor: Decimal;
+}
+
+export interface FluxoMensal {
+  mes: number;
+  entradas: Decimal;
+  saidas: Decimal;
+  fluxoMensal: Decimal;
+  fluxoAcumulado: Decimal;
+}
+
+export interface IndicadoresFluxo {
+  necessidadeMaximaCapital: Decimal;
+  mesPico: number | null;
+  mesRecuperacao: number | null;
+  saldoFinal: Decimal;
+  vpl: Decimal;
+}

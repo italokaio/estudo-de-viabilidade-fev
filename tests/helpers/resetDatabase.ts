@@ -1,0 +1,18 @@
+import { prisma } from "../../src/db/client.js";
+
+/** Limpa todas as tabelas, respeitando a ordem de chaves estrangeiras. Usado antes de cada teste de integracao para garantir um banco limpo. */
+export async function resetDatabase() {
+  await prisma.recebimentoProjetado.deleteMany();
+  await prisma.venda.deleteMany();
+  await prisma.premissaVelocidadeVendas.deleteMany();
+  await prisma.modalidadePagamento.deleteMany();
+  await prisma.condicaoPagamento.deleteMany();
+  await prisma.unidade.deleteMany();
+  await prisma.cronogramaFisicoFinanceiro.deleteMany();
+  await prisma.custo.deleteMany();
+  await prisma.categoriaCusto.deleteMany();
+  await prisma.tipologia.deleteMany();
+  await prisma.terreno.deleteMany();
+  await prisma.cenario.deleteMany();
+  await prisma.empreendimento.deleteMany();
+}
