@@ -12,6 +12,7 @@ export interface PontoFluxo {
   fluxoAcumulado: string;
   entradasRealizadas: string | null;
   saidasRealizadas: string | null;
+  entradasCorrigidas: string;
 }
 
 export interface FluxoCaixaResposta {
@@ -113,6 +114,7 @@ export interface CenarioDetalhe {
   premissasVelocidade: { id: string; tipologiaId: string; tipologiaNome: string; mes: number; unidadesPrevistas: string }[];
   custos: CustoResumo[];
   cronograma: { mes: number; percentualExecucaoMensal: string }[];
+  indicesCorrecao: { mes: number; percentual: string }[];
   totalVendasGeradas: number;
 }
 
@@ -327,6 +329,14 @@ export function excluirCusto(id: string) {
 
 export function excluirCronograma(cenarioId: string) {
   return del(`/api/cenarios/${cenarioId}/cronograma`);
+}
+
+export function definirPontoIndiceCorrecao(cenarioId: string, input: { mes: number; percentual: string }) {
+  return postJson<{ mes: number; percentual: string }>(`/api/cenarios/${cenarioId}/indices-correcao`, input);
+}
+
+export function excluirPontoIndiceCorrecao(cenarioId: string, mes: number) {
+  return del(`/api/cenarios/${cenarioId}/indices-correcao/${mes}`);
 }
 
 export type Papel = "admin" | "usuario";

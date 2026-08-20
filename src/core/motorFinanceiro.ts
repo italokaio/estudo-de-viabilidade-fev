@@ -1,8 +1,9 @@
 import { Decimal } from "decimal.js";
+import { corrigirRecebimentos } from "./motorCorrecao.js";
 import { gerarDesembolsosMensais, type ContextoCustos } from "./motorCustos.js";
 import { calcularIndicadores, consolidarFluxoCaixa } from "./motorFluxoCaixa.js";
 import { gerarRecebimentos } from "./motorRecebimentos.js";
-import type { CustoInput, FluxoMensal, IndicadoresFluxo, PontoCronograma, RecebimentoGerado, VendaInput } from "./types.js";
+import type { CustoInput, FluxoMensal, IndicadoresFluxo, PontoCronograma, PontoIndiceCorrecao, RecebimentoGerado, VendaInput } from "./types.js";
 
 export interface EntradaMotorFinanceiro {
   vendas: VendaInput[];
@@ -10,12 +11,16 @@ export interface EntradaMotorFinanceiro {
   cronograma: PontoCronograma[];
   horizonteMeses: number;
   taxaDescontoMensal: Decimal;
+  /** serie de indice de correcao monetaria do cenario (achado F6) -- vazio/omitido = sem correcao, comportamento identico ao motor antes desta fatia */
+  indiceCorrecao?: PontoIndiceCorrecao[];
 }
 
 export interface SaidaMotorFinanceiro {
   recebimentos: RecebimentoGerado[];
   fluxo: FluxoMensal[];
   indicadores: IndicadoresFluxo;
+  /** entradas de cada mes corrigidas pelo indice de correcao (identicas a fluxo[].entradas quando nenhum indice foi cadastrado) */
+  entradasCorrigidas: { mes: number; valor: Decimal }[];
 }
 
 /**
@@ -51,5 +56,17 @@ export function executarMotorFinanceiro(entrada: EntradaMotorFinanceiro): SaidaM
   const fluxo = consolidarFluxoCaixa(recebimentos, desembolsos, entrada.horizonteMeses);
   const indicadores = calcularIndicadores(fluxo, entrada.taxaDescontoMensal);
 
-  return { recebimentos, fluxo, indicadores };
+  const mesOrigemPorVenda = new Map(entrada.vendas.map((v) => [v.id, v.mesOrigem]));
+  const corrigidos = corrigirRecebimentos(recebimentos, mesOrigemPorVenda, entrada.indiceCorrecao ?? []);
+  const entradasCorrigidasPorMes = new Map<number, Decimal>();
+  for (const c of corrigidos) {
+    const atual = entradasCorrigidasPorMes.get(c.mesCompetencia) ?? new Decimal(0);
+    entradasCorrigidasPorMes.set(c.mesCompetencia, atual.plus(c.valorCorrigido));
+  }
+  const entradasCorrigidas = Array.from({ length: entrada.horizonteMeses }, (_, i) => {
+    const mes = i + 1;
+    return { mes, valor: entradasCorrigidasPorMes.get(mes) ?? new Decimal(0) };
+  });
+
+  return { recebimentos, fluxo, indicadores, entradasCorrigidas };
 }

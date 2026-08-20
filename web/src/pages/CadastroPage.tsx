@@ -16,6 +16,7 @@ import {
   criarTipologia,
   criarUnidadesEmLote,
   criarUnidadesPorAndar,
+  definirPontoIndiceCorrecao,
   desfazerPermuta,
   excluirCategoriaCusto,
   excluirCenario,
@@ -23,6 +24,7 @@ import {
   excluirCronograma,
   excluirCusto,
   excluirEmpreendimento,
+  excluirPontoIndiceCorrecao,
   excluirTipologia,
   fetchCenarioDetalhe,
   fetchEmpreendimentoDetalhe,
@@ -635,6 +637,13 @@ function CartaoCenario({
 
           <div style={{ paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
             <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)", marginBottom: 8 }}>
+              Índice de correção monetária
+            </div>
+            <IndiceCorrecaoSecao cenarioId={cenarioResumo.id} indicesCorrecao={detalhe.indicesCorrecao} onAtualizado={recarregar} onErro={onErro} />
+          </div>
+
+          <div style={{ paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)", marginBottom: 8 }}>
               Custos
             </div>
             <CustosSecao
@@ -773,6 +782,98 @@ function CronogramaSecao({
         </Button>
       </div>
     </form>
+  );
+}
+
+function IndiceCorrecaoSecao({
+  cenarioId,
+  indicesCorrecao,
+  onAtualizado,
+  onErro,
+}: {
+  cenarioId: string;
+  indicesCorrecao: CenarioDetalhe["indicesCorrecao"];
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [mes, setMes] = useState("1");
+  const [percentual, setPercentual] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [excluindoMes, setExcluindoMes] = useState<number | null>(null);
+
+  async function adicionar(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await definirPontoIndiceCorrecao(cenarioId, { mes: Number(mes), percentual });
+      setPercentual("");
+      onAtualizado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function remover(mesRemover: number) {
+    setExcluindoMes(mesRemover);
+    try {
+      await excluirPontoIndiceCorrecao(cenarioId, mesRemover);
+      onAtualizado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setExcluindoMes(null);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {indicesCorrecao.length > 0 ? (
+        <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Variação</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody style={{ font: "var(--text-mono-body)" }}>
+            {indicesCorrecao.map((p) => (
+              <tr key={p.mes}>
+                <td style={{ padding: "2px 0" }}>{p.mes}</td>
+                <td>{(Number(p.percentual) * 100).toFixed(2)}%</td>
+                <td style={{ textAlign: "right" }}>
+                  <button
+                    type="button"
+                    onClick={() => remover(p.mes)}
+                    disabled={excluindoMes === p.mes}
+                    title="Remover"
+                    style={{ border: "none", background: "transparent", color: "var(--status-critical-text)", cursor: "pointer", fontSize: 13, padding: 0 }}
+                  >
+                    ×
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>Nenhum índice cadastrado — o fluxo de caixa não aplica correção monetária.</div>
+      )}
+
+      <form onSubmit={adicionar} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <div style={{ width: 80 }}>
+          <TextField label="Mês" type="number" min={1} value={mes} onChange={(e) => setMes(e.target.value)} required />
+        </div>
+        <div style={{ width: 150 }}>
+          <TextField label="Variação (0–1)" value={percentual} onChange={(e) => setPercentual(e.target.value)} placeholder="0.005 = 0,5%" required />
+        </div>
+        <Button type="submit" disabled={salvando}>
+          {salvando ? "Salvando…" : "Definir"}
+        </Button>
+      </form>
+    </div>
   );
 }
 

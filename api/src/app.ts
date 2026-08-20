@@ -19,6 +19,7 @@ import {
   criarTipologia,
   criarUnidadesEmLote,
   criarUnidadesPorAndar,
+  definirPontoIndiceCorrecao,
   desfazerPermuta,
   excluirCategoriaCusto,
   excluirCenario,
@@ -26,6 +27,7 @@ import {
   excluirCronograma,
   excluirCusto,
   excluirEmpreendimento,
+  excluirPontoIndiceCorrecao,
   excluirTipologia,
   registrarPermuta,
   type ModalidadeInput,
@@ -759,6 +761,7 @@ export async function buildApp() {
         premissasVelocidade: { include: { tipologia: { select: { nome: true } } }, orderBy: { mes: "asc" } },
         custos: { include: { categoria: true }, orderBy: { createdAt: "asc" } },
         cronograma: { orderBy: { mes: "asc" } },
+        indicesCorrecao: { orderBy: { mes: "asc" } },
         _count: { select: { vendas: true } },
       },
     });
@@ -794,6 +797,7 @@ export async function buildApp() {
         status: c.status,
       })),
       cronograma: cenario.cronograma.map((p) => ({ mes: p.mes, percentualExecucaoMensal: p.percentualExecucaoMensal })),
+      indicesCorrecao: cenario.indicesCorrecao.map((i) => ({ mes: i.mes, percentual: i.percentual })),
       totalVendasGeradas: cenario._count.vendas,
     };
   });
@@ -940,6 +944,50 @@ export async function buildApp() {
       }
     },
   );
+
+  // Indice de correcao monetaria (achado F6, docs/DECISOES.md): ao contrario
+  // do cronograma, cada mes e independente (sem soma obrigatoria) -- upsert
+  // por mes em vez de "criar tudo de uma vez", para o usuario poder
+  // completar a serie aos poucos conforme novos indices sao divulgados.
+  app.post<{ Params: { id: string }; Body: { mes?: number; percentual?: string } }>(
+    "/api/cenarios/:id/indices-correcao",
+    async (req, reply) => {
+      const { mes, percentual } = req.body ?? {};
+      if (mes === undefined || !Number.isInteger(mes) || mes < 1) {
+        reply.code(400);
+        return { erro: "mês deve ser um número inteiro maior ou igual a 1" };
+      }
+      if (percentual === undefined || !percentual.trim() || Number.isNaN(Number(percentual))) {
+        reply.code(400);
+        return { erro: "percentual é obrigatório e deve ser numérico" };
+      }
+      const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+      if (!cenario) {
+        reply.code(404);
+        return { erro: "Cenário não encontrado" };
+      }
+      if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+      const ponto = await definirPontoIndiceCorrecao({ empreendimentoId: cenario.empreendimentoId, cenarioId: cenario.id, mes, percentual: percentual.trim() });
+      reply.code(201);
+      return ponto;
+    },
+  );
+
+  app.delete<{ Params: { id: string; mes: string } }>("/api/cenarios/:id/indices-correcao/:mes", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+    await excluirPontoIndiceCorrecao(cenario.id, Number(req.params.mes));
+    reply.code(204);
+    return null;
+  });
 
   // Uma unica rota PATCH cobre duas acoes distintas, despachadas pela
   // presenca de valorRealizado no corpo: registrar o realizado (Fase 1,
@@ -1111,6 +1159,8 @@ export async function buildApp() {
       saidasRealizadasPorMes.set(mes, atual.plus(new Decimal(c.valorRealizado ?? "0")));
     }
 
+    const entradasCorrigidasPorMes = new Map(resultado.entradasCorrigidas.map((e) => [e.mes, e.valor]));
+
     return {
       empreendimento: cenario.empreendimento.nome,
       cenario: cenario.nome,
@@ -1123,6 +1173,7 @@ export async function buildApp() {
         fluxoAcumulado: f.fluxoAcumulado.toFixed(2),
         entradasRealizadas: entradasRealizadasPorMes.get(f.mes)?.toFixed(2) ?? null,
         saidasRealizadas: saidasRealizadasPorMes.get(f.mes)?.toFixed(2) ?? null,
+        entradasCorrigidas: (entradasCorrigidasPorMes.get(f.mes) ?? new Decimal(0)).toFixed(2),
       })),
       indicadores: {
         necessidadeMaximaCapital: resultado.indicadores.necessidadeMaximaCapital.toFixed(2),

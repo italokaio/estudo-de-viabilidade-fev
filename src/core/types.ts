@@ -76,6 +76,13 @@ export interface DesembolsoMensal {
   valor: Decimal;
 }
 
+/** Variacao de indice de correcao monetaria (ex.: INCC, IGP-M) num mes do calendario do cenario. */
+export interface PontoIndiceCorrecao {
+  mes: number;
+  /** variacao do indice naquele mes, ex.: 0.005 = 0.5% (pode ser negativo) */
+  percentual: Decimal;
+}
+
 export interface FluxoMensal {
   mes: number;
   entradas: Decimal;

@@ -40,6 +40,14 @@
 
 **Status.** Aprovado e implementado (décima primeira fatia). Testado em `tests/integration/api.permissaoPorEmpreendimento.test.ts`.
 
+## F6 — Correção monetária como camada computada sobre recebimentos, nunca persistida (achado da Fase 1)
+
+**Contexto.** O motor financeiro nunca teve nenhum tratamento de inflação — todo valor previsto (`RecebimentoProjetado.valorPrevisto`, `Custo.valorPrevisto`) é nominal, no valor do mês em que o motor o calcula. Isso é uma lacuna real de viabilidade imobiliária: a planilha original do Splendido já lidava com correção por índice (INCC durante a obra, IGP-M/IPCA depois), e qualquer análise de longo prazo sem correção subestima sistematicamente o capital necessário.
+
+**Decisão.** Correção monetária aplicada só sobre `RecebimentoProjetado` nesta fatia (não sobre `Custo` — mesmo padrão poderia ser estendido depois, fora de escopo agora). Uma série de índice (`IndiceCorrecao`: mês × variação percentual, cadastrada por cenário) é usada para corrigir cada parcela pelo fator acumulado entre o mês da venda que a originou e o mês de competência da parcela (`src/core/motorCorrecao.ts`). Igual ao achado F1 (fluxo de caixa nunca é uma tabela), o valor corrigido nunca é persistido — é recomputado a cada `GET /fluxo-caixa`, a partir da série de índice e dos recebimentos já calculados pelo motor. Sem nenhum índice cadastrado, o fator é sempre 1 e o comportamento é idêntico ao motor antes desta fatia — mudança inteiramente aditiva (`fluxo`/`indicadores` nominais não mudam; só um campo novo, `entradasCorrigidas`, é adicionado à saída).
+
+**Status.** Aprovado e implementado (décima segunda fatia). Testado em `tests/core/motorCorrecao.test.ts` e `tests/integration/api.correcaoMonetaria.test.ts`.
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |

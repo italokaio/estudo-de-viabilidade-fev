@@ -1,6 +1,6 @@
 import { Decimal } from "decimal.js";
 import { executarMotorFinanceiro, type SaidaMotorFinanceiro } from "../core/motorFinanceiro.js";
-import type { CondicaoPagamento, CustoInput, PontoCronograma, TipoDistribuicao, TipoIncidenciaCusto, VendaInput } from "../core/types.js";
+import type { CondicaoPagamento, CustoInput, PontoCronograma, PontoIndiceCorrecao, TipoDistribuicao, TipoIncidenciaCusto, VendaInput } from "../core/types.js";
 import { prisma } from "./client.js";
 
 /**
@@ -54,12 +54,16 @@ export async function rodarMotorParaCenario(
     percentualExecucaoMensal: new Decimal(p.percentualExecucaoMensal),
   }));
 
+  const indicesDb = await prisma.indiceCorrecao.findMany({ where: { cenarioId }, orderBy: { mes: "asc" } });
+  const indiceCorrecao: PontoIndiceCorrecao[] = indicesDb.map((i) => ({ mes: i.mes, percentual: new Decimal(i.percentual) }));
+
   const resultado = executarMotorFinanceiro({
     vendas,
     custos,
     cronograma,
     horizonteMeses: cenario.horizonteProjecaoMeses,
     taxaDescontoMensal: new Decimal(opcoes.taxaDescontoMensal ?? "0"),
+    indiceCorrecao,
   });
 
   await persistirRecebimentos(cenarioId, resultado);

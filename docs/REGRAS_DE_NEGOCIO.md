@@ -17,6 +17,7 @@ Extraídas da engenharia reversa da planilha do Splendido, mas **nenhuma delas c
 | R11 | Um cenário é uma cópia isolada e completa das premissas; alterações em um cenário nunca propagam para outro. | Modelo de dados — todo dado de premissa carrega `cenarioId` |
 | R12 | Toda entidade transacional pertence a exatamente um empreendimento e um cenário; a agregação de portfólio nunca altera os dados de origem. | `empreendimentoId` obrigatório em toda tabela transacional |
 | R13 | Toda grandeza com valor previsto e valor realizado armazena os dois separadamente — o realizado nunca sobrescreve o previsto. | `Custo.valorRealizado`, `RecebimentoProjetado.valorRealizado` |
+| R14 | O valor corrigido de um recebimento é o valor previsto multiplicado pelo fator acumulado de `(1 + variação do índice)` de cada mês entre o mês da venda (exclusive) e o mês de competência do recebimento (inclusive); sem índice cadastrado para um mês, a variação daquele mês é zero. | `motorCorrecao.calcularFatorCorrecao()`, `motorCorrecao.corrigirRecebimentos()` |
 
 ## As 4 estratégias de distribuição de uma modalidade de pagamento (`TipoDistribuicao`)
 

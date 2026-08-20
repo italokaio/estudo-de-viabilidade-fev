@@ -98,6 +98,7 @@ model Empreendimento {
   cronograma          CronogramaFisicoFinanceiro[]
   permutas            Permuta[]
   usuariosVinculados  EmpreendimentoUsuario[]
+  indicesCorrecao     IndiceCorrecao[]
 
   @@map("empreendimento")
 }
@@ -120,6 +121,7 @@ model Cenario {
   vendas              Venda[]
   custos              Custo[]
   cronograma          CronogramaFisicoFinanceiro[]
+  indicesCorrecao     IndiceCorrecao[]
 
   @@map("cenario")
 }
@@ -342,4 +344,28 @@ model CronogramaFisicoFinanceiro {
 
   @@unique([cenarioId, mes])
   @@map("cronograma_fisico_financeiro")
+}
+
+/**
+ * Serie de indice de correcao monetaria por mes do cenario (achado F6,
+ * docs/DECISOES.md) -- ex.: variacao mensal do INCC ou IGP-M. Cada mes e
+ * independente (sem soma obrigatoria, ao contrario do cronograma R6): um
+ * usuario pode cadastrar so os meses ja conhecidos e completar a serie aos
+ * poucos conforme novos indices sao divulgados. Nunca persistido como
+ * "valor corrigido" em RecebimentoProjetado -- e sempre recomputado on the
+ * fly a partir desta serie, no mesmo espirito do achado F1 (fluxo de caixa
+ * nunca e uma tabela).
+ */
+model IndiceCorrecao {
+  id               String @id @default(cuid())
+  empreendimentoId String
+  cenarioId        String
+  mes              Int
+  percentual       String // decimal-as-string, variacao do indice naquele mes (pode ser negativo)
+
+  empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
+  cenario        Cenario        @relation(fields: [cenarioId], references: [id])
+
+  @@unique([cenarioId, mes])
+  @@map("indice_correcao")
 }

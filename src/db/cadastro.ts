@@ -48,6 +48,7 @@ export async function excluirEmpreendimento(id: string) {
   await prisma.permuta.deleteMany({ where: { empreendimentoId: id } });
   await prisma.unidade.deleteMany({ where: { empreendimentoId: id } });
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.indiceCorrecao.deleteMany({ where: { empreendimentoId: id } });
   await prisma.custo.deleteMany({ where: { empreendimentoId: id } });
   await prisma.categoriaCusto.deleteMany({ where: { empreendimentoId: id } });
   await prisma.tipologia.deleteMany({ where: { empreendimentoId: id } });
@@ -98,6 +99,7 @@ export async function excluirCenario(id: string) {
   await prisma.premissaVelocidadeVendas.deleteMany({ where: { cenarioId: id } });
   await prisma.custo.deleteMany({ where: { cenarioId: id } });
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { cenarioId: id } });
+  await prisma.indiceCorrecao.deleteMany({ where: { cenarioId: id } });
   await prisma.cenario.delete({ where: { id } });
 }
 
@@ -554,4 +556,31 @@ export async function criarCronograma(input: CriarCronogramaInput) {
  */
 export async function excluirCronograma(cenarioId: string) {
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { cenarioId } });
+}
+
+export interface DefinirPontoIndiceCorrecaoInput {
+  empreendimentoId: string;
+  cenarioId: string;
+  mes: number;
+  percentual: string;
+}
+
+/**
+ * Cadastra ou atualiza a variacao do indice de correcao monetaria (achado
+ * F6, docs/DECISOES.md) para um mes do cenario. Upsert por mes, ao
+ * contrario do cronograma (R6): cada mes e independente, sem soma
+ * obrigatoria, entao o usuario pode completar a serie aos poucos conforme
+ * novos indices sao divulgados, sem precisar apagar e recriar tudo.
+ */
+export async function definirPontoIndiceCorrecao(input: DefinirPontoIndiceCorrecaoInput) {
+  return prisma.indiceCorrecao.upsert({
+    where: { cenarioId_mes: { cenarioId: input.cenarioId, mes: input.mes } },
+    update: { percentual: input.percentual },
+    create: input,
+  });
+}
+
+/** Remove a variacao cadastrada para um mes -- aquele mes volta a nao corrigir (fator=1). */
+export async function excluirPontoIndiceCorrecao(cenarioId: string, mes: number) {
+  await prisma.indiceCorrecao.deleteMany({ where: { cenarioId, mes } });
 }
