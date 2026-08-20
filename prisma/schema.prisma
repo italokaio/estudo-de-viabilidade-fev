@@ -19,6 +19,41 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/**
+ * Autenticacao e permissoes — unico, opaco token de sessao guardado em
+ * cookie httpOnly (nao JWT: um token aleatorio verificado contra esta
+ * tabela e o padrao mais simples de auditar/revogar, consistente com o
+ * resto do sistema preferir estado explicito no banco a esperteza).
+ * papel: "admin" (acesso completo, incluindo excluir) | "usuario"
+ * (visualiza e cadastra, nao exclui) — permissao grossa, deliberadamente
+ * simples: nao ha controle por empreendimento nesta fase.
+ */
+model Usuario {
+  id         String   @id @default(cuid())
+  email      String   @unique
+  nome       String
+  senhaHash  String
+  papel      String   @default("usuario") // admin | usuario
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  sessoes Sessao[]
+
+  @@map("usuario")
+}
+
+model Sessao {
+  id        String   @id @default(cuid())
+  usuarioId String
+  token     String   @unique
+  expiraEm  DateTime
+  createdAt DateTime @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@map("sessao")
+}
+
 model Empreendimento {
   id                    String    @id @default(cuid())
   nome                  String

@@ -125,7 +125,7 @@ Terceiro item da lista aprovada. O schema já tinha `RecebimentoProjetado.valorR
 Quarto item da lista aprovada. Implementa o achado F3 (`docs/DECISOES.md`): `Unidade.status='permutada'` já bastava para o motor financeiro (exclui a unidade do estoque disponível e do VGV de venda) — esta fatia acrescenta o cadastro nominal (quem recebeu o quê) que ficara pendente.
 
 **Implementado:**
-- Schema — tabela nova `Permuta` (`nomeContraparte`, `documento?`, `valorAtribuido?`, `dataAcordo?`, `observacao?`), `unidadeId` único (uma unidade só pode ter uma permuta ativa por vez), nunca lida pelo motor. `docs/DECISOES.md` ganhou o achado F4 documentando por que essa tabela é só um registro histórico, não uma entrada do motor.
+- Schema — tabela nova `Permuta` (`nomeContraparte`, `documento?`, `valorAtribuido?`, `dataAcordo?`, `observacao?`), `unidadeId` único (uma unidade só pode ter uma permuta ativa por vez), nunca lida pelo motor — exatamente como previsto na decisão F3 original (`docs/DECISOES.md`).
 - `src/db/cadastro.ts` — `registrarPermuta` (bloqueia se a unidade não estiver em `estoque` — mesma regra que já valia para venda: uma unidade só tem um destino) e `desfazerPermuta` (apaga o registro e devolve a unidade a `estoque`).
 - API — `GET /api/tipologias/:id/unidades` (nova: lista unidades individuais de uma tipologia, algo que a interface só tinha em contagem agregada até aqui — necessário para escolher qual unidade permutar), `POST /api/unidades/:id/permuta`, `DELETE /api/unidades/:id/permuta`.
 - Tela — cada tipologia ganhou uma terceira ação expansível "Permuta": tabela de unidades individuais (número, status, contraparte) com "Registrar permuta" (unidades em estoque) ou "Desfazer" (unidades permutadas) por linha.
@@ -134,6 +134,27 @@ Quarto item da lista aprovada. Implementa o achado F3 (`docs/DECISOES.md`): `Uni
 
 **Não implementado nesta fatia:** editar uma permuta já registrada (só registrar/desfazer), permuta parcial (uma unidade dividida entre múltiplas contrapartes), anexos/documentos digitalizados.
 
+## Fase 1 (código) — nona fatia: autenticação, usuários e permissões (este repositório, concluída)
+
+Quinto e último item da lista de "próxima fase" aprovada em bloco. Até aqui a API não exigia login nenhum — qualquer um com acesso à rede local podia ler ou apagar qualquer cadastro. Fecha essa lacuna.
+
+**Decisões de escopo (permissão deliberadamente grossa, não uma matriz RBAC):**
+- Dois papéis: `admin` (acesso completo, incluindo excluir) e `usuario` (visualiza e cadastra, não exclui). Sem controle por empreendimento nesta fase — todo usuário autenticado vê todos os empreendimentos.
+- Sessão por token opaco (não JWT) guardado num cookie `httpOnly`, verificado contra a tabela `Sessao` a cada request — mesmo padrão de "estado explícito no banco em vez de esperteza" já usado no resto do sistema (nunca decodificado no cliente, revogável apagando a linha).
+- Senha com `bcryptjs` (custo 12), sem dependência nativa — evita problemas de compilação no Windows que motivaram trocas de biblioteca em outras partes do projeto.
+
+**Implementado:**
+- Schema — tabelas `Usuario` (`email` único, `senhaHash`, `papel`) e `Sessao` (`token` único, `expiraEm`).
+- `src/db/auth.ts` — `criarUsuario`, `autenticar` (confere senha, cria sessão de 7 dias), `validarSessao`, `encerrarSessao`, `listarUsuarios`, `excluirUsuario`.
+- `src/import/seedAdmin.ts` — cria o primeiro administrador (`npm run seed:admin -- <email> <nome> <senha>`); existe porque `POST /api/usuarios` exige um admin autenticado — sem este script, ninguém consegue criar o primeiro usuário.
+- API — `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `POST`/`GET /api/usuarios` (admin), `DELETE /api/usuarios/:id` (admin, bloqueado para o próprio usuário). Um hook `onRequest` passou a exigir sessão válida em toda rota `/api/*` (exceto login/logout); as cinco rotas de exclusão (`empreendimentos`, `tipologias`, `cenarios`, `unidades/:id/permuta`, `usuarios`) checam `papel === "admin"` e devolvem 403 caso contrário.
+- Web — `LoginPage` (gate de toda a aplicação: `App.tsx` verifica `GET /api/auth/me` no carregamento), rodapé da `Sidebar` com nome/email do usuário logado e "Sair", item de menu "Usuários" (só visível para admin) com `UsuariosPage` (listar, criar, excluir).
+- **Achado durante a implementação, não estava previsto:** proteger toda a API quebrava as ~140 chamadas `app.inject()` espalhadas pelos 8 arquivos de teste de integração existentes (todas passavam a receber 401). Em vez de anexar um cookie de sessão em cada uma individualmente, criou-se `tests/helpers/buildAuthenticatedApp.ts` — cria um usuário de teste, loga uma vez, e substitui `app.inject` por uma versão que sempre carrega o cookie. Cada arquivo de teste precisou de uma única linha trocada (`buildApp()` → `buildAuthenticatedApp()`), preservando os ~140 casos de teste já escritos sem tocar em nenhum deles individualmente.
+- 9 novos testes de API dedicados a autenticação/permissão (`tests/integration/api.auth.test.ts`), incluindo: rota protegida sem sessão devolve 401, login errado não gera cookie, logout invalida o cookie, usuário comum recebe 403 ao excluir (e o dado permanece intacto), admin não consegue excluir a si mesmo, email duplicado é rejeitado. Suíte total: 17 arquivos, 80 testes.
+- Verificado num navegador real (claro e escuro): tela de login rejeita senha errada com mensagem clara, login correto libera o app e mostra "Usuários" só para o admin, criou um usuário comum pela tela, logout volta para o login, login como o usuário comum confirma que o item "Usuários" desaparece e que uma tentativa de excluir um empreendimento mostra "Apenas administradores podem excluir" — com o empreendimento permanecendo intacto na lista.
+
+**Não implementado nesta fatia:** recuperação de senha, expiração/renovação automática de sessão na interface (uma sessão expirada só é percebida no próximo request, mostrado como erro genérico na tela em vez de redirecionar para o login), permissão por empreendimento, edição de usuário (só criar/excluir), 2FA.
+
 ## Próxima fase
 
-Quinto e último item da lista aprovada: autenticação, usuários e permissões.
+Os cinco itens da lista aprovada em bloco estão concluídos. Aguardando direção do usuário sobre o que vem a seguir.

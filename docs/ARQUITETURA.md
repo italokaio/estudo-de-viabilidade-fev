@@ -43,6 +43,8 @@ src/import/ dados estruturados (não lógica) de cada empreendimento + scripts d
 | Valores monetários como `String` no banco, `Decimal` no motor | SQLite não tem tipo Decimal nativo no Prisma; ponto flutuante binário quebraria o princípio B (determinismo) |
 | Vitest | Testes rápidos, nativos em TS, sem configuração extra |
 | `decimal.js` | Aritmética decimal de precisão arbitrária, sem deriva de arredondamento entre execuções |
+| `bcryptjs` (Fase 1) | Hash de senha sem dependência nativa — evita os mesmos problemas de compilação no Windows que já motivaram outras escolhas de biblioteca neste projeto |
+| Sessão por token opaco em cookie `httpOnly` (Fase 1), não JWT | Mesmo princípio de "estado explícito no banco, não esperteza" usado em todo o resto do sistema — revogável apagando uma linha, nunca decodificado no cliente |
 
 ## Decisão arquitetural mais importante desta fase (achado F1)
 

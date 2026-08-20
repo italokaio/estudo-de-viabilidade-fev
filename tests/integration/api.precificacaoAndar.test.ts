@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../../api/src/app.js";
+import { buildAuthenticatedApp } from "../helpers/buildAuthenticatedApp.js";
 import { prisma } from "../../src/db/client.js";
 import { resetDatabase } from "../helpers/resetDatabase.js";
 
@@ -13,7 +14,7 @@ describe("API — geração de unidades com cascata de preço por andar", () => 
 
   beforeEach(async () => {
     await resetDatabase();
-    app = await buildApp();
+    app = await buildAuthenticatedApp();
   });
 
   afterAll(async () => {

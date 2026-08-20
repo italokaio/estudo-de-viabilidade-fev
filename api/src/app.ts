@@ -1,3 +1,4 @@
+import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import { Decimal } from "decimal.js";
 import Fastify from "fastify";
@@ -22,9 +23,19 @@ import {
   registrarPermuta,
   type ModalidadeInput,
 } from "../../src/db/cadastro.js";
+import { autenticar, criarUsuario, encerrarSessao, excluirUsuario, listarUsuarios, validarSessao } from "../../src/db/auth.js";
 import { prisma } from "../../src/db/client.js";
 import { gerarVendasDePremissaVelocidade } from "../../src/db/gerarVendas.js";
 import { rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
+
+declare module "fastify" {
+  interface FastifyRequest {
+    usuario?: { id: string; email: string; nome: string; papel: string };
+  }
+}
+
+const NOME_COOKIE_SESSAO = "sessao";
+const DURACAO_COOKIE_SEGUNDOS = 60 * 60 * 24 * 7;
 
 /**
  * API — casca fina sobre o motor da Fase 0. Nenhuma regra de negocio vive
@@ -36,7 +47,102 @@ import { rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
  */
 export async function buildApp() {
   const app = Fastify({ logger: false });
-  await app.register(cors, { origin: true });
+  await app.register(cors, { origin: true, credentials: true });
+  await app.register(cookie);
+
+  // Toda rota /api/* exige sessao valida, exceto login (senao ninguem
+  // consegue entrar) e logout (um cookie invalido ainda precisa poder ser
+  // limpo). Permissao e propositalmente grossa nesta fase (achado, ver
+  // docs/DECISOES.md): so "admin" x "usuario", sem controle por
+  // empreendimento — checado rota a rota nas cinco rotas de exclusao.
+  app.addHook("onRequest", async (req, reply) => {
+    if (!req.url.startsWith("/api/")) return;
+    if (req.url === "/api/auth/login" || req.url === "/api/auth/logout") return;
+    const token = req.cookies[NOME_COOKIE_SESSAO];
+    const usuario = token ? await validarSessao(token) : null;
+    if (!usuario) {
+      reply.code(401);
+      return reply.send({ erro: "Não autenticado" });
+    }
+    req.usuario = usuario;
+  });
+
+  app.post<{ Body: { email?: string; senha?: string } }>("/api/auth/login", async (req, reply) => {
+    const { email, senha } = req.body ?? {};
+    if (!email || !senha) {
+      reply.code(400);
+      return { erro: "Email e senha são obrigatórios" };
+    }
+    const resultado = await autenticar({ email, senha });
+    if (!resultado) {
+      reply.code(401);
+      return { erro: "Email ou senha inválidos" };
+    }
+    reply.setCookie(NOME_COOKIE_SESSAO, resultado.token, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: DURACAO_COOKIE_SEGUNDOS,
+    });
+    return resultado.usuario;
+  });
+
+  app.post("/api/auth/logout", async (req, reply) => {
+    const token = req.cookies[NOME_COOKIE_SESSAO];
+    if (token) await encerrarSessao(token);
+    reply.clearCookie(NOME_COOKIE_SESSAO, { path: "/" });
+    return { ok: true };
+  });
+
+  app.get("/api/auth/me", async (req) => {
+    return req.usuario;
+  });
+
+  app.post<{ Body: { email?: string; nome?: string; senha?: string; papel?: string } }>("/api/usuarios", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem criar usuários" };
+    }
+    const { email, nome, senha, papel } = req.body ?? {};
+    if (!email || !email.trim() || !nome || !nome.trim() || !senha || senha.length < 6) {
+      reply.code(400);
+      return { erro: "Email, nome e senha (mínimo 6 caracteres) são obrigatórios" };
+    }
+    if (papel !== undefined && papel !== "admin" && papel !== "usuario") {
+      reply.code(400);
+      return { erro: "Papel deve ser 'admin' ou 'usuario'" };
+    }
+    try {
+      const usuario = await criarUsuario({ email: email.trim(), nome: nome.trim(), senha, papel: papel as "admin" | "usuario" | undefined });
+      reply.code(201);
+      return usuario;
+    } catch (e: any) {
+      reply.code(400);
+      return { erro: "Já existe um usuário com este email" };
+    }
+  });
+
+  app.get("/api/usuarios", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem listar usuários" };
+    }
+    return listarUsuarios();
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/usuarios/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir usuários" };
+    }
+    if (req.usuario!.id === req.params.id) {
+      reply.code(400);
+      return { erro: "Não é possível excluir o próprio usuário" };
+    }
+    await excluirUsuario(req.params.id);
+    reply.code(204);
+    return null;
+  });
 
   app.get("/api/empreendimentos", async () => {
     const empreendimentos = await prisma.empreendimento.findMany({
@@ -121,6 +227,10 @@ export async function buildApp() {
   );
 
   app.delete<{ Params: { id: string } }>("/api/empreendimentos/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
     const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
     if (!empreendimento) {
       reply.code(404);
@@ -291,6 +401,10 @@ export async function buildApp() {
   });
 
   app.delete<{ Params: { id: string } }>("/api/unidades/:id/permuta", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
     const erro = await desfazerPermuta(req.params.id);
     if (erro) {
       reply.code(404);
@@ -318,6 +432,10 @@ export async function buildApp() {
   );
 
   app.delete<{ Params: { id: string } }>("/api/tipologias/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
     const tipologia = await prisma.tipologia.findUnique({ where: { id: req.params.id } });
     if (!tipologia) {
       reply.code(404);
@@ -501,6 +619,10 @@ export async function buildApp() {
   );
 
   app.delete<{ Params: { id: string } }>("/api/cenarios/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
     const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
     if (!cenario) {
       reply.code(404);

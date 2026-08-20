@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "../../api/src/app.js";
+import { buildAuthenticatedApp } from "../helpers/buildAuthenticatedApp.js";
 import { prisma } from "../../src/db/client.js";
 import { gerarVendasDePremissaVelocidade } from "../../src/db/gerarVendas.js";
 import { importarSplendido } from "../../src/import/importadorSplendido.js";
@@ -20,7 +21,7 @@ describe("API — casca sobre o motor", () => {
     const { cenarioId: id } = await importarSplendido({ participaFluxoCaixaExtras: false });
     cenarioId = id;
     await gerarVendasDePremissaVelocidade(cenarioId);
-    app = await buildApp();
+    app = await buildAuthenticatedApp();
   });
 
   afterAll(async () => {

@@ -297,3 +297,55 @@ export function registrarPermuta(
 export function desfazerPermuta(unidadeId: string) {
   return del(`/api/unidades/${unidadeId}/permuta`);
 }
+
+export type Papel = "admin" | "usuario";
+
+export interface Usuario {
+  id: string;
+  email: string;
+  nome: string;
+  papel: Papel;
+}
+
+/** null quando não há sessão válida (não é um erro — é o estado esperado antes do login). */
+export async function fetchUsuarioAtual(): Promise<Usuario | null> {
+  const res = await fetch("/api/auth/me");
+  if (res.status === 401) return null;
+  if (!res.ok) throw new Error(`Falha ao verificar sessão (${res.status})`);
+  return res.json();
+}
+
+export async function login(email: string, senha: string): Promise<Usuario> {
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, senha }),
+  });
+  if (!res.ok) {
+    const erro = await res.json().catch(() => ({ erro: `Falha (${res.status})` }));
+    throw new Error(erro.erro ?? `Falha (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function logout(): Promise<void> {
+  await fetch("/api/auth/logout", { method: "POST" });
+}
+
+export interface UsuarioResumo extends Usuario {
+  createdAt: string;
+}
+
+export async function fetchUsuarios(): Promise<UsuarioResumo[]> {
+  const res = await fetch("/api/usuarios");
+  if (!res.ok) throw new Error(`Falha ao carregar usuários (${res.status})`);
+  return res.json();
+}
+
+export function criarUsuario(input: { email: string; nome: string; senha: string; papel?: Papel }) {
+  return postJson<UsuarioResumo>("/api/usuarios", input);
+}
+
+export function excluirUsuario(id: string) {
+  return del(`/api/usuarios/${id}`);
+}

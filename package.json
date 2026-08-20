@@ -11,10 +11,12 @@
     "prisma:push": "prisma db push",
     "import:splendido": "tsx src/import/importadorSplendido.ts",
     "import:ficticio": "tsx src/import/importadorFicticio.ts",
+    "seed:admin": "tsx src/import/seedAdmin.ts",
     "typecheck": "tsc --noEmit"
   },
   "license": "UNLICENSED",
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^26.2.0",
     "prisma": "^6.19.3",
     "tsx": "^4.23.12",
@@ -23,6 +25,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "bcryptjs": "^3.0.3",
     "decimal.js": "^10.6.0"
   },
   "allowScripts": {

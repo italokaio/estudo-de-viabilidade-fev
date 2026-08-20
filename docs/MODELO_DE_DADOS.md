@@ -1,6 +1,6 @@
 # Modelo de dados — Fase 0
 
-Schema completo em [`prisma/schema.prisma`](../prisma/schema.prisma). 14 tabelas (13 da Fase 0 + `permuta`, adicionada na Fase 1 — ver `docs/DECISOES.md`, achado F3/F4), todas genéricas — nenhuma coluna ou valor específico de um empreendimento. O que muda entre o Splendido e qualquer outro empreendimento são as **linhas**, nunca a tabela.
+Schema completo em [`prisma/schema.prisma`](../prisma/schema.prisma). 16 tabelas (13 da Fase 0 + `permuta`, `usuario` e `sessao`, adicionadas na Fase 1), todas genéricas — nenhuma coluna ou valor específico de um empreendimento. O que muda entre o Splendido e qualquer outro empreendimento são as **linhas**, nunca a tabela.
 
 Convenção: todo valor monetário ou percentual é `String` (texto decimal), nunca `Float`. Ver `docs/ARQUITETURA.md`, princípio B.
 
@@ -16,10 +16,12 @@ Convenção: todo valor monetário ou percentual é `String` (texto decimal), nu
 | `modalidade_pagamento` | Uma fatia da condição (ex.: "Entrada") | `tipoDistribuicao` é o campo que generaliza o motor — ver `REGRAS_DE_NEGOCIO.md` |
 | `premissa_velocidade_vendas` | Quantas unidades/mês/tipologia se espera vender | Consumida por `gerarVendasDePremissaVelocidade()` para criar `Venda` reais |
 | `venda` | Uma unidade vendida em um mês | Gatilho do motor de recebimentos |
-| `recebimento_projetado` | Saída do motor — um evento de caixa futuro | Sempre regenerável a partir de `venda` + `modalidade_pagamento`; nunca editado à mão |
+| `recebimento_projetado` | Saída do motor — um evento de caixa futuro | O campo `valorPrevisto` é sempre regenerado a partir de `venda` + `modalidade_pagamento`; `valorRealizado`/`status` são dado real registrado pelo usuário (Fase 1) e preservados entre recálculos — chave `(vendaId, modalidadeId, mesCompetencia)` única garante que o `id` da linha não muda a cada recálculo (achado F4, `docs/DECISOES.md`) |
 | `categoria_custo` | Categoria + tipo de incidência | `empreendimentoId` nulo = categoria reutilizável entre empreendimentos |
-| `custo` | Uma linha de custo/despesa | `participaFluxoCaixa` decide se entra no fluxo — é o mecanismo do achado F/4.3 |
+| `custo` | Uma linha de custo/despesa | `participaFluxoCaixa` decide se entra no fluxo — é o mecanismo do achado F/4.3; `valorRealizado`/`status` (Fase 1) só fazem sentido para custos de incidência fixa, que têm um mês de competência único |
 | `cronograma_fisico_financeiro` | % de execução física por mês | Curva livre, sem formato pressuposto (não precisa ser "S") |
+| `usuario` | Login e permissão (Fase 1) | `senhaHash` via `bcryptjs`; `papel` (`admin`/`usuario`) é a única dimensão de permissão — sem controle por empreendimento nesta fase |
+| `sessao` | Token de sessão ativo (Fase 1) | Token opaco (não JWT), verificado a cada request; revogar é apagar a linha |
 
 ## O que foi deliberadamente deixado de fora da Fase 0
 
@@ -27,6 +29,6 @@ Ver `docs/DECISOES.md` para a justificativa de cada item — nenhum foi esquecid
 
 - `RegistroAreaTerreno` (auditoria de múltiplas origens de área) — Fase 0 usa `Terreno.areaObservacao` (texto) para o mesmo fim
 - `MovimentoCaixa` — **removida como tabela**, é serviço computado (achado F1)
-- `FinanciamentoProducao`, `AlertaRisco`, `SimulacaoSensibilidade`, `VersaoCenario`, `EstruturaComissao`, `Usuario`/`PapelAcesso`/`EmpreendimentoUsuario`, `IndiceCorrecao`, `Distrato` — todas fora do MVP definido, sem impacto no motor financeiro
+- `FinanciamentoProducao`, `AlertaRisco`, `SimulacaoSensibilidade`, `VersaoCenario`, `EstruturaComissao`, `IndiceCorrecao`, `Distrato` — todas fora do MVP definido, sem impacto no motor financeiro
 
-Dois itens desta lista original já foram implementados na Fase 1 (ver `docs/FASES.md`): `Permuta` (cadastro nominal, achado F3/F4) e a cascata de preço por andar (achado F2, sem tabela nova — ver `src/core/precificacaoAndar.ts`).
+Três itens desta lista original já foram implementados na Fase 1 (ver `docs/FASES.md`): `Permuta` (cadastro nominal, achado F3), a cascata de preço por andar (achado F2, sem tabela nova — ver `src/core/precificacaoAndar.ts`), e `Usuario`/`Sessao` (login e permissão — `EmpreendimentoUsuario`, ou seja, permissão *por empreendimento*, continua fora: a permissão implementada é só `admin`×`usuario`, global).
