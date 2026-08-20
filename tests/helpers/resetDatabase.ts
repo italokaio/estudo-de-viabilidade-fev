@@ -3,6 +3,7 @@ import { prisma } from "../../src/db/client.js";
 /** Limpa todas as tabelas, respeitando a ordem de chaves estrangeiras. Usado antes de cada teste de integracao para garantir um banco limpo. */
 export async function resetDatabase() {
   await prisma.sessao.deleteMany();
+  await prisma.empreendimentoUsuario.deleteMany();
   await prisma.usuario.deleteMany();
   await prisma.recebimentoProjetado.deleteMany();
   await prisma.venda.deleteMany();

@@ -24,9 +24,9 @@ datasource db {
  * cookie httpOnly (nao JWT: um token aleatorio verificado contra esta
  * tabela e o padrao mais simples de auditar/revogar, consistente com o
  * resto do sistema preferir estado explicito no banco a esperteza).
- * papel: "admin" (acesso completo, incluindo excluir) | "usuario"
- * (visualiza e cadastra, nao exclui) — permissao grossa, deliberadamente
- * simples: nao ha controle por empreendimento nesta fase.
+ * papel: "admin" (acesso completo a TODOS os empreendimentos, incluindo
+ * excluir) | "usuario" (visualiza e cadastra, nao exclui, e só nos
+ * empreendimentos vinculados via EmpreendimentoUsuario — ver esse modelo).
  */
 model Usuario {
   id         String   @id @default(cuid())
@@ -37,7 +37,8 @@ model Usuario {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  sessoes Sessao[]
+  sessoes      Sessao[]
+  empreendimentos EmpreendimentoUsuario[]
 
   @@map("usuario")
 }
@@ -52,6 +53,27 @@ model Sessao {
   usuario Usuario @relation(fields: [usuarioId], references: [id])
 
   @@map("sessao")
+}
+
+/**
+ * Vinculo usuario<->empreendimento (achado da nona fatia, docs/DECISOES.md
+ * F5): so tem efeito para usuario.papel="usuario" — admin sempre tem acesso
+ * a todos os empreendimentos, com ou sem linha aqui. Cadastrar um
+ * empreendimento vincula automaticamente quem criou (ver
+ * POST /api/empreendimentos), senao a pessoa criava algo que nao conseguia
+ * mais ver.
+ */
+model EmpreendimentoUsuario {
+  id               String   @id @default(cuid())
+  empreendimentoId String
+  usuarioId        String
+  createdAt        DateTime @default(now())
+
+  empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
+  usuario        Usuario        @relation(fields: [usuarioId], references: [id])
+
+  @@unique([usuarioId, empreendimentoId])
+  @@map("empreendimento_usuario")
 }
 
 model Empreendimento {
@@ -75,6 +97,7 @@ model Empreendimento {
   custos              Custo[]
   cronograma          CronogramaFisicoFinanceiro[]
   permutas            Permuta[]
+  usuariosVinculados  EmpreendimentoUsuario[]
 
   @@map("empreendimento")
 }

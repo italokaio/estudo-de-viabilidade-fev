@@ -1,5 +1,18 @@
 import { useEffect, useState } from "react";
-import { criarUsuario, excluirUsuario, fetchUsuarios, type Papel, type Usuario, type UsuarioResumo } from "../api/client.js";
+import {
+  criarUsuario,
+  desvincularEmpreendimento,
+  excluirUsuario,
+  fetchEmpreendimentos,
+  fetchEmpreendimentosDoUsuario,
+  fetchUsuarios,
+  vincularEmpreendimento,
+  type EmpreendimentoResumo,
+  type EmpreendimentoVinculado,
+  type Papel,
+  type Usuario,
+  type UsuarioResumo,
+} from "../api/client.js";
 import { Button } from "../components/Button.js";
 import { TextField } from "../components/TextField.js";
 import { ThemeToggle } from "../components/ThemeToggle.js";
@@ -8,6 +21,7 @@ export function UsuariosPage({ usuarioAtual }: { usuarioAtual: Usuario }) {
   const [usuarios, setUsuarios] = useState<UsuarioResumo[]>([]);
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
+  const [expandidoId, setExpandidoId] = useState<string | null>(null);
 
   function recarregar() {
     fetchUsuarios()
@@ -48,7 +62,10 @@ export function UsuariosPage({ usuarioAtual }: { usuarioAtual: Usuario }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16, alignItems: "start" }}>
         <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 18px", boxShadow: "var(--shadow-sm)" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-primary)", marginBottom: 12 }}>Todos os usuários</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-primary)", marginBottom: 4 }}>Todos os usuários</div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginBottom: 12 }}>
+            "Admin" vê todos os empreendimentos sempre. "Usuário" só vê os que forem vinculados abaixo, em "Acesso".
+          </div>
           {carregando ? (
             <div style={{ fontSize: 13, color: "var(--ink-muted)" }}>Carregando…</div>
           ) : (
@@ -63,31 +80,15 @@ export function UsuariosPage({ usuarioAtual }: { usuarioAtual: Usuario }) {
               </thead>
               <tbody>
                 {usuarios.map((u) => (
-                  <tr key={u.id}>
-                    <td style={{ padding: "6px 0", color: "var(--ink-primary)", fontWeight: 600 }}>{u.nome}</td>
-                    <td style={{ color: "var(--ink-secondary)" }}>{u.email}</td>
-                    <td>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: u.papel === "admin" ? "var(--accent-text)" : "var(--ink-muted)",
-                          background: u.papel === "admin" ? "var(--accent-soft-bg)" : "var(--surface-2)",
-                          borderRadius: 999,
-                          padding: "3px 9px",
-                        }}
-                      >
-                        {u.papel}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {u.id !== usuarioAtual.id && (
-                        <Button variant="secondary" onClick={() => excluir(u.id)} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
-                          Excluir
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
+                  <LinhaUsuario
+                    key={u.id}
+                    usuario={u}
+                    ehVoceMesmo={u.id === usuarioAtual.id}
+                    expandido={expandidoId === u.id}
+                    onToggleExpandir={() => setExpandidoId((v) => (v === u.id ? null : u.id))}
+                    onExcluir={() => excluir(u.id)}
+                    onErro={setErro}
+                  />
                 ))}
               </tbody>
             </table>
@@ -96,6 +97,178 @@ export function UsuariosPage({ usuarioAtual }: { usuarioAtual: Usuario }) {
 
         <NovoUsuarioForm onCriado={recarregar} onErro={setErro} />
       </div>
+    </div>
+  );
+}
+
+function LinhaUsuario({
+  usuario,
+  ehVoceMesmo,
+  expandido,
+  onToggleExpandir,
+  onExcluir,
+  onErro,
+}: {
+  usuario: UsuarioResumo;
+  ehVoceMesmo: boolean;
+  expandido: boolean;
+  onToggleExpandir: () => void;
+  onExcluir: () => void;
+  onErro: (msg: string) => void;
+}) {
+  return (
+    <>
+      <tr>
+        <td style={{ padding: "6px 0", color: "var(--ink-primary)", fontWeight: 600 }}>{usuario.nome}</td>
+        <td style={{ color: "var(--ink-secondary)" }}>{usuario.email}</td>
+        <td>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: usuario.papel === "admin" ? "var(--accent-text)" : "var(--ink-muted)",
+              background: usuario.papel === "admin" ? "var(--accent-soft-bg)" : "var(--surface-2)",
+              borderRadius: 999,
+              padding: "3px 9px",
+            }}
+          >
+            {usuario.papel}
+          </span>
+        </td>
+        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+          {usuario.papel === "usuario" && (
+            <Button variant="secondary" onClick={onToggleExpandir} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
+              {expandido ? "Fechar" : "Acesso"}
+            </Button>
+          )}
+          {!ehVoceMesmo && (
+            <Button variant="secondary" onClick={onExcluir} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+              Excluir
+            </Button>
+          )}
+        </td>
+      </tr>
+      {expandido && (
+        <tr>
+          <td colSpan={4} style={{ paddingBottom: 12 }}>
+            <AcessoEmpreendimentos usuarioId={usuario.id} onErro={onErro} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErro: (msg: string) => void }) {
+  const [vinculados, setVinculados] = useState<EmpreendimentoVinculado[]>([]);
+  const [todos, setTodos] = useState<EmpreendimentoResumo[]>([]);
+  const [novoId, setNovoId] = useState("");
+  const [carregando, setCarregando] = useState(true);
+  const [salvando, setSalvando] = useState(false);
+
+  function recarregar() {
+    Promise.all([fetchEmpreendimentosDoUsuario(usuarioId), fetchEmpreendimentos()])
+      .then(([v, t]) => {
+        setVinculados(v);
+        setTodos(t);
+      })
+      .catch((e) => onErro(String(e.message ?? e)))
+      .finally(() => setCarregando(false));
+  }
+
+  useEffect(() => {
+    recarregar();
+  }, [usuarioId]);
+
+  const disponiveis = todos.filter((e) => !vinculados.some((v) => v.id === e.id));
+
+  useEffect(() => {
+    if (!novoId && disponiveis[0]) setNovoId(disponiveis[0].id);
+  }, [disponiveis.length]);
+
+  async function adicionar(e: React.FormEvent) {
+    e.preventDefault();
+    if (!novoId) return;
+    setSalvando(true);
+    try {
+      await vincularEmpreendimento(usuarioId, novoId);
+      setNovoId("");
+      recarregar();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function remover(empreendimentoId: string) {
+    try {
+      await desvincularEmpreendimento(usuarioId, empreendimentoId);
+      recarregar();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    }
+  }
+
+  if (carregando) return <div style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>Carregando…</div>;
+
+  return (
+    <div style={{ background: "var(--surface-2)", borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+      {vinculados.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>Nenhum empreendimento vinculado — este usuário não vê nenhum ainda.</div>
+      ) : (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {vinculados.map((v) => (
+            <span
+              key={v.id}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                color: "var(--ink-primary)",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: 999,
+                padding: "4px 6px 4px 10px",
+              }}
+            >
+              {v.nome}
+              <button
+                type="button"
+                onClick={() => remover(v.id)}
+                title="Remover acesso"
+                style={{ border: "none", background: "transparent", color: "var(--status-critical-text)", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 0 }}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {disponiveis.length > 0 && (
+        <form onSubmit={adicionar} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 220 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Dar acesso a</span>
+            <select
+              value={novoId}
+              onChange={(e) => setNovoId(e.target.value)}
+              style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+            >
+              {disponiveis.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
+            {salvando ? "Salvando…" : "Adicionar"}
+          </Button>
+        </form>
+      )}
     </div>
   );
 }

@@ -53,6 +53,7 @@ export async function excluirEmpreendimento(id: string) {
   await prisma.tipologia.deleteMany({ where: { empreendimentoId: id } });
   await prisma.terreno.deleteMany({ where: { empreendimentoId: id } });
   await prisma.cenario.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.empreendimentoUsuario.deleteMany({ where: { empreendimentoId: id } });
   await prisma.empreendimento.delete({ where: { id } });
 }
 

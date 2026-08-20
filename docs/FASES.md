@@ -176,6 +176,22 @@ Fecha a lacuna deixada na quinta fatia: agora condição de pagamento, categoria
 
 **Não implementado nesta fatia:** edição de modalidades de uma condição de pagamento pela tela (só o nome — editar modalidades continua possível via API, mas a tela não expõe periodicidade/mês fixo no formato que a API de leitura devolve), edição ponto a ponto de cronograma.
 
+## Fase 1 (código) — décima primeira fatia: permissão por empreendimento (este repositório, concluída)
+
+Implementa o achado F5 (`docs/DECISOES.md`): a nona fatia deixou explicitamente pendente o controle de acesso por empreendimento ("todo usuário autenticado vê todos os empreendimentos"). Esta fatia fecha essa lacuna sem alterar o modelo de papéis já existente.
+
+**Decisão de escopo:** continua sendo permissão grossa, não uma matriz RBAC — só um segundo eixo (além de `admin`/`usuario`) que restringe **quais** empreendimentos um `usuario` enxerga, nunca **o que** ele pode fazer dentro de um empreendimento que já enxerga (isso continua sendo `admin` vs. `usuario`). `admin` sempre vê tudo, incondicionalmente — o vínculo nunca é consultado para ele.
+
+**Implementado:**
+- Schema — tabela nova `EmpreendimentoUsuario` (join simples `usuarioId` × `empreendimentoId`, `@@unique` no par), sem nenhum campo além do vínculo em si.
+- `src/db/auth.ts` — `temAcessoEmpreendimento` (admin sempre `true`; usuário comum consulta o vínculo), `empreendimentosPermitidos` (devolve `"todos"` para admin ou a lista de ids para usuário comum — o chamador decide se filtra), `vincularUsuarioEmpreendimento`/`desvincularUsuarioEmpreendimento`, `listarEmpreendimentosDoUsuario`.
+- API — helper `garantirAcesso(req, reply, empreendimentoId)` em `api/src/app.ts`, chamado logo após o check de existência (404) em toda rota que lê ou escreve um recurso preso a um empreendimento (~20 rotas: empreendimento, tipologia, unidade, permuta, categoria de custo, cenário, condição de pagamento, custo, cronograma, recebimento) — sem acesso, devolve 404 (não 403), para não revelar a um usuário sem vínculo que aquele empreendimento existe. Rotas de exclusão não precisaram do helper: já são bloqueadas por `papel !== "admin" → 403`, e admin nunca é restringido por vínculo. `GET /api/empreendimentos` passou a filtrar pela lista permitida; `POST /api/empreendimentos` vincula automaticamente o criador quando ele não é admin (senão o próprio criador ficaria sem acesso ao que acabou de criar). Três rotas novas — `GET`/`POST /api/usuarios/:id/empreendimentos`, `DELETE /api/usuarios/:id/empreendimentos/:empreendimentoId` — todas exigindo `admin`, para o admin gerenciar vínculos.
+- Web (`UsuariosPage.tsx`) — cada usuário com papel "usuario" ganhou um botão "Acesso" que expande um painel: chips dos empreendimentos vinculados (com "×" para remover) e um seletor para adicionar mais um.
+- 8 novos testes de API (`tests/integration/api.permissaoPorEmpreendimento.test.ts`): lista vazia sem vínculo, 404 ao acessar diretamente, acesso liberado após vínculo, admin sempre acessa independente de vínculo, vínculo automático ao criar, usuário comum recebe 403 ao tentar gerenciar vínculo de terceiros, remoção de vínculo revoga o acesso, recurso aninhado (tipologia) bloqueado sem vínculo com o empreendimento pai. Suíte total: 19 arquivos, 97 testes.
+- Verificado num navegador real (claro e escuro): criou um usuário comum sem nenhum vínculo (painel "Acesso" mostra "Nenhum empreendimento vinculado"), concedeu acesso a um empreendimento, logou como esse usuário e confirmou que o seletor de empreendimento mostra só o vinculado, voltou como admin e removeu o vínculo pela mesma tela (chip "×"), confirmando a reversão ao estado vazio.
+
+**Não implementado nesta fatia:** vínculo em lote (só um empreendimento por vez no seletor), nível de acesso por empreendimento diferente do papel global (ex.: admin só dentro de um empreendimento específico), notificar o usuário quando um vínculo é concedido/removido.
+
 ## Próxima fase
 
-Os cinco itens da lista aprovada em bloco, mais esta décima fatia de edição/exclusão completa, estão concluídos. Aguardando direção do usuário sobre o que vem a seguir.
+Os cinco itens da lista aprovada em bloco, mais a décima fatia de edição/exclusão completa e a décima primeira de permissão por empreendimento, estão concluídos. Aguardando direção do usuário sobre o que vem a seguir.

@@ -380,3 +380,22 @@ export function criarUsuario(input: { email: string; nome: string; senha: string
 export function excluirUsuario(id: string) {
   return del(`/api/usuarios/${id}`);
 }
+
+export interface EmpreendimentoVinculado {
+  id: string;
+  nome: string;
+}
+
+export async function fetchEmpreendimentosDoUsuario(usuarioId: string): Promise<EmpreendimentoVinculado[]> {
+  const res = await fetch(`/api/usuarios/${usuarioId}/empreendimentos`);
+  if (!res.ok) throw new Error(`Falha ao carregar acesso (${res.status})`);
+  return res.json();
+}
+
+export function vincularEmpreendimento(usuarioId: string, empreendimentoId: string) {
+  return postJson<EmpreendimentoVinculado[]>(`/api/usuarios/${usuarioId}/empreendimentos`, { empreendimentoId });
+}
+
+export function desvincularEmpreendimento(usuarioId: string, empreendimentoId: string) {
+  return del(`/api/usuarios/${usuarioId}/empreendimentos/${empreendimentoId}`);
+}

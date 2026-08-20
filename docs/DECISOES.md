@@ -32,6 +32,14 @@
 
 **Status.** Aprovado e implementado. Testado explicitamente em `tests/integration/api.realizadoXProjetado.test.ts` (o id de um recebimento não muda entre dois recálculos consecutivos).
 
+## F5 — Permissão por empreendimento como segundo eixo, não uma matriz RBAC (achado da Fase 1)
+
+**Contexto.** A nona fatia da Fase 1 implementou dois papéis (`admin`/`usuario`), mas deixou explicitamente pendente: "sem controle por empreendimento nesta fase — todo usuário autenticado vê todos os empreendimentos". Isso é aceitável para uma equipe pequena, mas não escala para uma incorporadora com múltiplos empreendimentos geridos por equipes diferentes, onde um usuário de um empreendimento não deveria nem saber que outro existe.
+
+**Decisão.** Em vez de uma matriz RBAC completa (permissão por ação × por recurso × por empreendimento), o controle por empreendimento entra como um segundo eixo independente do papel: uma tabela de junção simples `EmpreendimentoUsuario` (`usuarioId` × `empreendimentoId`) que só responde "este usuário enxerga este empreendimento?" — nunca "o que ele pode fazer nele". `admin` continua tendo acesso total e incondicional, sem nunca consultar o vínculo; `usuario` só enxerga os empreendimentos vinculados, mas mantém as mesmas permissões de ação (visualizar/cadastrar, não excluir) dentro deles. Acesso negado devolve 404 em vez de 403, para não revelar a existência de um empreendimento que o usuário não deveria nem saber que existe.
+
+**Status.** Aprovado e implementado (décima primeira fatia). Testado em `tests/integration/api.permissaoPorEmpreendimento.test.ts`.
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |

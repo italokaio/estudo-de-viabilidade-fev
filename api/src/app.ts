@@ -1,7 +1,7 @@
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import { Decimal } from "decimal.js";
-import Fastify from "fastify";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import {
   atualizarCategoriaCusto,
   atualizarCenario,
@@ -30,7 +30,19 @@ import {
   registrarPermuta,
   type ModalidadeInput,
 } from "../../src/db/cadastro.js";
-import { autenticar, criarUsuario, encerrarSessao, excluirUsuario, listarUsuarios, validarSessao } from "../../src/db/auth.js";
+import {
+  autenticar,
+  criarUsuario,
+  desvincularUsuarioEmpreendimento,
+  empreendimentosPermitidos,
+  encerrarSessao,
+  excluirUsuario,
+  listarEmpreendimentosDoUsuario,
+  listarUsuarios,
+  temAcessoEmpreendimento,
+  validarSessao,
+  vincularUsuarioEmpreendimento,
+} from "../../src/db/auth.js";
 import { prisma } from "../../src/db/client.js";
 import { gerarVendasDePremissaVelocidade } from "../../src/db/gerarVendas.js";
 import { rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
@@ -43,6 +55,23 @@ declare module "fastify" {
 
 const NOME_COOKIE_SESSAO = "sessao";
 const DURACAO_COOKIE_SEGUNDOS = 60 * 60 * 24 * 7;
+
+/**
+ * Permissão por empreendimento (achado F5, docs/DECISOES.md): checa acesso
+ * e, se negado, já responde 404 (mesma mensagem de "não encontrado" — não
+ * revela a um usuário sem vínculo que o empreendimento existe). Devolve
+ * false quando a rota deve parar aqui.
+ *
+ * empreendimentoId null é usado para recursos globais (ex.: categoria de
+ * custo reutilizável entre empreendimentos) — sempre acessíveis.
+ */
+async function garantirAcesso(req: FastifyRequest, reply: FastifyReply, empreendimentoId: string | null): Promise<boolean> {
+  if (empreendimentoId === null) return true;
+  if (await temAcessoEmpreendimento(req.usuario!, empreendimentoId)) return true;
+  reply.code(404);
+  reply.send({ erro: "Empreendimento não encontrado" });
+  return false;
+}
 
 /**
  * API — casca fina sobre o motor da Fase 0. Nenhuma regra de negocio vive
@@ -151,8 +180,56 @@ export async function buildApp() {
     return null;
   });
 
-  app.get("/api/empreendimentos", async () => {
+  app.get<{ Params: { id: string } }>("/api/usuarios/:id/empreendimentos", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem ver vínculos de acesso" };
+    }
+    return listarEmpreendimentosDoUsuario(req.params.id);
+  });
+
+  app.post<{ Params: { id: string }; Body: { empreendimentoId?: string } }>("/api/usuarios/:id/empreendimentos", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem gerenciar vínculos de acesso" };
+    }
+    const { empreendimentoId } = req.body ?? {};
+    if (!empreendimentoId) {
+      reply.code(400);
+      return { erro: "empreendimentoId é obrigatório" };
+    }
+    const usuario = await prisma.usuario.findUnique({ where: { id: req.params.id } });
+    if (!usuario) {
+      reply.code(404);
+      return { erro: "Usuário não encontrado" };
+    }
+    const empreendimento = await prisma.empreendimento.findUnique({ where: { id: empreendimentoId } });
+    if (!empreendimento) {
+      reply.code(404);
+      return { erro: "Empreendimento não encontrado" };
+    }
+    await vincularUsuarioEmpreendimento(req.params.id, empreendimentoId);
+    reply.code(201);
+    return listarEmpreendimentosDoUsuario(req.params.id);
+  });
+
+  app.delete<{ Params: { id: string; empreendimentoId: string } }>(
+    "/api/usuarios/:id/empreendimentos/:empreendimentoId",
+    async (req, reply) => {
+      if (req.usuario!.papel !== "admin") {
+        reply.code(403);
+        return { erro: "Apenas administradores podem gerenciar vínculos de acesso" };
+      }
+      await desvincularUsuarioEmpreendimento(req.params.id, req.params.empreendimentoId);
+      reply.code(204);
+      return null;
+    },
+  );
+
+  app.get("/api/empreendimentos", async (req) => {
+    const permitidos = await empreendimentosPermitidos(req.usuario!);
     const empreendimentos = await prisma.empreendimento.findMany({
+      where: permitidos === "todos" ? undefined : { id: { in: permitidos } },
       include: { cenarios: { select: { id: true, nome: true, tipo: true, horizonteProjecaoMeses: true } } },
       orderBy: { nome: "asc" },
     });
@@ -166,11 +243,16 @@ export async function buildApp() {
       return { erro: "Nome do empreendimento é obrigatório" };
     }
     const empreendimento = await criarEmpreendimento({ nome: nome.trim(), incorporador, endereco });
+    // quem cria (se nao for admin) precisa de um vinculo, senao criava algo que nao consegue mais ver.
+    if (req.usuario!.papel !== "admin") {
+      await vincularUsuarioEmpreendimento(req.usuario!.id, empreendimento.id);
+    }
     reply.code(201);
     return empreendimento;
   });
 
   app.get<{ Params: { id: string } }>("/api/empreendimentos/:id", async (req, reply) => {
+    if (!(await garantirAcesso(req, reply, req.params.id))) return;
     const empreendimento = await prisma.empreendimento.findUnique({
       where: { id: req.params.id },
       include: {
@@ -229,6 +311,7 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Empreendimento não encontrado" };
       }
+      if (!(await garantirAcesso(req, reply, empreendimento.id))) return;
       return atualizarEmpreendimento(req.params.id, { nome: nome?.trim(), incorporador, endereco });
     },
   );
@@ -261,6 +344,7 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Empreendimento não encontrado" };
       }
+      if (!(await garantirAcesso(req, reply, empreendimento.id))) return;
       const tipologia = await criarTipologia({
         empreendimentoId: req.params.id,
         nome: nome.trim(),
@@ -293,6 +377,7 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Tipologia não encontrada" };
       }
+      if (!(await garantirAcesso(req, reply, tipologia.empreendimentoId))) return;
       const unidades = await criarUnidadesEmLote({
         empreendimentoId: tipologia.empreendimentoId,
         tipologiaId: tipologia.id,
@@ -343,6 +428,7 @@ export async function buildApp() {
       reply.code(404);
       return { erro: "Tipologia não encontrada" };
     }
+    if (!(await garantirAcesso(req, reply, tipologia.empreendimentoId))) return;
     const unidades = await criarUnidadesPorAndar({
       empreendimentoId: tipologia.empreendimentoId,
       tipologiaId: tipologia.id,
@@ -366,6 +452,7 @@ export async function buildApp() {
       reply.code(404);
       return { erro: "Tipologia não encontrada" };
     }
+    if (!(await garantirAcesso(req, reply, tipologia.empreendimentoId))) return;
     const unidades = await prisma.unidade.findMany({
       where: { tipologiaId: req.params.id },
       include: { permuta: true },
@@ -391,6 +478,12 @@ export async function buildApp() {
       reply.code(400);
       return { erro: "Nome da contraparte é obrigatório" };
     }
+    const unidade = await prisma.unidade.findUnique({ where: { id: req.params.id } });
+    if (!unidade) {
+      reply.code(404);
+      return { erro: "Unidade não encontrada" };
+    }
+    if (!(await garantirAcesso(req, reply, unidade.empreendimentoId))) return;
     const resultado = await registrarPermuta({
       unidadeId: req.params.id,
       nomeContraparte: nomeContraparte.trim(),
@@ -434,6 +527,7 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Tipologia não encontrada" };
       }
+      if (!(await garantirAcesso(req, reply, tipologia.empreendimentoId))) return;
       return atualizarTipologia(req.params.id, { nome: nome?.trim(), areaPrivativaPadrao, precoUnitarioPadrao });
     },
   );
@@ -475,6 +569,7 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Empreendimento não encontrado" };
       }
+      if (!(await garantirAcesso(req, reply, empreendimento.id))) return;
       const categoria = await criarCategoriaCusto({
         empreendimentoId: req.params.id,
         nome: nome.trim(),
@@ -503,6 +598,7 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Categoria de custo não encontrada" };
       }
+      if (!(await garantirAcesso(req, reply, categoria.empreendimentoId))) return;
       const resultado = await atualizarCategoriaCusto(req.params.id, {
         nome: nome?.trim(),
         tipoIncidencia: tipoIncidencia as "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao" | undefined,
@@ -556,6 +652,7 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Empreendimento não encontrado" };
       }
+      if (!(await garantirAcesso(req, reply, empreendimento.id))) return;
       const cenario = await criarCenario({
         empreendimentoId: req.params.id,
         tipo: tipo as "base" | "otimista" | "pessimista" | "personalizado",
@@ -584,6 +681,7 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Tipologia não encontrada" };
       }
+      if (!(await garantirAcesso(req, reply, tipologia.empreendimentoId))) return;
       try {
         const condicao = await criarCondicaoPagamento({
           empreendimentoId: tipologia.empreendimentoId,
@@ -617,6 +715,7 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Condição de pagamento não encontrada" };
       }
+      if (!(await garantirAcesso(req, reply, condicao.empreendimentoId))) return;
       const resultado = await atualizarCondicaoPagamento(req.params.id, { nome: nome?.trim(), modalidades });
       if ("erro" in resultado) {
         reply.code(400);
@@ -667,6 +766,7 @@ export async function buildApp() {
       reply.code(404);
       return { erro: "Cenário não encontrado" };
     }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimento.id))) return;
     return {
       id: cenario.id,
       nome: cenario.nome,
@@ -715,6 +815,7 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Cenário não encontrado" };
       }
+      if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
       return atualizarCenario(req.params.id, { nome: nome?.trim(), horizonteProjecaoMeses });
     },
   );
@@ -748,6 +849,7 @@ export async function buildApp() {
       reply.code(404);
       return { erro: "Cenário não encontrado" };
     }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
     const categoria = await prisma.categoriaCusto.findUnique({ where: { id: categoriaId } });
     if (!categoria) {
       reply.code(404);
@@ -822,6 +924,7 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Cenário não encontrado" };
       }
+      if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
       const existentes = await prisma.cronogramaFisicoFinanceiro.count({ where: { cenarioId: cenario.id } });
       if (existentes > 0) {
         reply.code(400);
@@ -852,6 +955,7 @@ export async function buildApp() {
       reply.code(404);
       return { erro: "Custo não encontrado" };
     }
+    if (!(await garantirAcesso(req, reply, custo.empreendimentoId))) return;
 
     if (valorRealizado !== undefined) {
       if (!valorRealizado.trim()) {
@@ -877,6 +981,7 @@ export async function buildApp() {
       reply.code(404);
       return { erro: "Cenário não encontrado" };
     }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
     const recebimentos = await prisma.recebimentoProjetado.findMany({
       where: { venda: { cenarioId: req.params.id } },
       include: { venda: { include: { unidade: { select: { numero: true } } } }, modalidade: { select: { nome: true } } },
@@ -906,11 +1011,15 @@ export async function buildApp() {
         reply.code(400);
         return { erro: `Status deve ser um de: ${tiposValidos.join(", ")}` };
       }
-      const recebimento = await prisma.recebimentoProjetado.findUnique({ where: { id: req.params.id } });
+      const recebimento = await prisma.recebimentoProjetado.findUnique({
+        where: { id: req.params.id },
+        include: { venda: { select: { empreendimentoId: true } } },
+      });
       if (!recebimento) {
         reply.code(404);
         return { erro: "Recebimento não encontrado" };
       }
+      if (!(await garantirAcesso(req, reply, recebimento.venda.empreendimentoId))) return;
       return prisma.recebimentoProjetado.update({
         where: { id: req.params.id },
         data: { valorRealizado: valorRealizado.trim(), status: status ?? "recebido" },
@@ -931,6 +1040,7 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Cenário não encontrado" };
       }
+      if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
       await criarPremissaVelocidade(
         itens.map((item) => ({
           empreendimentoId: cenario.empreendimentoId,
@@ -951,6 +1061,7 @@ export async function buildApp() {
       reply.code(404);
       return { erro: "Cenário não encontrado" };
     }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
     try {
       const resultado = await gerarVendasDePremissaVelocidade(req.params.id);
       return resultado;
@@ -971,6 +1082,7 @@ export async function buildApp() {
       reply.code(404);
       return { erro: "Cenário não encontrado" };
     }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
 
     const resultado = await rodarMotorParaCenario(cenarioId, { taxaDescontoMensal: "0.005" });
 

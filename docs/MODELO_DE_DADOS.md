@@ -1,6 +1,6 @@
 # Modelo de dados — Fase 0
 
-Schema completo em [`prisma/schema.prisma`](../prisma/schema.prisma). 16 tabelas (13 da Fase 0 + `permuta`, `usuario` e `sessao`, adicionadas na Fase 1), todas genéricas — nenhuma coluna ou valor específico de um empreendimento. O que muda entre o Splendido e qualquer outro empreendimento são as **linhas**, nunca a tabela.
+Schema completo em [`prisma/schema.prisma`](../prisma/schema.prisma). 17 tabelas (13 da Fase 0 + `permuta`, `usuario`, `sessao` e `empreendimento_usuario`, adicionadas na Fase 1), todas genéricas — nenhuma coluna ou valor específico de um empreendimento. O que muda entre o Splendido e qualquer outro empreendimento são as **linhas**, nunca a tabela.
 
 Convenção: todo valor monetário ou percentual é `String` (texto decimal), nunca `Float`. Ver `docs/ARQUITETURA.md`, princípio B.
 
@@ -20,8 +20,9 @@ Convenção: todo valor monetário ou percentual é `String` (texto decimal), nu
 | `categoria_custo` | Categoria + tipo de incidência | `empreendimentoId` nulo = categoria reutilizável entre empreendimentos |
 | `custo` | Uma linha de custo/despesa | `participaFluxoCaixa` decide se entra no fluxo — é o mecanismo do achado F/4.3; `valorRealizado`/`status` (Fase 1) só fazem sentido para custos de incidência fixa, que têm um mês de competência único |
 | `cronograma_fisico_financeiro` | % de execução física por mês | Curva livre, sem formato pressuposto (não precisa ser "S") |
-| `usuario` | Login e permissão (Fase 1) | `senhaHash` via `bcryptjs`; `papel` (`admin`/`usuario`) é a única dimensão de permissão — sem controle por empreendimento nesta fase |
+| `usuario` | Login e permissão (Fase 1) | `senhaHash` via `bcryptjs`; `papel` (`admin`/`usuario`) é a dimensão de permissão por ação — ver `empreendimento_usuario` para a dimensão de permissão por empreendimento |
 | `sessao` | Token de sessão ativo (Fase 1) | Token opaco (não JWT), verificado a cada request; revogar é apagar a linha |
+| `empreendimento_usuario` | Vínculo de acesso usuário×empreendimento (Fase 1, achado F5) | Só existe para `papel='usuario'` — `admin` nunca é restringido por ela; sem vínculo, um `usuario` não vê o empreendimento na listagem e recebe 404 (não 403) ao tentar acessá-lo direto |
 
 ## O que foi deliberadamente deixado de fora da Fase 0
 
@@ -31,4 +32,4 @@ Ver `docs/DECISOES.md` para a justificativa de cada item — nenhum foi esquecid
 - `MovimentoCaixa` — **removida como tabela**, é serviço computado (achado F1)
 - `FinanciamentoProducao`, `AlertaRisco`, `SimulacaoSensibilidade`, `VersaoCenario`, `EstruturaComissao`, `IndiceCorrecao`, `Distrato` — todas fora do MVP definido, sem impacto no motor financeiro
 
-Três itens desta lista original já foram implementados na Fase 1 (ver `docs/FASES.md`): `Permuta` (cadastro nominal, achado F3), a cascata de preço por andar (achado F2, sem tabela nova — ver `src/core/precificacaoAndar.ts`), e `Usuario`/`Sessao` (login e permissão — `EmpreendimentoUsuario`, ou seja, permissão *por empreendimento*, continua fora: a permissão implementada é só `admin`×`usuario`, global).
+Itens desta lista original já foram implementados na Fase 1 (ver `docs/FASES.md`): `Permuta` (cadastro nominal, achado F3), a cascata de preço por andar (achado F2, sem tabela nova — ver `src/core/precificacaoAndar.ts`), `Usuario`/`Sessao` (login e permissão por ação) e `EmpreendimentoUsuario` (permissão por empreendimento, achado F5).

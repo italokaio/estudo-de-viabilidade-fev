@@ -35,6 +35,7 @@ export async function listarUsuarios() {
 
 export async function excluirUsuario(id: string) {
   await prisma.sessao.deleteMany({ where: { usuarioId: id } });
+  await prisma.empreendimentoUsuario.deleteMany({ where: { usuarioId: id } });
   await prisma.usuario.delete({ where: { id } });
 }
 
@@ -70,4 +71,47 @@ export async function validarSessao(token: string) {
 
 export async function encerrarSessao(token: string) {
   await prisma.sessao.deleteMany({ where: { token } });
+}
+
+/**
+ * Permissão por empreendimento (achado F5, docs/DECISOES.md) — só tem
+ * efeito para papel="usuario"; admin sempre devolve true, com ou sem
+ * vínculo. Usada em toda rota que resolve um empreendimentoId a partir
+ * de um id de entidade filha (ver api/src/app.ts).
+ */
+export async function temAcessoEmpreendimento(usuario: { id: string; papel: string }, empreendimentoId: string): Promise<boolean> {
+  if (usuario.papel === "admin") return true;
+  const vinculo = await prisma.empreendimentoUsuario.findUnique({
+    where: { usuarioId_empreendimentoId: { usuarioId: usuario.id, empreendimentoId } },
+  });
+  return vinculo !== null;
+}
+
+/** IDs dos empreendimentos visíveis para o usuário — "todos" para admin (evita listar e comparar contra uma lista gigante). */
+export async function empreendimentosPermitidos(usuario: { id: string; papel: string }): Promise<string[] | "todos"> {
+  if (usuario.papel === "admin") return "todos";
+  const vinculos = await prisma.empreendimentoUsuario.findMany({ where: { usuarioId: usuario.id }, select: { empreendimentoId: true } });
+  return vinculos.map((v) => v.empreendimentoId);
+}
+
+export async function vincularUsuarioEmpreendimento(usuarioId: string, empreendimentoId: string) {
+  return prisma.empreendimentoUsuario.upsert({
+    where: { usuarioId_empreendimentoId: { usuarioId, empreendimentoId } },
+    update: {},
+    create: { usuarioId, empreendimentoId },
+  });
+}
+
+export async function desvincularUsuarioEmpreendimento(usuarioId: string, empreendimentoId: string) {
+  await prisma.empreendimentoUsuario.deleteMany({ where: { usuarioId, empreendimentoId } });
+}
+
+/** Empreendimentos vinculados a um usuário — para a tela de admin gerenciar acesso. */
+export async function listarEmpreendimentosDoUsuario(usuarioId: string) {
+  const vinculos = await prisma.empreendimentoUsuario.findMany({
+    where: { usuarioId },
+    include: { empreendimento: { select: { id: true, nome: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  return vinculos.map((v) => v.empreendimento);
 }
