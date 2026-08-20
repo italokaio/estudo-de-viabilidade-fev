@@ -120,6 +120,20 @@ Terceiro item da lista aprovada. O schema já tinha `RecebimentoProjetado.valorR
 
 **Não implementado nesta fatia:** registrar realizado para custos percentuais (limitação documentada acima), edição/estorno de um valor já registrado como realizado, importação em lote de extrato bancário.
 
+## Fase 1 (código) — oitava fatia: permuta nominal completa (este repositório, concluída)
+
+Quarto item da lista aprovada. Implementa o achado F3 (`docs/DECISOES.md`): `Unidade.status='permutada'` já bastava para o motor financeiro (exclui a unidade do estoque disponível e do VGV de venda) — esta fatia acrescenta o cadastro nominal (quem recebeu o quê) que ficara pendente.
+
+**Implementado:**
+- Schema — tabela nova `Permuta` (`nomeContraparte`, `documento?`, `valorAtribuido?`, `dataAcordo?`, `observacao?`), `unidadeId` único (uma unidade só pode ter uma permuta ativa por vez), nunca lida pelo motor. `docs/DECISOES.md` ganhou o achado F4 documentando por que essa tabela é só um registro histórico, não uma entrada do motor.
+- `src/db/cadastro.ts` — `registrarPermuta` (bloqueia se a unidade não estiver em `estoque` — mesma regra que já valia para venda: uma unidade só tem um destino) e `desfazerPermuta` (apaga o registro e devolve a unidade a `estoque`).
+- API — `GET /api/tipologias/:id/unidades` (nova: lista unidades individuais de uma tipologia, algo que a interface só tinha em contagem agregada até aqui — necessário para escolher qual unidade permutar), `POST /api/unidades/:id/permuta`, `DELETE /api/unidades/:id/permuta`.
+- Tela — cada tipologia ganhou uma terceira ação expansível "Permuta": tabela de unidades individuais (número, status, contraparte) com "Registrar permuta" (unidades em estoque) ou "Desfazer" (unidades permutadas) por linha.
+- 6 novos testes de API, incluindo a prova de que uma unidade permutada não entra na geração de vendas (mesmo caminho de "estoque insuficiente" que já existia para vendas normais — nenhuma regra nova no motor). Suíte total: 16 arquivos, 71 testes.
+- Verificado num navegador real: registrou permuta de uma unidade (nome, documento, valor atribuído), conferiu que ela sai do estoque disponível e a outra unidade da mesma tipologia permanece disponível, desfez a permuta e confirmou o retorno ao estoque — com o estado final também conferido direto no banco.
+
+**Não implementado nesta fatia:** editar uma permuta já registrada (só registrar/desfazer), permuta parcial (uma unidade dividida entre múltiplas contrapartes), anexos/documentos digitalizados.
+
 ## Próxima fase
 
-Quarto item da lista aprovada: permuta nominal completa.
+Quinto e último item da lista aprovada: autenticação, usuários e permissões.

@@ -1,6 +1,6 @@
 # Modelo de dados — Fase 0
 
-Schema completo em [`prisma/schema.prisma`](../prisma/schema.prisma). 13 tabelas, todas genéricas — nenhuma coluna ou valor específico de um empreendimento. O que muda entre o Splendido e qualquer outro empreendimento são as **linhas**, nunca a tabela.
+Schema completo em [`prisma/schema.prisma`](../prisma/schema.prisma). 14 tabelas (13 da Fase 0 + `permuta`, adicionada na Fase 1 — ver `docs/DECISOES.md`, achado F3/F4), todas genéricas — nenhuma coluna ou valor específico de um empreendimento. O que muda entre o Splendido e qualquer outro empreendimento são as **linhas**, nunca a tabela.
 
 Convenção: todo valor monetário ou percentual é `String` (texto decimal), nunca `Float`. Ver `docs/ARQUITETURA.md`, princípio B.
 
@@ -10,7 +10,8 @@ Convenção: todo valor monetário ou percentual é `String` (texto decimal), nu
 | `cenario` | Base/otimista/pessimista/personalizado | `horizonteProjecaoMeses` é obrigatório e nunca hardcoded em nenhum outro lugar do sistema |
 | `terreno` | 1:1 com empreendimento | `areaStatusValidacao` (`pendente`/`validado`/`conflitante`) + `areaObservacao` registram divergências de fonte em vez de escondê-las (ver Splendido: conflito SÍNTESE×LEGAL) |
 | `tipologia` | Produto (ex.: "1 Quarto", "Loja") | Cadastro livre, sem lista fixa |
-| `unidade` | Unidade física vendável | Fase 0: preço direto (`precoVenda`), sem tabela de posição por andar — ver achado F2 |
+| `unidade` | Unidade física vendável | `precoVenda` é um valor direto na linha — sempre foi assim, inclusive quando calculado por cascata de andar (Fase 1, achado F2): a estratégia de precificação decide o número no momento da criação, o schema nunca soube que existia mais de uma estratégia |
+| `permuta` | Cadastro nominal de quem recebeu uma unidade permutada | 1:1 com `unidade` (achado F3/F4); nunca lida pelo motor — `Unidade.status='permutada'` já é suficiente para excluir a unidade do VGV |
 | `condicao_pagamento` | Agrupa modalidades | 0 ou 1 por tipologia (ou pode ser por empreendimento, se `tipologiaId` for nulo) |
 | `modalidade_pagamento` | Uma fatia da condição (ex.: "Entrada") | `tipoDistribuicao` é o campo que generaliza o motor — ver `REGRAS_DE_NEGOCIO.md` |
 | `premissa_velocidade_vendas` | Quantas unidades/mês/tipologia se espera vender | Consumida por `gerarVendasDePremissaVelocidade()` para criar `Venda` reais |
@@ -25,7 +26,7 @@ Convenção: todo valor monetário ou percentual é `String` (texto decimal), nu
 Ver `docs/DECISOES.md` para a justificativa de cada item — nenhum foi esquecido, todos foram avaliados e adiados conscientemente:
 
 - `RegistroAreaTerreno` (auditoria de múltiplas origens de área) — Fase 0 usa `Terreno.areaObservacao` (texto) para o mesmo fim
-- `Permutante` / `Permuta` / `ItemPermuta` — Fase 0 usa apenas `Unidade.status = 'permutada'`
-- `TabelaPrecoPosicao` (preço por andar/orientação) — Fase 0 usa preço direto por unidade
 - `MovimentoCaixa` — **removida como tabela**, é serviço computado (achado F1)
 - `FinanciamentoProducao`, `AlertaRisco`, `SimulacaoSensibilidade`, `VersaoCenario`, `EstruturaComissao`, `Usuario`/`PapelAcesso`/`EmpreendimentoUsuario`, `IndiceCorrecao`, `Distrato` — todas fora do MVP definido, sem impacto no motor financeiro
+
+Dois itens desta lista original já foram implementados na Fase 1 (ver `docs/FASES.md`): `Permuta` (cadastro nominal, achado F3/F4) e a cascata de preço por andar (achado F2, sem tabela nova — ver `src/core/precificacaoAndar.ts`).

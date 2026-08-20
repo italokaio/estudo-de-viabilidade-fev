@@ -45,6 +45,7 @@ export async function excluirEmpreendimento(id: string) {
   await prisma.premissaVelocidadeVendas.deleteMany({ where: { empreendimentoId: id } });
   await prisma.modalidadePagamento.deleteMany({ where: { condicaoPagamento: { empreendimentoId: id } } });
   await prisma.condicaoPagamento.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.permuta.deleteMany({ where: { empreendimentoId: id } });
   await prisma.unidade.deleteMany({ where: { empreendimentoId: id } });
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { empreendimentoId: id } });
   await prisma.custo.deleteMany({ where: { empreendimentoId: id } });
@@ -235,6 +236,53 @@ export async function criarUnidadesPorAndar(input: CriarUnidadesPorAndarInput) {
     where: { empreendimentoId: input.empreendimentoId, tipologiaId: input.tipologiaId, numero: { startsWith: `${input.prefixoNumero}-` } },
     orderBy: [{ andar: "asc" }, { numero: "asc" }],
   });
+}
+
+export interface RegistrarPermutaInput {
+  unidadeId: string;
+  nomeContraparte: string;
+  documento?: string;
+  valorAtribuido?: string;
+  dataAcordo?: Date;
+  observacao?: string;
+}
+
+/**
+ * Cadastro nominal completo de uma permuta (achado F3, docs/DECISOES.md).
+ * So permite permutar unidade em estoque — a mesma regra que ja vale para
+ * venda (uma unidade so tem um destino). Ao registrar, marca a unidade
+ * como 'permutada', que ja e o suficiente para o motor financeiro
+ * (exclui do estoque disponivel e do VGV de venda, sem nenhuma mudanca
+ * necessaria em src/core).
+ */
+export async function registrarPermuta(input: RegistrarPermutaInput): Promise<{ erro: string } | { permuta: Awaited<ReturnType<typeof prisma.permuta.create>> }> {
+  const unidade = await prisma.unidade.findUnique({ where: { id: input.unidadeId } });
+  if (!unidade) return { erro: "Unidade não encontrada" };
+  if (unidade.status !== "estoque") {
+    return { erro: `Esta unidade está com status "${unidade.status}" — só é possível registrar permuta de uma unidade em estoque` };
+  }
+  const permuta = await prisma.permuta.create({
+    data: {
+      empreendimentoId: unidade.empreendimentoId,
+      unidadeId: unidade.id,
+      nomeContraparte: input.nomeContraparte,
+      documento: input.documento,
+      valorAtribuido: input.valorAtribuido,
+      dataAcordo: input.dataAcordo,
+      observacao: input.observacao,
+    },
+  });
+  await prisma.unidade.update({ where: { id: unidade.id }, data: { status: "permutada" } });
+  return { permuta };
+}
+
+/** Desfaz uma permuta: apaga o registro e devolve a unidade ao estoque. */
+export async function desfazerPermuta(unidadeId: string): Promise<string | null> {
+  const permuta = await prisma.permuta.findUnique({ where: { unidadeId } });
+  if (!permuta) return "Esta unidade não tem permuta registrada";
+  await prisma.permuta.delete({ where: { unidadeId } });
+  await prisma.unidade.update({ where: { id: unidadeId }, data: { status: "estoque" } });
+  return null;
 }
 
 export interface ModalidadeInput {

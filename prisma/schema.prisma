@@ -39,6 +39,7 @@ model Empreendimento {
   categoriasCusto     CategoriaCusto[]
   custos              Custo[]
   cronograma          CronogramaFisicoFinanceiro[]
+  permutas            Permuta[]
 
   @@map("empreendimento")
 }
@@ -114,8 +115,33 @@ model Unidade {
   empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
   tipologia      Tipologia      @relation(fields: [tipologiaId], references: [id])
   vendas         Venda[]
+  permuta        Permuta?
 
   @@map("unidade")
+}
+
+/**
+ * Cadastro nominal completo de uma permuta (achado F3, docs/DECISOES.md:
+ * Unidade.status='permutada' ja e suficiente para o motor financeiro —
+ * exclui a unidade do estoque disponivel e do VGV de venda — mas nao
+ * registra quem recebeu o que. Esta tabela e so isso: um registro, nunca
+ * lida pelo motor.
+ */
+model Permuta {
+  id               String    @id @default(cuid())
+  empreendimentoId String
+  unidadeId        String    @unique
+  nomeContraparte  String
+  documento        String?
+  valorAtribuido   String? // decimal-as-string, so para registro -- nao participa do motor
+  dataAcordo       DateTime?
+  observacao       String?
+  createdAt        DateTime  @default(now())
+
+  empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
+  unidade        Unidade        @relation(fields: [unidadeId], references: [id])
+
+  @@map("permuta")
 }
 
 model CondicaoPagamento {

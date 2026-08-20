@@ -15,9 +15,11 @@ import {
   criarTipologia,
   criarUnidadesEmLote,
   criarUnidadesPorAndar,
+  desfazerPermuta,
   excluirCenario,
   excluirEmpreendimento,
   excluirTipologia,
+  registrarPermuta,
   type ModalidadeInput,
 } from "../../src/db/cadastro.js";
 import { prisma } from "../../src/db/client.js";
@@ -239,6 +241,63 @@ export async function buildApp() {
     });
     reply.code(201);
     return unidades;
+  });
+
+  app.get<{ Params: { id: string } }>("/api/tipologias/:id/unidades", async (req, reply) => {
+    const tipologia = await prisma.tipologia.findUnique({ where: { id: req.params.id } });
+    if (!tipologia) {
+      reply.code(404);
+      return { erro: "Tipologia não encontrada" };
+    }
+    const unidades = await prisma.unidade.findMany({
+      where: { tipologiaId: req.params.id },
+      include: { permuta: true },
+      orderBy: [{ andar: "asc" }, { numero: "asc" }],
+    });
+    return unidades.map((u) => ({
+      id: u.id,
+      numero: u.numero,
+      andar: u.andar,
+      areaPrivativa: u.areaPrivativa,
+      precoVenda: u.precoVenda,
+      status: u.status,
+      permuta: u.permuta ? { id: u.permuta.id, nomeContraparte: u.permuta.nomeContraparte, documento: u.permuta.documento, valorAtribuido: u.permuta.valorAtribuido } : null,
+    }));
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: { nomeContraparte?: string; documento?: string; valorAtribuido?: string; dataAcordo?: string; observacao?: string };
+  }>("/api/unidades/:id/permuta", async (req, reply) => {
+    const { nomeContraparte, documento, valorAtribuido, dataAcordo, observacao } = req.body ?? {};
+    if (!nomeContraparte || !nomeContraparte.trim()) {
+      reply.code(400);
+      return { erro: "Nome da contraparte é obrigatório" };
+    }
+    const resultado = await registrarPermuta({
+      unidadeId: req.params.id,
+      nomeContraparte: nomeContraparte.trim(),
+      documento,
+      valorAtribuido,
+      dataAcordo: dataAcordo ? new Date(dataAcordo) : undefined,
+      observacao,
+    });
+    if ("erro" in resultado) {
+      reply.code(resultado.erro === "Unidade não encontrada" ? 404 : 400);
+      return { erro: resultado.erro };
+    }
+    reply.code(201);
+    return resultado.permuta;
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/unidades/:id/permuta", async (req, reply) => {
+    const erro = await desfazerPermuta(req.params.id);
+    if (erro) {
+      reply.code(404);
+      return { erro };
+    }
+    reply.code(204);
+    return null;
   });
 
   app.patch<{ Params: { id: string }; Body: { nome?: string; areaPrivativaPadrao?: string | null; precoUnitarioPadrao?: string | null } }>(

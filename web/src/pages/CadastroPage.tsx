@@ -13,13 +13,16 @@ import {
   criarTipologia,
   criarUnidadesEmLote,
   criarUnidadesPorAndar,
+  desfazerPermuta,
   excluirCenario,
   excluirEmpreendimento,
   excluirTipologia,
   fetchCenarioDetalhe,
   fetchEmpreendimentoDetalhe,
   fetchEmpreendimentos,
+  fetchUnidades,
   gerarVendas,
+  registrarPermuta,
   type CategoriaCustoResumo,
   type CenarioDetalhe,
   type EmpreendimentoDetalhe,
@@ -28,6 +31,7 @@ import {
   type TipoDistribuicao,
   type TipoIncidenciaCusto,
   type TipoIncrementoAndar,
+  type UnidadeResumo,
 } from "../api/client.js";
 import { Button } from "../components/Button.js";
 import { TextField } from "../components/TextField.js";
@@ -883,6 +887,7 @@ function CartaoTipologia({
   const [expandido, setExpandido] = useState(false);
   const [modoGeracao, setModoGeracao] = useState<"unico" | "andar">("unico");
   const [expandidoCondicao, setExpandidoCondicao] = useState(false);
+  const [expandidoPermuta, setExpandidoPermuta] = useState(false);
   const [editando, setEditando] = useState(false);
   const [nomeEdicao, setNomeEdicao] = useState(tipologia.nome);
   const [areaEdicao, setAreaEdicao] = useState(tipologia.areaPrivativaPadrao ?? "");
@@ -998,6 +1003,9 @@ function CartaoTipologia({
           <Button variant="secondary" onClick={() => setExpandidoCondicao((v) => !v)} style={{ padding: "6px 10px", fontSize: 12 }}>
             {expandidoCondicao ? "Cancelar" : "Condição de pagamento"}
           </Button>
+          <Button variant="secondary" onClick={() => setExpandidoPermuta((v) => !v)} style={{ padding: "6px 10px", fontSize: 12 }}>
+            {expandidoPermuta ? "Fechar" : "Permuta"}
+          </Button>
           <Button variant="secondary" onClick={() => setExpandido((v) => !v)} style={{ padding: "6px 10px", fontSize: 12 }}>
             {expandido ? "Cancelar" : "Gerar unidades"}
           </Button>
@@ -1102,7 +1110,150 @@ function CartaoTipologia({
           onErro={onErro}
         />
       )}
+
+      {expandidoPermuta && <PermutaSecao tipologiaId={tipologia.id} onAtualizado={onAtualizado} onErro={onErro} />}
     </div>
+  );
+}
+
+function PermutaSecao({
+  tipologiaId,
+  onAtualizado,
+  onErro,
+}: {
+  tipologiaId: string;
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [unidades, setUnidades] = useState<UnidadeResumo[]>([]);
+  const [carregando, setCarregando] = useState(true);
+
+  function recarregar() {
+    fetchUnidades(tipologiaId)
+      .then(setUnidades)
+      .catch((e) => onErro(String(e.message ?? e)))
+      .finally(() => setCarregando(false));
+  }
+
+  useEffect(() => {
+    recarregar();
+  }, [tipologiaId]);
+
+  function aoRegistrar() {
+    recarregar();
+    onAtualizado();
+  }
+
+  if (carregando) return <div style={{ fontSize: 12.5, color: "var(--ink-muted)", marginTop: 12 }}>Carregando…</div>;
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
+      {unidades.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>Nenhuma unidade cadastrada ainda.</div>
+      ) : (
+        <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Unidade</th>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Status</th>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Contraparte</th>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {unidades.map((u) => (
+              <LinhaUnidadePermuta key={u.id} unidade={u} onRegistrado={aoRegistrar} onErro={onErro} />
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function LinhaUnidadePermuta({
+  unidade,
+  onRegistrado,
+  onErro,
+}: {
+  unidade: UnidadeResumo;
+  onRegistrado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [nomeContraparte, setNomeContraparte] = useState("");
+  const [documento, setDocumento] = useState("");
+  const [valorAtribuido, setValorAtribuido] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  async function registrar(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await registrarPermuta(unidade.id, { nomeContraparte, documento: documento || undefined, valorAtribuido: valorAtribuido || undefined });
+      setEditando(false);
+      onRegistrado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function desfazer() {
+    if (!window.confirm(`Desfazer a permuta da unidade "${unidade.numero}"? Ela volta para o estoque.`)) return;
+    try {
+      await desfazerPermuta(unidade.id);
+      onRegistrado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    }
+  }
+
+  if (editando) {
+    return (
+      <tr>
+        <td colSpan={4} style={{ padding: "6px 0" }}>
+          <form onSubmit={registrar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div style={{ width: 160 }}>
+              <TextField label="Contraparte" value={nomeContraparte} onChange={(e) => setNomeContraparte(e.target.value)} required />
+            </div>
+            <div style={{ width: 130 }}>
+              <TextField label="Documento" value={documento} onChange={(e) => setDocumento(e.target.value)} placeholder="CPF/CNPJ" />
+            </div>
+            <div style={{ width: 120 }}>
+              <TextField label="Valor atribuído" value={valorAtribuido} onChange={(e) => setValorAtribuido(e.target.value)} placeholder="310000" />
+            </div>
+            <Button type="submit" disabled={salvando || !nomeContraparte.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
+              {salvando ? "Salvando…" : "Confirmar"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
+              Cancelar
+            </Button>
+          </form>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr>
+      <td style={{ padding: "4px 0", color: "var(--ink-primary)", font: "var(--text-mono-body)" }}>{unidade.numero}</td>
+      <td style={{ color: "var(--ink-secondary)" }}>{unidade.status}</td>
+      <td style={{ color: "var(--ink-secondary)" }}>{unidade.permuta?.nomeContraparte ?? "—"}</td>
+      <td style={{ textAlign: "right" }}>
+        {unidade.status === "estoque" && (
+          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "4px 8px", fontSize: 11 }}>
+            Registrar permuta
+          </Button>
+        )}
+        {unidade.status === "permutada" && (
+          <Button variant="secondary" onClick={desfazer} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+            Desfazer
+          </Button>
+        )}
+      </td>
+    </tr>
   );
 }
 

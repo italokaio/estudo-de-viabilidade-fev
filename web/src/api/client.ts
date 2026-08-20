@@ -270,3 +270,30 @@ export function atualizarCenario(id: string, input: { nome?: string; horizontePr
 export function excluirCenario(id: string) {
   return del(`/api/cenarios/${id}`);
 }
+
+export interface UnidadeResumo {
+  id: string;
+  numero: string;
+  andar: number | null;
+  areaPrivativa: string | null;
+  precoVenda: string | null;
+  status: string;
+  permuta: { id: string; nomeContraparte: string; documento: string | null; valorAtribuido: string | null } | null;
+}
+
+export async function fetchUnidades(tipologiaId: string): Promise<UnidadeResumo[]> {
+  const res = await fetch(`/api/tipologias/${tipologiaId}/unidades`);
+  if (!res.ok) throw new Error(`Falha ao carregar unidades (${res.status})`);
+  return res.json();
+}
+
+export function registrarPermuta(
+  unidadeId: string,
+  input: { nomeContraparte: string; documento?: string; valorAtribuido?: string; observacao?: string },
+) {
+  return postJson<{ id: string }>(`/api/unidades/${unidadeId}/permuta`, input);
+}
+
+export function desfazerPermuta(unidadeId: string) {
+  return del(`/api/unidades/${unidadeId}/permuta`);
+}
