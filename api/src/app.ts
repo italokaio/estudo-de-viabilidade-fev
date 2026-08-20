@@ -1,6 +1,9 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import {
+  atualizarCenario,
+  atualizarEmpreendimento,
+  atualizarTipologia,
   criarCategoriaCusto,
   criarCenario,
   criarCondicaoPagamento,
@@ -10,6 +13,9 @@ import {
   criarPremissaVelocidade,
   criarTipologia,
   criarUnidadesEmLote,
+  excluirCenario,
+  excluirEmpreendimento,
+  excluirTipologia,
   type ModalidadeInput,
 } from "../../src/db/cadastro.js";
 import { prisma } from "../../src/db/client.js";
@@ -93,6 +99,34 @@ export async function buildApp() {
     };
   });
 
+  app.patch<{ Params: { id: string }; Body: { nome?: string; incorporador?: string | null; endereco?: string | null } }>(
+    "/api/empreendimentos/:id",
+    async (req, reply) => {
+      const { nome, incorporador, endereco } = req.body ?? {};
+      if (nome !== undefined && !nome.trim()) {
+        reply.code(400);
+        return { erro: "Nome do empreendimento não pode ficar vazio" };
+      }
+      const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
+      if (!empreendimento) {
+        reply.code(404);
+        return { erro: "Empreendimento não encontrado" };
+      }
+      return atualizarEmpreendimento(req.params.id, { nome: nome?.trim(), incorporador, endereco });
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>("/api/empreendimentos/:id", async (req, reply) => {
+    const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
+    if (!empreendimento) {
+      reply.code(404);
+      return { erro: "Empreendimento não encontrado" };
+    }
+    await excluirEmpreendimento(req.params.id);
+    reply.code(204);
+    return null;
+  });
+
   app.post<{ Params: { id: string }; Body: { nome?: string; areaPrivativaPadrao?: string; precoUnitarioPadrao?: string } }>(
     "/api/empreendimentos/:id/tipologias",
     async (req, reply) => {
@@ -150,6 +184,38 @@ export async function buildApp() {
       return unidades;
     },
   );
+
+  app.patch<{ Params: { id: string }; Body: { nome?: string; areaPrivativaPadrao?: string | null; precoUnitarioPadrao?: string | null } }>(
+    "/api/tipologias/:id",
+    async (req, reply) => {
+      const { nome, areaPrivativaPadrao, precoUnitarioPadrao } = req.body ?? {};
+      if (nome !== undefined && !nome.trim()) {
+        reply.code(400);
+        return { erro: "Nome da tipologia não pode ficar vazio" };
+      }
+      const tipologia = await prisma.tipologia.findUnique({ where: { id: req.params.id } });
+      if (!tipologia) {
+        reply.code(404);
+        return { erro: "Tipologia não encontrada" };
+      }
+      return atualizarTipologia(req.params.id, { nome: nome?.trim(), areaPrivativaPadrao, precoUnitarioPadrao });
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>("/api/tipologias/:id", async (req, reply) => {
+    const tipologia = await prisma.tipologia.findUnique({ where: { id: req.params.id } });
+    if (!tipologia) {
+      reply.code(404);
+      return { erro: "Tipologia não encontrada" };
+    }
+    const erro = await excluirTipologia(req.params.id);
+    if (erro) {
+      reply.code(400);
+      return { erro };
+    }
+    reply.code(204);
+    return null;
+  });
 
   app.post<{ Params: { id: string }; Body: { nome?: string; tipoIncidencia?: string } }>(
     "/api/empreendimentos/:id/categorias-custo",
@@ -294,6 +360,38 @@ export async function buildApp() {
       cronograma: cenario.cronograma.map((p) => ({ mes: p.mes, percentualExecucaoMensal: p.percentualExecucaoMensal })),
       totalVendasGeradas: cenario._count.vendas,
     };
+  });
+
+  app.patch<{ Params: { id: string }; Body: { nome?: string; horizonteProjecaoMeses?: number } }>(
+    "/api/cenarios/:id",
+    async (req, reply) => {
+      const { nome, horizonteProjecaoMeses } = req.body ?? {};
+      if (nome !== undefined && !nome.trim()) {
+        reply.code(400);
+        return { erro: "Nome do cenário não pode ficar vazio" };
+      }
+      if (horizonteProjecaoMeses !== undefined && (horizonteProjecaoMeses < 1 || !Number.isInteger(horizonteProjecaoMeses))) {
+        reply.code(400);
+        return { erro: "Horizonte de projeção deve ser um número inteiro de meses maior que zero" };
+      }
+      const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+      if (!cenario) {
+        reply.code(404);
+        return { erro: "Cenário não encontrado" };
+      }
+      return atualizarCenario(req.params.id, { nome: nome?.trim(), horizonteProjecaoMeses });
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>("/api/cenarios/:id", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    await excluirCenario(req.params.id);
+    reply.code(204);
+    return null;
   });
 
   app.post<{

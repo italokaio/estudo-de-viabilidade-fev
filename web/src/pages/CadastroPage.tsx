@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import {
+  atualizarCenario,
+  atualizarEmpreendimento,
+  atualizarTipologia,
   criarCategoriaCusto,
   criarCenario,
   criarCondicaoPagamento,
@@ -9,6 +12,9 @@ import {
   criarPremissasVelocidade,
   criarTipologia,
   criarUnidadesEmLote,
+  excluirCenario,
+  excluirEmpreendimento,
+  excluirTipologia,
   fetchCenarioDetalhe,
   fetchEmpreendimentoDetalhe,
   fetchEmpreendimentos,
@@ -63,6 +69,13 @@ export function CadastroPage() {
     recarregarDetalhe();
   }, [selecionadoId]);
 
+  async function excluirEmpreendimentoSelecionado(id: string) {
+    await excluirEmpreendimento(id);
+    const emps = await fetchEmpreendimentos();
+    setEmpreendimentos(emps);
+    setSelecionadoId(emps[0]?.id ?? null);
+  }
+
   return (
     <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -94,6 +107,7 @@ export function CadastroPage() {
             key={detalhe.id}
             detalhe={detalhe}
             onAtualizado={recarregarDetalhe}
+            onExcluido={() => excluirEmpreendimentoSelecionado(detalhe.id)}
             onErro={setErro}
           />
         )}
@@ -199,20 +213,17 @@ function ListaEmpreendimentos({
 function DetalheEmpreendimento({
   detalhe,
   onAtualizado,
+  onExcluido,
   onErro,
 }: {
   detalhe: EmpreendimentoDetalhe;
   onAtualizado: () => void;
+  onExcluido: () => Promise<void>;
   onErro: (msg: string) => void;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <Painel titulo={detalhe.nome}>
-        <div style={{ fontSize: 13, color: "var(--ink-secondary)", display: "flex", flexDirection: "column", gap: 3 }}>
-          <div>{detalhe.incorporador || <span style={{ color: "var(--ink-muted)" }}>Incorporador não informado</span>}</div>
-          <div>{detalhe.endereco || <span style={{ color: "var(--ink-muted)" }}>Endereço não informado</span>}</div>
-        </div>
-      </Painel>
+      <EmpreendimentoHeader detalhe={detalhe} onAtualizado={onAtualizado} onExcluido={onExcluido} onErro={onErro} />
 
       <Painel titulo="Tipologias">
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -250,12 +261,96 @@ function DetalheEmpreendimento({
             <div style={{ fontSize: 13, color: "var(--ink-muted)" }}>Nenhum cenário cadastrado ainda.</div>
           )}
           {detalhe.cenarios.map((c) => (
-            <CartaoCenario key={c.id} cenarioResumo={c} onErro={onErro} />
+            <CartaoCenario key={c.id} cenarioResumo={c} onAtualizado={onAtualizado} onErro={onErro} />
           ))}
         </div>
 
         <NovoCenarioForm empreendimentoId={detalhe.id} onCriado={onAtualizado} onErro={onErro} />
       </Painel>
+    </div>
+  );
+}
+
+function EmpreendimentoHeader({
+  detalhe,
+  onAtualizado,
+  onExcluido,
+  onErro,
+}: {
+  detalhe: EmpreendimentoDetalhe;
+  onAtualizado: () => void;
+  onExcluido: () => Promise<void>;
+  onErro: (msg: string) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [nome, setNome] = useState(detalhe.nome);
+  const [incorporador, setIncorporador] = useState(detalhe.incorporador ?? "");
+  const [endereco, setEndereco] = useState(detalhe.endereco ?? "");
+  const [salvando, setSalvando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await atualizarEmpreendimento(detalhe.id, { nome, incorporador: incorporador || null, endereco: endereco || null });
+      setEditando(false);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function excluir() {
+    if (!window.confirm(`Excluir "${detalhe.nome}" e tudo cadastrado nele (tipologias, unidades, cenários, vendas)? Esta ação não pode ser desfeita.`)) return;
+    setExcluindo(true);
+    try {
+      await onExcluido();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+      setExcluindo(false);
+    }
+  }
+
+  if (editando) {
+    return (
+      <Painel titulo="Editar empreendimento">
+        <form onSubmit={salvar} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <TextField label="Nome" value={nome} onChange={(e) => setNome(e.target.value)} required />
+          <TextField label="Incorporador" value={incorporador} onChange={(e) => setIncorporador(e.target.value)} />
+          <TextField label="Endereço" value={endereco} onChange={(e) => setEndereco(e.target.value)} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button type="submit" disabled={salvando || !nome.trim()}>
+              {salvando ? "Salvando…" : "Salvar"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setEditando(false)}>
+              Cancelar
+            </Button>
+          </div>
+        </form>
+      </Painel>
+    );
+  }
+
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 18px", boxShadow: "var(--shadow-sm)" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-primary)", marginBottom: 12 }}>{detalhe.nome}</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+            Editar
+          </Button>
+          <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+            {excluindo ? "Excluindo…" : "Excluir"}
+          </Button>
+        </div>
+      </div>
+      <div style={{ fontSize: 13, color: "var(--ink-secondary)", display: "flex", flexDirection: "column", gap: 3 }}>
+        <div>{detalhe.incorporador || <span style={{ color: "var(--ink-muted)" }}>Incorporador não informado</span>}</div>
+        <div>{detalhe.endereco || <span style={{ color: "var(--ink-muted)" }}>Endereço não informado</span>}</div>
+      </div>
     </div>
   );
 }
@@ -319,9 +414,11 @@ function NovoCenarioForm({
 
 function CartaoCenario({
   cenarioResumo,
+  onAtualizado,
   onErro,
 }: {
   cenarioResumo: EmpreendimentoDetalhe["cenarios"][number];
+  onAtualizado: () => void;
   onErro: (msg: string) => void;
 }) {
   const [expandido, setExpandido] = useState(false);
@@ -332,6 +429,37 @@ function CartaoCenario({
   const [salvandoPremissa, setSalvandoPremissa] = useState(false);
   const [gerando, setGerando] = useState(false);
   const [resultadoGeracao, setResultadoGeracao] = useState<string | null>(null);
+  const [editando, setEditando] = useState(false);
+  const [nomeEdicao, setNomeEdicao] = useState(cenarioResumo.nome);
+  const [horizonteEdicao, setHorizonteEdicao] = useState(String(cenarioResumo.horizonteProjecaoMeses));
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+
+  async function salvarEdicao(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvandoEdicao(true);
+    try {
+      await atualizarCenario(cenarioResumo.id, { nome: nomeEdicao, horizonteProjecaoMeses: Number(horizonteEdicao) });
+      setEditando(false);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvandoEdicao(false);
+    }
+  }
+
+  async function excluir() {
+    if (!window.confirm(`Excluir o cenário "${cenarioResumo.nome}"? As vendas geradas neste cenário serão apagadas e as unidades voltam para o estoque.`)) return;
+    setExcluindo(true);
+    try {
+      await excluirCenario(cenarioResumo.id);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+      setExcluindo(false);
+    }
+  }
 
   function recarregar() {
     fetchCenarioDetalhe(cenarioResumo.id)
@@ -376,6 +504,27 @@ function CartaoCenario({
     }
   }
 
+  if (editando) {
+    return (
+      <div style={{ border: "1px solid var(--border-subtle)", borderRadius: 10, padding: "12px 14px", background: "var(--surface-2)" }}>
+        <form onSubmit={salvarEdicao} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <TextField label="Nome" value={nomeEdicao} onChange={(e) => setNomeEdicao(e.target.value)} required />
+          </div>
+          <div style={{ width: 130 }}>
+            <TextField label="Horizonte (meses)" type="number" min={1} value={horizonteEdicao} onChange={(e) => setHorizonteEdicao(e.target.value)} required />
+          </div>
+          <Button type="submit" disabled={salvandoEdicao || !nomeEdicao.trim()}>
+            {salvandoEdicao ? "Salvando…" : "Salvar"}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => setEditando(false)}>
+            Cancelar
+          </Button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div style={{ border: "1px solid var(--border-subtle)", borderRadius: 10, padding: "12px 14px", background: "var(--surface-2)" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -386,9 +535,17 @@ function CartaoCenario({
             {detalhe && ` · ${detalhe.totalVendasGeradas} venda(s) gerada(s)`}
           </div>
         </div>
-        <Button variant="secondary" onClick={() => setExpandido((v) => !v)} style={{ padding: "6px 10px", fontSize: 12 }}>
-          {expandido ? "Fechar" : "Detalhes do cenário"}
-        </Button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button variant="secondary" onClick={() => setExpandido((v) => !v)} style={{ padding: "6px 10px", fontSize: 12 }}>
+            {expandido ? "Fechar" : "Detalhes do cenário"}
+          </Button>
+          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+            Editar
+          </Button>
+          <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+            {excluindo ? "Excluindo…" : "Excluir"}
+          </Button>
+        </div>
       </div>
 
       {expandido && detalhe && (
@@ -723,11 +880,48 @@ function CartaoTipologia({
 }) {
   const [expandido, setExpandido] = useState(false);
   const [expandidoCondicao, setExpandidoCondicao] = useState(false);
+  const [editando, setEditando] = useState(false);
+  const [nomeEdicao, setNomeEdicao] = useState(tipologia.nome);
+  const [areaEdicao, setAreaEdicao] = useState(tipologia.areaPrivativaPadrao ?? "");
+  const [precoEdicao, setPrecoEdicao] = useState(tipologia.precoUnitarioPadrao ?? "");
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
   const [quantidade, setQuantidade] = useState("");
   const [precoVenda, setPrecoVenda] = useState(tipologia.precoUnitarioPadrao ?? "");
   const [areaPrivativa, setAreaPrivativa] = useState(tipologia.areaPrivativaPadrao ?? "");
   const [prefixoNumero, setPrefixoNumero] = useState("");
   const [salvando, setSalvando] = useState(false);
+
+  async function salvarEdicao(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvandoEdicao(true);
+    try {
+      await atualizarTipologia(tipologia.id, {
+        nome: nomeEdicao,
+        areaPrivativaPadrao: areaEdicao || null,
+        precoUnitarioPadrao: precoEdicao || null,
+      });
+      setEditando(false);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvandoEdicao(false);
+    }
+  }
+
+  async function excluir() {
+    if (!window.confirm(`Excluir a tipologia "${tipologia.nome}"?`)) return;
+    setExcluindo(true);
+    try {
+      await excluirTipologia(tipologia.id);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setExcluindo(false);
+    }
+  }
 
   async function gerarUnidades(e: React.FormEvent) {
     e.preventDefault();
@@ -748,6 +942,30 @@ function CartaoTipologia({
     } finally {
       setSalvando(false);
     }
+  }
+
+  if (editando) {
+    return (
+      <div style={{ border: "1px solid var(--border-subtle)", borderRadius: 10, padding: "12px 14px", background: "var(--surface-2)" }}>
+        <form onSubmit={salvarEdicao} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <TextField label="Nome" value={nomeEdicao} onChange={(e) => setNomeEdicao(e.target.value)} required />
+          </div>
+          <div style={{ width: 110 }}>
+            <TextField label="Área padrão (m²)" value={areaEdicao} onChange={(e) => setAreaEdicao(e.target.value)} />
+          </div>
+          <div style={{ width: 140 }}>
+            <TextField label="Preço padrão" value={precoEdicao} onChange={(e) => setPrecoEdicao(e.target.value)} />
+          </div>
+          <Button type="submit" disabled={salvandoEdicao || !nomeEdicao.trim()}>
+            {salvandoEdicao ? "Salvando…" : "Salvar"}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => setEditando(false)}>
+            Cancelar
+          </Button>
+        </form>
+      </div>
+    );
   }
 
   return (
@@ -779,6 +997,12 @@ function CartaoTipologia({
           </Button>
           <Button variant="secondary" onClick={() => setExpandido((v) => !v)} style={{ padding: "6px 10px", fontSize: 12 }}>
             {expandido ? "Cancelar" : "Gerar unidades"}
+          </Button>
+          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+            Editar
+          </Button>
+          <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+            {excluindo ? "Excluindo…" : "Excluir"}
           </Button>
         </div>
       </div>

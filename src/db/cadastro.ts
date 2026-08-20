@@ -22,6 +22,38 @@ export async function criarEmpreendimento(input: CriarEmpreendimentoInput) {
   return prisma.empreendimento.create({ data: input });
 }
 
+export interface AtualizarEmpreendimentoInput {
+  nome?: string;
+  incorporador?: string | null;
+  endereco?: string | null;
+}
+
+export async function atualizarEmpreendimento(id: string, input: AtualizarEmpreendimentoInput) {
+  return prisma.empreendimento.update({ where: { id }, data: input });
+}
+
+/**
+ * Apaga um empreendimento e tudo o que depende dele, na ordem segura de
+ * chaves estrangeiras (mesma ordem usada em tests/helpers/resetDatabase.ts,
+ * agora escopada a um unico empreendimento em vez do banco inteiro).
+ */
+export async function excluirEmpreendimento(id: string) {
+  const vendaIds = (await prisma.venda.findMany({ where: { empreendimentoId: id }, select: { id: true } })).map((v) => v.id);
+  await prisma.recebimentoProjetado.deleteMany({ where: { vendaId: { in: vendaIds } } });
+  await prisma.venda.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.premissaVelocidadeVendas.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.modalidadePagamento.deleteMany({ where: { condicaoPagamento: { empreendimentoId: id } } });
+  await prisma.condicaoPagamento.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.unidade.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.custo.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.categoriaCusto.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.tipologia.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.terreno.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.cenario.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.empreendimento.delete({ where: { id } });
+}
+
 export interface CriarCenarioInput {
   empreendimentoId: string;
   tipo: "base" | "otimista" | "pessimista" | "personalizado";
@@ -32,6 +64,38 @@ export interface CriarCenarioInput {
 
 export async function criarCenario(input: CriarCenarioInput) {
   return prisma.cenario.create({ data: input });
+}
+
+export interface AtualizarCenarioInput {
+  nome?: string;
+  horizonteProjecaoMeses?: number;
+}
+
+export async function atualizarCenario(id: string, input: AtualizarCenarioInput) {
+  return prisma.cenario.update({ where: { id }, data: input });
+}
+
+/**
+ * Apaga um cenario e tudo o que depende dele. Diferente de excluir um
+ * empreendimento inteiro: as Unidades vendidas neste cenario precisam
+ * voltar para o estoque ('estoque'), senao ficam "presas" como vendidas
+ * sem nenhuma Venda apontando para elas — quebraria a contagem de
+ * estoque disponivel para outros cenarios do mesmo empreendimento.
+ */
+export async function excluirCenario(id: string) {
+  const vendas = await prisma.venda.findMany({ where: { cenarioId: id }, select: { id: true, unidadeId: true } });
+  const vendaIds = vendas.map((v) => v.id);
+  const unidadeIds = vendas.map((v) => v.unidadeId);
+
+  await prisma.recebimentoProjetado.deleteMany({ where: { vendaId: { in: vendaIds } } });
+  await prisma.venda.deleteMany({ where: { cenarioId: id } });
+  if (unidadeIds.length > 0) {
+    await prisma.unidade.updateMany({ where: { id: { in: unidadeIds } }, data: { status: "estoque" } });
+  }
+  await prisma.premissaVelocidadeVendas.deleteMany({ where: { cenarioId: id } });
+  await prisma.custo.deleteMany({ where: { cenarioId: id } });
+  await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { cenarioId: id } });
+  await prisma.cenario.delete({ where: { id } });
 }
 
 export interface CriarTerrenoInput {
@@ -56,6 +120,35 @@ export interface CriarTipologiaInput {
 
 export async function criarTipologia(input: CriarTipologiaInput) {
   return prisma.tipologia.create({ data: input });
+}
+
+export interface AtualizarTipologiaInput {
+  nome?: string;
+  areaPrivativaPadrao?: string | null;
+  precoUnitarioPadrao?: string | null;
+}
+
+export async function atualizarTipologia(id: string, input: AtualizarTipologiaInput) {
+  return prisma.tipologia.update({ where: { id }, data: input });
+}
+
+/**
+ * Apaga uma tipologia e suas unidades/condicoes de pagamento — mas apenas
+ * se nenhuma unidade dela ja foi vendida ou reservada (regra: nunca apagar
+ * dado que uma Venda referencia). Devolve null em caso de sucesso, ou uma
+ * mensagem explicando por que nao foi possivel apagar.
+ */
+export async function excluirTipologia(id: string): Promise<string | null> {
+  const unidadeNaoDisponivel = await prisma.unidade.count({ where: { tipologiaId: id, status: { not: "estoque" } } });
+  if (unidadeNaoDisponivel > 0) {
+    return `Esta tipologia tem ${unidadeNaoDisponivel} unidade(s) vendida(s) ou reservada(s) — não é possível excluí-la sem antes excluir o cenário que gerou essas vendas.`;
+  }
+  await prisma.modalidadePagamento.deleteMany({ where: { condicaoPagamento: { tipologiaId: id } } });
+  await prisma.condicaoPagamento.deleteMany({ where: { tipologiaId: id } });
+  await prisma.premissaVelocidadeVendas.deleteMany({ where: { tipologiaId: id } });
+  await prisma.unidade.deleteMany({ where: { tipologiaId: id } });
+  await prisma.tipologia.delete({ where: { id } });
+  return null;
 }
 
 export interface CriarUnidadesEmLoteInput {
