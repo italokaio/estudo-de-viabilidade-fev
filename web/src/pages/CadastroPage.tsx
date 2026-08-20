@@ -12,6 +12,7 @@ import {
   criarPremissasVelocidade,
   criarTipologia,
   criarUnidadesEmLote,
+  criarUnidadesPorAndar,
   excluirCenario,
   excluirEmpreendimento,
   excluirTipologia,
@@ -26,6 +27,7 @@ import {
   type ModalidadeInput,
   type TipoDistribuicao,
   type TipoIncidenciaCusto,
+  type TipoIncrementoAndar,
 } from "../api/client.js";
 import { Button } from "../components/Button.js";
 import { TextField } from "../components/TextField.js";
@@ -879,6 +881,7 @@ function CartaoTipologia({
   onErro: (msg: string) => void;
 }) {
   const [expandido, setExpandido] = useState(false);
+  const [modoGeracao, setModoGeracao] = useState<"unico" | "andar">("unico");
   const [expandidoCondicao, setExpandidoCondicao] = useState(false);
   const [editando, setEditando] = useState(false);
   const [nomeEdicao, setNomeEdicao] = useState(tipologia.nome);
@@ -1020,23 +1023,73 @@ function CartaoTipologia({
       )}
 
       {expandido && (
-        <form onSubmit={gerarUnidades} style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <div style={{ width: 90 }}>
-            <TextField label="Quantidade" type="number" min={1} value={quantidade} onChange={(e) => setQuantidade(e.target.value)} required />
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+            <button
+              type="button"
+              onClick={() => setModoGeracao("unico")}
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 12,
+                fontWeight: 600,
+                padding: "5px 10px",
+                borderRadius: 999,
+                border: "1px solid var(--border)",
+                background: modoGeracao === "unico" ? "var(--accent-soft-bg)" : "transparent",
+                color: modoGeracao === "unico" ? "var(--accent-text)" : "var(--ink-secondary)",
+                cursor: "pointer",
+              }}
+            >
+              Preço único
+            </button>
+            <button
+              type="button"
+              onClick={() => setModoGeracao("andar")}
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 12,
+                fontWeight: 600,
+                padding: "5px 10px",
+                borderRadius: 999,
+                border: "1px solid var(--border)",
+                background: modoGeracao === "andar" ? "var(--accent-soft-bg)" : "transparent",
+                color: modoGeracao === "andar" ? "var(--accent-text)" : "var(--ink-secondary)",
+                cursor: "pointer",
+              }}
+            >
+              Cascata por andar
+            </button>
           </div>
-          <div style={{ width: 140 }}>
-            <TextField label="Preço de venda" value={precoVenda} onChange={(e) => setPrecoVenda(e.target.value)} placeholder="310000" required />
-          </div>
-          <div style={{ width: 100 }}>
-            <TextField label="Área (m²)" value={areaPrivativa} onChange={(e) => setAreaPrivativa(e.target.value)} placeholder="28.5" />
-          </div>
-          <div style={{ width: 90 }}>
-            <TextField label="Prefixo" value={prefixoNumero} onChange={(e) => setPrefixoNumero(e.target.value)} placeholder="ST" required />
-          </div>
-          <Button type="submit" disabled={salvando}>
-            {salvando ? "Gerando…" : "Gerar"}
-          </Button>
-        </form>
+
+          {modoGeracao === "unico" ? (
+            <form onSubmit={gerarUnidades} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ width: 90 }}>
+                <TextField label="Quantidade" type="number" min={1} value={quantidade} onChange={(e) => setQuantidade(e.target.value)} required />
+              </div>
+              <div style={{ width: 140 }}>
+                <TextField label="Preço de venda" value={precoVenda} onChange={(e) => setPrecoVenda(e.target.value)} placeholder="310000" required />
+              </div>
+              <div style={{ width: 100 }}>
+                <TextField label="Área (m²)" value={areaPrivativa} onChange={(e) => setAreaPrivativa(e.target.value)} placeholder="28.5" />
+              </div>
+              <div style={{ width: 90 }}>
+                <TextField label="Prefixo" value={prefixoNumero} onChange={(e) => setPrefixoNumero(e.target.value)} placeholder="ST" required />
+              </div>
+              <Button type="submit" disabled={salvando}>
+                {salvando ? "Gerando…" : "Gerar"}
+              </Button>
+            </form>
+          ) : (
+            <GeracaoPorAndarForm
+              tipologiaId={tipologia.id}
+              onGerado={() => {
+                setExpandido(false);
+                onAtualizado();
+              }}
+              onErro={onErro}
+            />
+          )}
+        </div>
       )}
 
       {expandidoCondicao && (
@@ -1050,6 +1103,124 @@ function CartaoTipologia({
         />
       )}
     </div>
+  );
+}
+
+function GeracaoPorAndarForm({
+  tipologiaId,
+  onGerado,
+  onErro,
+}: {
+  tipologiaId: string;
+  onGerado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [prefixoNumero, setPrefixoNumero] = useState("AP");
+  const [areaPrivativa, setAreaPrivativa] = useState("");
+  const [andares, setAndares] = useState<{ andar: string; quantidade: string }[]>([{ andar: "1", quantidade: "" }]);
+  const [precoBase, setPrecoBase] = useState("");
+  const [andarBase, setAndarBase] = useState("1");
+  const [incremento, setIncremento] = useState("");
+  const [tipoIncremento, setTipoIncremento] = useState<TipoIncrementoAndar>("fixo");
+  const [salvando, setSalvando] = useState(false);
+
+  function atualizarAndar(i: number, patch: Partial<{ andar: string; quantidade: string }>) {
+    setAndares((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  }
+
+  function adicionarLinha() {
+    setAndares((rows) => [...rows, { andar: "", quantidade: "" }]);
+  }
+
+  function removerLinha(i: number) {
+    setAndares((rows) => rows.filter((_, idx) => idx !== i));
+  }
+
+  const totalUnidades = andares.reduce((acc, a) => acc + (Number(a.quantidade) || 0), 0);
+
+  async function submeter(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await criarUnidadesPorAndar(tipologiaId, {
+        prefixoNumero,
+        areaPrivativa: areaPrivativa || undefined,
+        andares: andares.map((a) => ({ andar: Number(a.andar), quantidade: Number(a.quantidade) })),
+        precificacao: { precoBase, andarBase: Number(andarBase), incremento, tipoIncremento },
+      });
+      onGerado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submeter} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ width: 90 }}>
+          <TextField label="Prefixo" value={prefixoNumero} onChange={(e) => setPrefixoNumero(e.target.value)} placeholder="AP" required />
+        </div>
+        <div style={{ width: 100 }}>
+          <TextField label="Área (m²)" value={areaPrivativa} onChange={(e) => setAreaPrivativa(e.target.value)} placeholder="65" />
+        </div>
+        <div style={{ width: 130 }}>
+          <TextField label="Preço base" value={precoBase} onChange={(e) => setPrecoBase(e.target.value)} placeholder="300000" required />
+        </div>
+        <div style={{ width: 100 }}>
+          <TextField label="Andar de referência" type="number" value={andarBase} onChange={(e) => setAndarBase(e.target.value)} required />
+        </div>
+        <div style={{ width: 110 }}>
+          <TextField
+            label={tipoIncremento === "fixo" ? "Incremento (R$)" : "Incremento (%)"}
+            value={incremento}
+            onChange={(e) => setIncremento(e.target.value)}
+            placeholder={tipoIncremento === "fixo" ? "5000" : "0.02"}
+            required
+          />
+        </div>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 140 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Tipo</span>
+          <select
+            value={tipoIncremento}
+            onChange={(e) => setTipoIncremento(e.target.value as TipoIncrementoAndar)}
+            style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+          >
+            <option value="fixo">Fixo por andar</option>
+            <option value="percentual">% por andar</option>
+          </select>
+        </label>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {andares.map((a, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <div style={{ width: 90 }}>
+              <TextField label="Andar" type="number" value={a.andar} onChange={(e) => atualizarAndar(i, { andar: e.target.value })} required />
+            </div>
+            <div style={{ width: 110 }}>
+              <TextField label="Unidades" type="number" min={1} value={a.quantidade} onChange={(e) => atualizarAndar(i, { quantidade: e.target.value })} required />
+            </div>
+            {andares.length > 1 && (
+              <Button type="button" variant="secondary" onClick={() => removerLinha(i)} style={{ padding: "8px 10px", fontSize: 12 }}>
+                Remover
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button type="button" variant="secondary" onClick={adicionarLinha} style={{ padding: "6px 10px", fontSize: 12 }}>
+          + Andar
+        </Button>
+        <span style={{ fontSize: 12, color: "var(--ink-muted)" }}>{totalUnidades} unidade{totalUnidades === 1 ? "" : "s"} no total</span>
+        <Button type="submit" disabled={salvando || totalUnidades === 0}>
+          {salvando ? "Gerando…" : "Gerar"}
+        </Button>
+      </div>
+    </form>
   );
 }
 

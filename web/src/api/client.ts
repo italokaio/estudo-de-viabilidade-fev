@@ -159,6 +159,20 @@ export function criarUnidadesEmLote(
   return postJson<unknown[]>(`/api/tipologias/${tipologiaId}/unidades`, input);
 }
 
+export type TipoIncrementoAndar = "fixo" | "percentual";
+
+export function criarUnidadesPorAndar(
+  tipologiaId: string,
+  input: {
+    prefixoNumero: string;
+    areaPrivativa?: string;
+    andares: { andar: number; quantidade: number }[];
+    precificacao: { precoBase: string; andarBase: number; incremento: string; tipoIncremento: TipoIncrementoAndar };
+  },
+) {
+  return postJson<{ andar: number; numero: string; precoVenda: string }[]>(`/api/tipologias/${tipologiaId}/unidades-por-andar`, input);
+}
+
 export function criarCenario(
   empreendimentoId: string,
   input: { tipo: string; nome: string; horizonteProjecaoMeses: number },

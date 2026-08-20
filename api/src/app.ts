@@ -13,6 +13,7 @@ import {
   criarPremissaVelocidade,
   criarTipologia,
   criarUnidadesEmLote,
+  criarUnidadesPorAndar,
   excluirCenario,
   excluirEmpreendimento,
   excluirTipologia,
@@ -184,6 +185,60 @@ export async function buildApp() {
       return unidades;
     },
   );
+
+  app.post<{
+    Params: { id: string };
+    Body: {
+      prefixoNumero?: string;
+      areaPrivativa?: string;
+      andares?: { andar: number; quantidade: number }[];
+      precificacao?: { precoBase?: string; andarBase?: number; incremento?: string; tipoIncremento?: string };
+    };
+  }>("/api/tipologias/:id/unidades-por-andar", async (req, reply) => {
+    const { prefixoNumero, areaPrivativa, andares, precificacao } = req.body ?? {};
+    if (!prefixoNumero || !prefixoNumero.trim()) {
+      reply.code(400);
+      return { erro: "Prefixo do número da unidade é obrigatório" };
+    }
+    if (!andares || andares.length === 0) {
+      reply.code(400);
+      return { erro: "É preciso ao menos um andar" };
+    }
+    for (const a of andares) {
+      if (!Number.isInteger(a.andar) || !Number.isInteger(a.quantidade) || a.quantidade < 1) {
+        reply.code(400);
+        return { erro: "Cada andar precisa de um número de andar e uma quantidade inteira maior que zero" };
+      }
+    }
+    if (!precificacao?.precoBase || precificacao.andarBase === undefined || !precificacao.incremento) {
+      reply.code(400);
+      return { erro: "Preço base, andar de referência e incremento são obrigatórios" };
+    }
+    if (precificacao.tipoIncremento !== "fixo" && precificacao.tipoIncremento !== "percentual") {
+      reply.code(400);
+      return { erro: "Tipo de incremento deve ser 'fixo' ou 'percentual'" };
+    }
+    const tipologia = await prisma.tipologia.findUnique({ where: { id: req.params.id } });
+    if (!tipologia) {
+      reply.code(404);
+      return { erro: "Tipologia não encontrada" };
+    }
+    const unidades = await criarUnidadesPorAndar({
+      empreendimentoId: tipologia.empreendimentoId,
+      tipologiaId: tipologia.id,
+      prefixoNumero: prefixoNumero.trim(),
+      areaPrivativa,
+      andares,
+      precificacao: {
+        precoBase: precificacao.precoBase,
+        andarBase: precificacao.andarBase,
+        incremento: precificacao.incremento,
+        tipoIncremento: precificacao.tipoIncremento,
+      },
+    });
+    reply.code(201);
+    return unidades;
+  });
 
   app.patch<{ Params: { id: string }; Body: { nome?: string; areaPrivativaPadrao?: string | null; precoUnitarioPadrao?: string | null } }>(
     "/api/tipologias/:id",

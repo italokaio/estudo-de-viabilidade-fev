@@ -1,5 +1,6 @@
 import { Decimal } from "decimal.js";
-import { validarCondicaoPagamento, validarCronograma } from "../core/index.js";
+import { calcularPrecoPorAndar, validarCondicaoPagamento, validarCronograma } from "../core/index.js";
+import type { RegraPrecificacaoAndar } from "../core/precificacaoAndar.js";
 import type { CondicaoPagamento as CondicaoPagamentoCore } from "../core/types.js";
 import { prisma } from "./client.js";
 
@@ -173,6 +174,66 @@ export async function criarUnidadesEmLote(input: CriarUnidadesEmLoteInput) {
   await prisma.unidade.createMany({ data: dados });
   return prisma.unidade.findMany({
     where: { empreendimentoId: input.empreendimentoId, tipologiaId: input.tipologiaId, numero: { startsWith: `${input.prefixoNumero}-` } },
+  });
+}
+
+export interface CriarUnidadesPorAndarInput {
+  empreendimentoId: string;
+  tipologiaId: string;
+  prefixoNumero: string;
+  areaPrivativa?: string;
+  andares: { andar: number; quantidade: number }[];
+  precificacao: {
+    precoBase: string;
+    andarBase: number;
+    incremento: string;
+    tipoIncremento: "fixo" | "percentual";
+  };
+}
+
+/**
+ * Segunda estrategia de precificacao (achado F2, docs/DECISOES.md): gera
+ * unidades com preco derivado de uma cascata por andar (ver
+ * src/core/precificacaoAndar.ts), em vez de um precoVenda direto identico
+ * para todas — sem exigir alteracao de schema, como planejado na decisao.
+ */
+export async function criarUnidadesPorAndar(input: CriarUnidadesPorAndarInput) {
+  const regra: RegraPrecificacaoAndar = {
+    precoBase: new Decimal(input.precificacao.precoBase),
+    andarBase: input.precificacao.andarBase,
+    incremento: new Decimal(input.precificacao.incremento),
+    tipoIncremento: input.precificacao.tipoIncremento,
+  };
+
+  const dados: {
+    empreendimentoId: string;
+    tipologiaId: string;
+    numero: string;
+    andar: number;
+    precoVenda: string;
+    areaPrivativa?: string;
+    status: string;
+  }[] = [];
+
+  for (const { andar, quantidade } of input.andares) {
+    const preco = calcularPrecoPorAndar(andar, regra);
+    for (let i = 1; i <= quantidade; i++) {
+      dados.push({
+        empreendimentoId: input.empreendimentoId,
+        tipologiaId: input.tipologiaId,
+        numero: `${input.prefixoNumero}-${andar}${String(i).padStart(2, "0")}`,
+        andar,
+        precoVenda: preco.toFixed(2),
+        areaPrivativa: input.areaPrivativa,
+        status: "estoque",
+      });
+    }
+  }
+
+  await prisma.unidade.createMany({ data: dados });
+  return prisma.unidade.findMany({
+    where: { empreendimentoId: input.empreendimentoId, tipologiaId: input.tipologiaId, numero: { startsWith: `${input.prefixoNumero}-` } },
+    orderBy: [{ andar: "asc" }, { numero: "asc" }],
   });
 }
 
