@@ -1,7 +1,16 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
-import { criarEmpreendimento, criarTipologia, criarUnidadesEmLote } from "../../src/db/cadastro.js";
+import {
+  criarCenario,
+  criarCondicaoPagamento,
+  criarEmpreendimento,
+  criarPremissaVelocidade,
+  criarTipologia,
+  criarUnidadesEmLote,
+  type ModalidadeInput,
+} from "../../src/db/cadastro.js";
 import { prisma } from "../../src/db/client.js";
+import { gerarVendasDePremissaVelocidade } from "../../src/db/gerarVendas.js";
 import { rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
 
 /**
@@ -38,7 +47,16 @@ export async function buildApp() {
   app.get<{ Params: { id: string } }>("/api/empreendimentos/:id", async (req, reply) => {
     const empreendimento = await prisma.empreendimento.findUnique({
       where: { id: req.params.id },
-      include: { tipologias: { include: { _count: { select: { unidades: true } } }, orderBy: { createdAt: "asc" } } },
+      include: {
+        tipologias: {
+          include: {
+            _count: { select: { unidades: true } },
+            condicoesPagamento: { include: { modalidades: true }, orderBy: { createdAt: "asc" } },
+          },
+          orderBy: { createdAt: "asc" },
+        },
+        cenarios: { orderBy: { createdAt: "asc" } },
+      },
     });
     if (!empreendimento) {
       reply.code(404);
@@ -49,12 +67,23 @@ export async function buildApp() {
       nome: empreendimento.nome,
       incorporador: empreendimento.incorporador,
       endereco: empreendimento.endereco,
+      cenarios: empreendimento.cenarios.map((c) => ({
+        id: c.id,
+        nome: c.nome,
+        tipo: c.tipo,
+        horizonteProjecaoMeses: c.horizonteProjecaoMeses,
+      })),
       tipologias: empreendimento.tipologias.map((t) => ({
         id: t.id,
         nome: t.nome,
         areaPrivativaPadrao: t.areaPrivativaPadrao,
         precoUnitarioPadrao: t.precoUnitarioPadrao,
         quantidadeUnidades: t._count.unidades,
+        condicoesPagamento: t.condicoesPagamento.map((cp) => ({
+          id: cp.id,
+          nome: cp.nome,
+          modalidades: cp.modalidades.map((m) => ({ nome: m.nome, percentual: m.percentual, tipoDistribuicao: m.tipoDistribuicao })),
+        })),
       })),
     };
   });
@@ -116,6 +145,147 @@ export async function buildApp() {
       return unidades;
     },
   );
+
+  app.post<{ Params: { id: string }; Body: { tipo?: string; nome?: string; horizonteProjecaoMeses?: number } }>(
+    "/api/empreendimentos/:id/cenarios",
+    async (req, reply) => {
+      const { tipo, nome, horizonteProjecaoMeses } = req.body ?? {};
+      const tiposValidos = ["base", "otimista", "pessimista", "personalizado"];
+      if (!nome || !nome.trim()) {
+        reply.code(400);
+        return { erro: "Nome do cenário é obrigatório" };
+      }
+      if (!tipo || !tiposValidos.includes(tipo)) {
+        reply.code(400);
+        return { erro: `Tipo do cenário deve ser um de: ${tiposValidos.join(", ")}` };
+      }
+      if (!horizonteProjecaoMeses || horizonteProjecaoMeses < 1 || !Number.isInteger(horizonteProjecaoMeses)) {
+        reply.code(400);
+        return { erro: "Horizonte de projeção deve ser um número inteiro de meses maior que zero" };
+      }
+      const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
+      if (!empreendimento) {
+        reply.code(404);
+        return { erro: "Empreendimento não encontrado" };
+      }
+      const cenario = await criarCenario({
+        empreendimentoId: req.params.id,
+        tipo: tipo as "base" | "otimista" | "pessimista" | "personalizado",
+        nome: nome.trim(),
+        horizonteProjecaoMeses,
+      });
+      reply.code(201);
+      return cenario;
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { nome?: string; modalidades?: ModalidadeInput[] } }>(
+    "/api/tipologias/:id/condicoes-pagamento",
+    async (req, reply) => {
+      const { nome, modalidades } = req.body ?? {};
+      if (!nome || !nome.trim()) {
+        reply.code(400);
+        return { erro: "Nome da condição de pagamento é obrigatório" };
+      }
+      if (!modalidades || modalidades.length === 0) {
+        reply.code(400);
+        return { erro: "É preciso ao menos uma modalidade de pagamento" };
+      }
+      const tipologia = await prisma.tipologia.findUnique({ where: { id: req.params.id } });
+      if (!tipologia) {
+        reply.code(404);
+        return { erro: "Tipologia não encontrada" };
+      }
+      try {
+        const condicao = await criarCondicaoPagamento({
+          empreendimentoId: tipologia.empreendimentoId,
+          tipologiaId: tipologia.id,
+          nome: nome.trim(),
+          modalidades,
+        });
+        reply.code(201);
+        return condicao;
+      } catch (e: any) {
+        reply.code(400);
+        return { erro: String(e.message ?? e) };
+      }
+    },
+  );
+
+  app.get<{ Params: { id: string } }>("/api/cenarios/:id", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({
+      where: { id: req.params.id },
+      include: {
+        empreendimento: {
+          select: { id: true, nome: true, tipologias: { select: { id: true, nome: true } } },
+        },
+        premissasVelocidade: { include: { tipologia: { select: { nome: true } } }, orderBy: { mes: "asc" } },
+        _count: { select: { vendas: true } },
+      },
+    });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    return {
+      id: cenario.id,
+      nome: cenario.nome,
+      tipo: cenario.tipo,
+      horizonteProjecaoMeses: cenario.horizonteProjecaoMeses,
+      empreendimento: { id: cenario.empreendimento.id, nome: cenario.empreendimento.nome },
+      tipologiasDisponiveis: cenario.empreendimento.tipologias,
+      premissasVelocidade: cenario.premissasVelocidade.map((p) => ({
+        id: p.id,
+        tipologiaId: p.tipologiaId,
+        tipologiaNome: p.tipologia.nome,
+        mes: p.mes,
+        unidadesPrevistas: p.unidadesPrevistas,
+      })),
+      totalVendasGeradas: cenario._count.vendas,
+    };
+  });
+
+  app.post<{ Params: { id: string }; Body: { itens?: { tipologiaId: string; mes: number; unidadesPrevistas: string }[] } }>(
+    "/api/cenarios/:id/premissas-velocidade",
+    async (req, reply) => {
+      const { itens } = req.body ?? {};
+      if (!itens || itens.length === 0) {
+        reply.code(400);
+        return { erro: "É preciso ao menos um item de premissa de velocidade" };
+      }
+      const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+      if (!cenario) {
+        reply.code(404);
+        return { erro: "Cenário não encontrado" };
+      }
+      await criarPremissaVelocidade(
+        itens.map((item) => ({
+          empreendimentoId: cenario.empreendimentoId,
+          cenarioId: cenario.id,
+          tipologiaId: item.tipologiaId,
+          mes: item.mes,
+          unidadesPrevistas: item.unidadesPrevistas,
+        })),
+      );
+      reply.code(201);
+      return { criadas: itens.length };
+    },
+  );
+
+  app.post<{ Params: { id: string } }>("/api/cenarios/:id/gerar-vendas", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    try {
+      const resultado = await gerarVendasDePremissaVelocidade(req.params.id);
+      return resultado;
+    } catch (e: any) {
+      reply.code(400);
+      return { erro: String(e.message ?? e) };
+    }
+  });
 
   app.get<{ Params: { cenarioId: string } }>("/api/cenarios/:cenarioId/fluxo-caixa", async (req, reply) => {
     const { cenarioId } = req.params;

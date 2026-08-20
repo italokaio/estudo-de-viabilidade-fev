@@ -38,12 +38,36 @@ export async function fetchFluxoCaixa(cenarioId: string): Promise<FluxoCaixaResp
   return res.json();
 }
 
+export type TipoDistribuicao = "unica_na_venda" | "nivelada" | "periodica" | "mes_fixo";
+
+export interface ModalidadeInput {
+  nome: string;
+  percentual: string;
+  tipoDistribuicao: TipoDistribuicao;
+  periodicidadeMeses?: number;
+  mesFixo?: number;
+}
+
+export interface CondicaoPagamentoResumo {
+  id: string;
+  nome: string;
+  modalidades: { nome: string; percentual: string; tipoDistribuicao: string }[];
+}
+
 export interface TipologiaResumo {
   id: string;
   nome: string;
   areaPrivativaPadrao: string | null;
   precoUnitarioPadrao: string | null;
   quantidadeUnidades: number;
+  condicoesPagamento: CondicaoPagamentoResumo[];
+}
+
+export interface CenarioResumo {
+  id: string;
+  nome: string;
+  tipo: string;
+  horizonteProjecaoMeses: number;
 }
 
 export interface EmpreendimentoDetalhe {
@@ -51,7 +75,19 @@ export interface EmpreendimentoDetalhe {
   nome: string;
   incorporador: string | null;
   endereco: string | null;
+  cenarios: CenarioResumo[];
   tipologias: TipologiaResumo[];
+}
+
+export interface CenarioDetalhe {
+  id: string;
+  nome: string;
+  tipo: string;
+  horizonteProjecaoMeses: number;
+  empreendimento: { id: string; nome: string };
+  tipologiasDisponiveis: { id: string; nome: string }[];
+  premissasVelocidade: { id: string; tipologiaId: string; tipologiaNome: string; mes: number; unidadesPrevistas: string }[];
+  totalVendasGeradas: number;
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
@@ -82,4 +118,32 @@ export function criarUnidadesEmLote(
   input: { quantidade: number; precoVenda: string; areaPrivativa?: string; prefixoNumero: string },
 ) {
   return postJson<unknown[]>(`/api/tipologias/${tipologiaId}/unidades`, input);
+}
+
+export function criarCenario(
+  empreendimentoId: string,
+  input: { tipo: string; nome: string; horizonteProjecaoMeses: number },
+) {
+  return postJson<CenarioResumo>(`/api/empreendimentos/${empreendimentoId}/cenarios`, input);
+}
+
+export function criarCondicaoPagamento(tipologiaId: string, input: { nome: string; modalidades: ModalidadeInput[] }) {
+  return postJson<CondicaoPagamentoResumo>(`/api/tipologias/${tipologiaId}/condicoes-pagamento`, input);
+}
+
+export async function fetchCenarioDetalhe(id: string): Promise<CenarioDetalhe> {
+  const res = await fetch(`/api/cenarios/${id}`);
+  if (!res.ok) throw new Error(`Falha ao carregar cenário (${res.status})`);
+  return res.json();
+}
+
+export function criarPremissasVelocidade(
+  cenarioId: string,
+  itens: { tipologiaId: string; mes: number; unidadesPrevistas: string }[],
+) {
+  return postJson<{ criadas: number }>(`/api/cenarios/${cenarioId}/premissas-velocidade`, { itens });
+}
+
+export function gerarVendas(cenarioId: string) {
+  return postJson<{ totalVendasCriadas: number }>(`/api/cenarios/${cenarioId}/gerar-vendas`, {});
 }

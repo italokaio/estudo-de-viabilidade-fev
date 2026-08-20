@@ -9,7 +9,7 @@ npm install
 npx prisma generate
 npx prisma db push      # cria/atualiza o banco SQLite local (prisma/dev.db)
 
-npm test                # roda toda a suíte (36 testes)
+npm test                # roda toda a suíte (40 testes)
 npm run typecheck
 
 npm run import:splendido   # popula o banco com o empreendimento Splendido
