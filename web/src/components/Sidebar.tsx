@@ -1,14 +1,29 @@
+export type Pagina = "fluxo" | "cadastro";
+
 const navIcon = {
   fluxo: "M3 17l5-5 4 4 8-8",
+  cadastro: "M12 5v14M5 12h14",
   vendas: "rect",
   custos: "M4 20V10M12 20V4M20 20v-7",
   cronograma: "circle",
   cenarios: "M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01",
 };
 
-function NavItem({ label, active, children }: { label: string; active?: boolean; children: React.ReactNode }) {
+function NavItem({
+  label,
+  active,
+  onClick,
+  children,
+}: {
+  label: string;
+  active?: boolean;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
+  const clicavel = Boolean(onClick);
   return (
     <div
+      onClick={onClick}
       style={{
         display: "flex",
         alignItems: "center",
@@ -19,9 +34,9 @@ function NavItem({ label, active, children }: { label: string; active?: boolean;
         fontWeight: 600,
         color: active ? "var(--accent-text)" : "var(--ink-muted)",
         background: active ? "var(--accent-soft-bg)" : "transparent",
-        cursor: active ? "default" : "not-allowed",
+        cursor: clicavel ? "pointer" : "not-allowed",
       }}
-      title={active ? undefined : "Ainda não implementado nesta fatia da Fase 1"}
+      title={clicavel ? undefined : "Ainda não implementado nesta fatia da Fase 1"}
     >
       {children}
       {label}
@@ -29,7 +44,7 @@ function NavItem({ label, active, children }: { label: string; active?: boolean;
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ pagina, onNavegar }: { pagina: Pagina; onNavegar: (p: Pagina) => void }) {
   return (
     <div
       style={{
@@ -51,9 +66,14 @@ export function Sidebar() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <NavItem label="Fluxo de caixa" active>
+        <NavItem label="Fluxo de caixa" active={pagina === "fluxo"} onClick={() => onNavegar("fluxo")}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d={navIcon.fluxo} strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </NavItem>
+        <NavItem label="Cadastro" active={pagina === "cadastro"} onClick={() => onNavegar("cadastro")}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d={navIcon.cadastro} strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </NavItem>
         <NavItem label="Vendas">

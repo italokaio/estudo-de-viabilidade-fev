@@ -1,5 +1,6 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
+import { criarEmpreendimento, criarTipologia, criarUnidadesEmLote } from "../../src/db/cadastro.js";
 import { prisma } from "../../src/db/client.js";
 import { rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
 
@@ -22,6 +23,99 @@ export async function buildApp() {
     });
     return empreendimentos;
   });
+
+  app.post<{ Body: { nome?: string; incorporador?: string; endereco?: string } }>("/api/empreendimentos", async (req, reply) => {
+    const { nome, incorporador, endereco } = req.body ?? {};
+    if (!nome || !nome.trim()) {
+      reply.code(400);
+      return { erro: "Nome do empreendimento é obrigatório" };
+    }
+    const empreendimento = await criarEmpreendimento({ nome: nome.trim(), incorporador, endereco });
+    reply.code(201);
+    return empreendimento;
+  });
+
+  app.get<{ Params: { id: string } }>("/api/empreendimentos/:id", async (req, reply) => {
+    const empreendimento = await prisma.empreendimento.findUnique({
+      where: { id: req.params.id },
+      include: { tipologias: { include: { _count: { select: { unidades: true } } }, orderBy: { createdAt: "asc" } } },
+    });
+    if (!empreendimento) {
+      reply.code(404);
+      return { erro: "Empreendimento não encontrado" };
+    }
+    return {
+      id: empreendimento.id,
+      nome: empreendimento.nome,
+      incorporador: empreendimento.incorporador,
+      endereco: empreendimento.endereco,
+      tipologias: empreendimento.tipologias.map((t) => ({
+        id: t.id,
+        nome: t.nome,
+        areaPrivativaPadrao: t.areaPrivativaPadrao,
+        precoUnitarioPadrao: t.precoUnitarioPadrao,
+        quantidadeUnidades: t._count.unidades,
+      })),
+    };
+  });
+
+  app.post<{ Params: { id: string }; Body: { nome?: string; areaPrivativaPadrao?: string; precoUnitarioPadrao?: string } }>(
+    "/api/empreendimentos/:id/tipologias",
+    async (req, reply) => {
+      const { nome, areaPrivativaPadrao, precoUnitarioPadrao } = req.body ?? {};
+      if (!nome || !nome.trim()) {
+        reply.code(400);
+        return { erro: "Nome da tipologia é obrigatório" };
+      }
+      const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
+      if (!empreendimento) {
+        reply.code(404);
+        return { erro: "Empreendimento não encontrado" };
+      }
+      const tipologia = await criarTipologia({
+        empreendimentoId: req.params.id,
+        nome: nome.trim(),
+        areaPrivativaPadrao,
+        precoUnitarioPadrao,
+      });
+      reply.code(201);
+      return tipologia;
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { quantidade?: number; precoVenda?: string; areaPrivativa?: string; prefixoNumero?: string } }>(
+    "/api/tipologias/:id/unidades",
+    async (req, reply) => {
+      const { quantidade, precoVenda, areaPrivativa, prefixoNumero } = req.body ?? {};
+      if (!quantidade || quantidade < 1 || !Number.isInteger(quantidade)) {
+        reply.code(400);
+        return { erro: "Quantidade deve ser um número inteiro maior que zero" };
+      }
+      if (!precoVenda || !precoVenda.trim()) {
+        reply.code(400);
+        return { erro: "Preço de venda é obrigatório" };
+      }
+      if (!prefixoNumero || !prefixoNumero.trim()) {
+        reply.code(400);
+        return { erro: "Prefixo do número da unidade é obrigatório" };
+      }
+      const tipologia = await prisma.tipologia.findUnique({ where: { id: req.params.id } });
+      if (!tipologia) {
+        reply.code(404);
+        return { erro: "Tipologia não encontrada" };
+      }
+      const unidades = await criarUnidadesEmLote({
+        empreendimentoId: tipologia.empreendimentoId,
+        tipologiaId: tipologia.id,
+        quantidade,
+        precoVenda: precoVenda.trim(),
+        areaPrivativa,
+        prefixoNumero: prefixoNumero.trim(),
+      });
+      reply.code(201);
+      return unidades;
+    },
+  );
 
   app.get<{ Params: { cenarioId: string } }>("/api/cenarios/:cenarioId/fluxo-caixa", async (req, reply) => {
     const { cenarioId } = req.params;

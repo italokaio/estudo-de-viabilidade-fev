@@ -9,7 +9,7 @@ npm install
 npx prisma generate
 npx prisma db push      # cria/atualiza o banco SQLite local (prisma/dev.db)
 
-npm test                # roda toda a suíte (28 testes)
+npm test                # roda toda a suíte (36 testes)
 npm run typecheck
 
 npm run import:splendido   # popula o banco com o empreendimento Splendido
@@ -25,7 +25,7 @@ cd api && npm install && npm run dev     # http://127.0.0.1:3333
 cd web && npm install && npm run dev     # http://localhost:5173
 ```
 
-Abra `http://localhost:5173` — a tela de Fluxo de Caixa lê os dados reais do banco (rode os `import:*` acima antes, se o banco estiver vazio).
+Abra `http://localhost:5173` — Fluxo de Caixa lê os dados reais do banco (rode os `import:*` acima antes, se o banco estiver vazio); Cadastro permite criar empreendimento/tipologia/unidade pela própria interface.
 
 ## Estrutura
 
