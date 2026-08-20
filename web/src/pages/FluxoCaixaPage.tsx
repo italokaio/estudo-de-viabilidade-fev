@@ -4,6 +4,7 @@ import { CenarioSwitcher } from "../components/CenarioSwitcher.js";
 import { FluxoChart } from "../components/FluxoChart.js";
 import { FluxoTable } from "../components/FluxoTable.js";
 import { KpiCard } from "../components/KpiCard.js";
+import { RealizadoPanel } from "../components/RealizadoPanel.js";
 import { ThemeToggle } from "../components/ThemeToggle.js";
 import { formatBRL } from "../format.js";
 
@@ -28,9 +29,8 @@ export function FluxoCaixaPage() {
       });
   }, []);
 
-  useEffect(() => {
+  function recarregarFluxo() {
     if (!cenarioId) return;
-    setCarregando(true);
     fetchFluxoCaixa(cenarioId)
       .then((d) => {
         setDados(d);
@@ -38,10 +38,16 @@ export function FluxoCaixaPage() {
       })
       .catch((e) => setErro(String(e.message ?? e)))
       .finally(() => setCarregando(false));
+  }
+
+  useEffect(() => {
+    if (!cenarioId) return;
+    setCarregando(true);
+    recarregarFluxo();
   }, [cenarioId]);
 
   return (
-    <div style={{ flex: 1, padding: "26px 32px", overflow: "hidden", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
+    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 12, color: "var(--ink-muted)", fontWeight: 600 }}>
@@ -72,7 +78,7 @@ export function FluxoCaixaPage() {
             <KpiCard label="VPL (0,5% a.m.)" value={formatBRL(dados.indicadores.vpl, { abbreviate: true })} />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16, flex: 1, minHeight: 0 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16, height: 420, flex: "none" }}>
             <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", display: "flex", flexDirection: "column", boxShadow: "var(--shadow-sm)", minHeight: 0 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-primary)" }}>Fluxo mensal — {dados.horizonteProjecaoMeses} meses</div>
@@ -90,6 +96,8 @@ export function FluxoCaixaPage() {
               <FluxoTable dados={dados.fluxo} />
             </div>
           </div>
+
+          {cenarioId && <RealizadoPanel cenarioId={cenarioId} onAtualizado={recarregarFluxo} />}
         </>
       )}
     </div>

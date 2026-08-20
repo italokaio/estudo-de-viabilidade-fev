@@ -102,6 +102,24 @@ Segundo item da lista aprovada. Implementa o achado F2 (`docs/DECISOES.md`): "ca
 
 **Não implementado nesta fatia:** precificação por orientação/posição na planta (só andar), edição de preço em lote depois de gerado.
 
+## Fase 1 (código) — sétima fatia: fluxo de realizado × projetado (este repositório, concluída)
+
+Terceiro item da lista aprovada. O schema já tinha `RecebimentoProjetado.valorRealizado`/`.status` e `Custo.valorRealizado`/`.status` desde a Fase 0 (sem uso até agora) — esta fatia usa esses campos pela primeira vez.
+
+**Achado arquitetural durante a implementação (não estava previsto, documentado em vez de escondido):** o motor sempre recalcula `RecebimentoProjetado` a cada `GET /fluxo-caixa` (achado F1) apagando e recriando as linhas — o que apagava qualquer `valorRealizado` já registrado, e pior, trocava o `id` da linha a cada recálculo, invalidando qualquer referência que a tela já tivesse guardada (uma ação "marcar como recebido" podia mirar um id que deixara de existir). Corrigido de duas formas complementares:
+- **Schema**: `RecebimentoProjetado` ganhou `@@unique([vendaId, modalidadeId, mesCompetencia])` — chave que o motor já garantia única por construção (`src/core/motorRecebimentos.ts`: nenhuma estratégia de distribuição gera duas parcelas da mesma modalidade, da mesma venda, no mesmo mês).
+- **`src/db/servicoMotor.ts`**: `persistirRecebimentos` deixou de ser delete-all-recreate-all. Agora calcula o diff entre o que existe e o que o motor recém-computou: cria em lote (`createMany`) as parcelas novas, apaga em lote as que deixaram de existir, e só faz `update` linha a linha nas que mudaram de valor previsto — preservando id, `valorRealizado` e `status` de tudo o mais. No caminho comum (nada mudou desde o último cálculo) isso é uma comparação em memória e nenhuma escrita.
+- Um teste de regressão (`tests/integration/api.realizadoXProjetado.test.ts`) prova explicitamente que o id de um recebimento não muda entre dois recálculos consecutivos do fluxo de caixa.
+- **Achado de performance:** a primeira tentativa de correção usava `upsert()` por linha — correto, mas ~1000 round-trips ao SQLite para o cenário do Splendido, estourando o timeout de 30s dos testes. Reescrito para operar em lote sempre que possível (só a comparação é linha-a-linha, não a escrita).
+
+**Implementado:**
+- API — `GET /api/cenarios/:id/recebimentos` (lista as parcelas projetadas com unidade/modalidade/mês/valores), `PATCH /api/recebimentos/:id` (registra valor realizado, status padrão "recebido"), `PATCH /api/custos/:id` (registra valor realizado — só para custos de incidência `fixo`, que têm um mês de competência único; custos percentuais são recalculados pelo motor a cada mês, sem uma linha por mês para marcar). `GET /api/cenarios/:id/fluxo-caixa` passou a devolver `entradasRealizadas`/`saidasRealizadas` por mês (`null` quando nada foi registrado naquele mês, nunca `0` — a ausência de dado é diferente de dado zero).
+- Tela — tabela "Detalhe mês a mês" ganhou colunas "Recebido" e "Pago"; novo painel "Realizado × Projetado" na tela de Fluxo de Caixa, com duas listas (recebimentos e custos fixos) e ação inline "Marcar recebido"/"Marcar pago" por linha, com contador de progresso ("N de M recebidos").
+- 6 novos testes de API, incluindo o teste de estabilidade de id acima, custo percentual rejeitado corretamente, e mês sem realizado devolvendo `null`. Suíte total: 15 arquivos, 65 testes.
+- Verificado num navegador real (claro e escuro): marcou um recebimento e um custo como realizados, conferiu que as colunas da tabela atualizaram com os valores corretos, e — o ponto central da correção — recarregou a página (forçando um recálculo do motor) e confirmou que o dado realizado sobreviveu.
+
+**Não implementado nesta fatia:** registrar realizado para custos percentuais (limitação documentada acima), edição/estorno de um valor já registrado como realizado, importação em lote de extrato bancário.
+
 ## Próxima fase
 
-Terceiro item da lista aprovada: fluxo de realizado × projetado.
+Quarto item da lista aprovada: permuta nominal completa.

@@ -7,7 +7,7 @@ export function FluxoTable({ dados }: { dados: PontoFluxo[] }) {
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            {["Mês", "Entradas", "Saídas", "Acumulado"].map((h, i) => (
+            {["Mês", "Entradas", "Recebido", "Saídas", "Pago", "Acumulado"].map((h, i) => (
               <th
                 key={h}
                 style={{
@@ -35,7 +35,13 @@ export function FluxoTable({ dados }: { dados: PontoFluxo[] }) {
               <tr key={d.mes} className="fluxo-row">
                 <td style={cellStyle("left")}>{d.mes}</td>
                 <td style={cellStyle("right")}>{formatBRL(d.entradas)}</td>
+                <td style={{ ...cellStyle("right"), color: "var(--status-good-text)" }}>
+                  {d.entradasRealizadas !== null ? formatBRL(d.entradasRealizadas) : <span style={{ color: "var(--ink-muted)" }}>—</span>}
+                </td>
                 <td style={cellStyle("right")}>{formatBRL(d.saidas)}</td>
+                <td style={{ ...cellStyle("right"), color: "var(--status-critical-text)" }}>
+                  {d.saidasRealizadas !== null ? formatBRL(d.saidasRealizadas) : <span style={{ color: "var(--ink-muted)" }}>—</span>}
+                </td>
                 <td style={{ ...cellStyle("right"), color: acumulado < 0 ? "var(--status-critical-text)" : "var(--status-good-text)", fontWeight: 600 }}>
                   {formatBRL(d.fluxoAcumulado)}
                 </td>

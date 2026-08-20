@@ -10,6 +10,8 @@ export interface PontoFluxo {
   saidas: string;
   fluxoMensal: string;
   fluxoAcumulado: string;
+  entradasRealizadas: string | null;
+  saidasRealizadas: string | null;
 }
 
 export interface FluxoCaixaResposta {
@@ -96,6 +98,8 @@ export interface CustoResumo {
   percentual: string | null;
   competenciaMes: number | null;
   recorrencia: string;
+  valorRealizado: string | null;
+  status: string;
 }
 
 export interface CenarioDetalhe {
@@ -214,6 +218,30 @@ export function criarCusto(
 
 export function criarCronograma(cenarioId: string, pontos: { mes: number; percentualExecucaoMensal: string }[]) {
   return postJson<{ criados: number }>(`/api/cenarios/${cenarioId}/cronograma`, { pontos });
+}
+
+export interface RecebimentoResumo {
+  id: string;
+  unidadeNumero: string;
+  modalidadeNome: string;
+  mesCompetencia: number;
+  valorPrevisto: string;
+  valorRealizado: string | null;
+  status: string;
+}
+
+export async function fetchRecebimentos(cenarioId: string): Promise<RecebimentoResumo[]> {
+  const res = await fetch(`/api/cenarios/${cenarioId}/recebimentos`);
+  if (!res.ok) throw new Error(`Falha ao carregar recebimentos (${res.status})`);
+  return res.json();
+}
+
+export function registrarRecebimentoRealizado(id: string, input: { valorRealizado: string; status?: "recebido" | "atrasado" }) {
+  return patchJson<RecebimentoResumo>(`/api/recebimentos/${id}`, input);
+}
+
+export function registrarCustoRealizado(id: string, input: { valorRealizado: string }) {
+  return patchJson<CustoResumo>(`/api/custos/${id}`, input);
 }
 
 export function atualizarEmpreendimento(id: string, input: { nome?: string; incorporador?: string | null; endereco?: string | null }) {

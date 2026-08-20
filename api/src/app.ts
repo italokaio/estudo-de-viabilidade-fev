@@ -1,4 +1,5 @@
 import cors from "@fastify/cors";
+import { Decimal } from "decimal.js";
 import Fastify from "fastify";
 import {
   atualizarCenario,
@@ -411,6 +412,8 @@ export async function buildApp() {
         percentual: c.percentual,
         competenciaMes: c.competenciaMes,
         recorrencia: c.recorrencia,
+        valorRealizado: c.valorRealizado,
+        status: c.status,
       })),
       cronograma: cenario.cronograma.map((p) => ({ mes: p.mes, percentualExecucaoMensal: p.percentualExecucaoMensal })),
       totalVendasGeradas: cenario._count.vendas,
@@ -523,6 +526,74 @@ export async function buildApp() {
     },
   );
 
+  app.patch<{ Params: { id: string }; Body: { valorRealizado?: string } }>("/api/custos/:id", async (req, reply) => {
+    const { valorRealizado } = req.body ?? {};
+    if (!valorRealizado || !valorRealizado.trim()) {
+      reply.code(400);
+      return { erro: "Valor realizado é obrigatório" };
+    }
+    const custo = await prisma.custo.findUnique({ where: { id: req.params.id }, include: { categoria: true } });
+    if (!custo) {
+      reply.code(404);
+      return { erro: "Custo não encontrado" };
+    }
+    if (custo.categoria.tipoIncidencia !== "fixo") {
+      reply.code(400);
+      return {
+        erro:
+          "Só é possível registrar valor realizado para custos de incidência fixa (com mês de competência definido) — custos percentuais são recalculados pelo motor a cada mês, sem uma única linha para marcar",
+      };
+    }
+    return prisma.custo.update({ where: { id: req.params.id }, data: { valorRealizado: valorRealizado.trim(), status: "realizado" } });
+  });
+
+  app.get<{ Params: { id: string } }>("/api/cenarios/:id/recebimentos", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    const recebimentos = await prisma.recebimentoProjetado.findMany({
+      where: { venda: { cenarioId: req.params.id } },
+      include: { venda: { include: { unidade: { select: { numero: true } } } }, modalidade: { select: { nome: true } } },
+      orderBy: [{ mesCompetencia: "asc" }],
+    });
+    return recebimentos.map((r) => ({
+      id: r.id,
+      unidadeNumero: r.venda.unidade.numero,
+      modalidadeNome: r.modalidade.nome,
+      mesCompetencia: r.mesCompetencia,
+      valorPrevisto: r.valorPrevisto,
+      valorRealizado: r.valorRealizado,
+      status: r.status,
+    }));
+  });
+
+  app.patch<{ Params: { id: string }; Body: { valorRealizado?: string; status?: string } }>(
+    "/api/recebimentos/:id",
+    async (req, reply) => {
+      const { valorRealizado, status } = req.body ?? {};
+      if (!valorRealizado || !valorRealizado.trim()) {
+        reply.code(400);
+        return { erro: "Valor realizado é obrigatório" };
+      }
+      const tiposValidos = ["recebido", "atrasado"];
+      if (status !== undefined && !tiposValidos.includes(status)) {
+        reply.code(400);
+        return { erro: `Status deve ser um de: ${tiposValidos.join(", ")}` };
+      }
+      const recebimento = await prisma.recebimentoProjetado.findUnique({ where: { id: req.params.id } });
+      if (!recebimento) {
+        reply.code(404);
+        return { erro: "Recebimento não encontrado" };
+      }
+      return prisma.recebimentoProjetado.update({
+        where: { id: req.params.id },
+        data: { valorRealizado: valorRealizado.trim(), status: status ?? "recebido" },
+      });
+    },
+  );
+
   app.post<{ Params: { id: string }; Body: { itens?: { tipologiaId: string; mes: number; unidadesPrevistas: string }[] } }>(
     "/api/cenarios/:id/premissas-velocidade",
     async (req, reply) => {
@@ -579,6 +650,31 @@ export async function buildApp() {
 
     const resultado = await rodarMotorParaCenario(cenarioId, { taxaDescontoMensal: "0.005" });
 
+    // "Realizado" nunca passa pelo motor (que so conhece "previsto") -- e uma
+    // camada de leitura por cima, somando RecebimentoProjetado.valorRealizado
+    // e Custo.valorRealizado (so custos fixos, que tem um mes de competencia
+    // unico; custos percentuais sao recalculados pelo motor a cada mes, sem
+    // uma linha por mes para marcar como realizada).
+    const recebimentosRealizados = await prisma.recebimentoProjetado.findMany({
+      where: { venda: { cenarioId }, status: "recebido" },
+      select: { mesCompetencia: true, valorRealizado: true },
+    });
+    const custosRealizados = await prisma.custo.findMany({
+      where: { cenarioId, status: "realizado", competenciaMes: { not: null } },
+      select: { competenciaMes: true, valorRealizado: true },
+    });
+    const entradasRealizadasPorMes = new Map<number, Decimal>();
+    for (const r of recebimentosRealizados) {
+      const atual = entradasRealizadasPorMes.get(r.mesCompetencia) ?? new Decimal(0);
+      entradasRealizadasPorMes.set(r.mesCompetencia, atual.plus(new Decimal(r.valorRealizado ?? "0")));
+    }
+    const saidasRealizadasPorMes = new Map<number, Decimal>();
+    for (const c of custosRealizados) {
+      const mes = c.competenciaMes as number;
+      const atual = saidasRealizadasPorMes.get(mes) ?? new Decimal(0);
+      saidasRealizadasPorMes.set(mes, atual.plus(new Decimal(c.valorRealizado ?? "0")));
+    }
+
     return {
       empreendimento: cenario.empreendimento.nome,
       cenario: cenario.nome,
@@ -589,6 +685,8 @@ export async function buildApp() {
         saidas: f.saidas.toFixed(2),
         fluxoMensal: f.fluxoMensal.toFixed(2),
         fluxoAcumulado: f.fluxoAcumulado.toFixed(2),
+        entradasRealizadas: entradasRealizadasPorMes.get(f.mes)?.toFixed(2) ?? null,
+        saidasRealizadas: saidasRealizadasPorMes.get(f.mes)?.toFixed(2) ?? null,
       })),
       indicadores: {
         necessidadeMaximaCapital: resultado.indicadores.necessidadeMaximaCapital.toFixed(2),

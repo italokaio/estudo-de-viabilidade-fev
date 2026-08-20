@@ -202,6 +202,11 @@ model RecebimentoProjetado {
   venda      Venda               @relation(fields: [vendaId], references: [id])
   modalidade ModalidadePagamento @relation(fields: [modalidadeId], references: [id])
 
+  // O motor nunca gera duas parcelas da mesma modalidade, da mesma venda, no
+  // mesmo mes (ver src/core/motorRecebimentos.ts) — a chave e usada para
+  // recalcular o previsto por upsert sem trocar o id de uma linha que ja
+  // tem valorRealizado gravado (ver src/db/servicoMotor.ts).
+  @@unique([vendaId, modalidadeId, mesCompetencia])
   @@map("recebimento_projetado")
 }
 

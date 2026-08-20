@@ -70,20 +70,49 @@ export async function rodarMotorParaCenario(
 async function persistirRecebimentos(cenarioId: string, resultado: SaidaMotorFinanceiro) {
   const vendaIds = (await prisma.venda.findMany({ where: { cenarioId }, select: { id: true } })).map((v) => v.id);
 
-  // idempotente: recalcular um cenario sempre substitui os recebimentos anteriores.
-  await prisma.recebimentoProjetado.deleteMany({ where: { vendaId: { in: vendaIds } } });
-
-  if (resultado.recebimentos.length === 0) return;
-
-  await prisma.recebimentoProjetado.createMany({
-    data: resultado.recebimentos.map((r) => ({
-      vendaId: r.vendaId,
-      modalidadeId: r.modalidadeId,
-      mesCompetencia: r.mesCompetencia,
-      valorPrevisto: r.valorPrevisto.toString(),
-      status: "previsto",
-    })),
+  // Recalcular um cenario sempre atualiza o "previsto" -- mas nunca pode
+  // apagar um valorRealizado ja registrado (dado real, nao derivavel pelo
+  // motor), nem trocar o id de uma linha que uma tela ja tem referenciada
+  // (ver achado sobre realizado x projetado, docs/DECISOES.md). Por isso
+  // upsert pela chave (vendaId, modalidadeId, mesCompetencia) -- que o
+  // motor garante unica por venda (src/core/motorRecebimentos.ts) -- em vez
+  // de delete+recreate. Em lote (createMany/deleteMany) sempre que possivel:
+  // um cenario real tem centenas de vendas, e um upsert por linha e lento
+  // demais para rodar a cada carregamento da tela.
+  const existentes = await prisma.recebimentoProjetado.findMany({
+    where: { vendaId: { in: vendaIds } },
+    select: { id: true, vendaId: true, modalidadeId: true, mesCompetencia: true, valorPrevisto: true },
   });
+  const existentePorChave = new Map(existentes.map((e) => [`${e.vendaId}|${e.modalidadeId}|${e.mesCompetencia}`, e]));
+
+  const chavesNovas = new Set(resultado.recebimentos.map((r) => `${r.vendaId}|${r.modalidadeId}|${r.mesCompetencia}`));
+  const idsObsoletos = existentes.filter((e) => !chavesNovas.has(`${e.vendaId}|${e.modalidadeId}|${e.mesCompetencia}`)).map((e) => e.id);
+  if (idsObsoletos.length > 0) {
+    await prisma.recebimentoProjetado.deleteMany({ where: { id: { in: idsObsoletos } } });
+  }
+
+  const aCriar = resultado.recebimentos.filter((r) => !existentePorChave.has(`${r.vendaId}|${r.modalidadeId}|${r.mesCompetencia}`));
+  if (aCriar.length > 0) {
+    await prisma.recebimentoProjetado.createMany({
+      data: aCriar.map((r) => ({
+        vendaId: r.vendaId,
+        modalidadeId: r.modalidadeId,
+        mesCompetencia: r.mesCompetencia,
+        valorPrevisto: r.valorPrevisto.toString(),
+      })),
+    });
+  }
+
+  // so atualiza as linhas cujo previsto realmente mudou (ex.: condicao de
+  // pagamento editada apos a venda) -- no caso comum (nada mudou) isto e zero updates.
+  const aAtualizar = resultado.recebimentos.filter((r) => {
+    const existente = existentePorChave.get(`${r.vendaId}|${r.modalidadeId}|${r.mesCompetencia}`);
+    return existente && existente.valorPrevisto !== r.valorPrevisto.toString();
+  });
+  for (const r of aAtualizar) {
+    const existente = existentePorChave.get(`${r.vendaId}|${r.modalidadeId}|${r.mesCompetencia}`)!;
+    await prisma.recebimentoProjetado.update({ where: { id: existente.id }, data: { valorPrevisto: r.valorPrevisto.toString() } });
+  }
 }
 
 function mapCondicao(condicaoDb: {

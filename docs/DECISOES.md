@@ -22,6 +22,16 @@
 
 **Status.** Aprovado. Não exercitado na Fase 0 porque nenhuma unidade do cenário de teste do Splendido foi marcada como permutada (a simulação usa apenas as unidades efetivamente vendidas via velocidade de vendas — ver limitação abaixo).
 
+## F4 — `RecebimentoProjetado` precisa de identidade estável entre recálculos (achado da Fase 1)
+
+**Contexto.** F1 estabeleceu que o fluxo de caixa é sempre recomputado, e que `rodarMotorParaCenario()` persiste `RecebimentoProjetado` como efeito colateral desse recálculo. Até a sétima fatia da Fase 1, isso era implementado como delete-all-recreate-all a cada chamada.
+
+**Problema encontrado.** Ao implementar "fluxo de realizado × projetado" (registrar `valorRealizado`/`status` numa parcela), o delete-all-recreate-all criava dois problemas: (1) apagava o `valorRealizado` já registrado, porque a linha recriada nunca soube que existia um valor real gravado nela; (2) trocava o `id` da linha a cada recálculo, então uma tela que buscou a lista de recebimentos antes de um recálculo (ex.: ao trocar de cenário, que dispara `GET /fluxo-caixa`) ficava com um id que já não existia mais no banco — a ação "marcar como recebido" falhava com 404 mesmo com o usuário fazendo tudo certo.
+
+**Decisão.** `RecebimentoProjetado` ganhou `@@unique([vendaId, modalidadeId, mesCompetencia])` — chave que o motor já garante única por construção (nenhuma estratégia de distribuição em `src/core/motorRecebimentos.ts` gera duas parcelas da mesma modalidade, da mesma venda, no mesmo mês). `persistirRecebimentos()` (`src/db/servicoMotor.ts`) passou a fazer diff contra o que já existe: cria em lote as parcelas novas, apaga em lote as obsoletas, e só atualiza (preservando id/`valorRealizado`/`status`) as que mudaram de valor previsto. A primeira correção usou `upsert()` por linha, que é correto mas lento demais (estourou timeout de 30s nos testes do Splendido, ~1000 round-trips); a versão final opera em lote sempre que possível.
+
+**Status.** Aprovado e implementado. Testado explicitamente em `tests/integration/api.realizadoXProjetado.test.ts` (o id de um recebimento não muda entre dois recálculos consecutivos).
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |
