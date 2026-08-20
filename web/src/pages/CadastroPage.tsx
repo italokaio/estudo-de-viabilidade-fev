@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import {
+  criarCategoriaCusto,
   criarCenario,
   criarCondicaoPagamento,
+  criarCronograma,
+  criarCusto,
   criarEmpreendimento,
   criarPremissasVelocidade,
   criarTipologia,
@@ -10,11 +13,13 @@ import {
   fetchEmpreendimentoDetalhe,
   fetchEmpreendimentos,
   gerarVendas,
+  type CategoriaCustoResumo,
   type CenarioDetalhe,
   type EmpreendimentoDetalhe,
   type EmpreendimentoResumo,
   type ModalidadeInput,
   type TipoDistribuicao,
+  type TipoIncidenciaCusto,
 } from "../api/client.js";
 import { Button } from "../components/Button.js";
 import { TextField } from "../components/TextField.js";
@@ -222,6 +227,23 @@ function DetalheEmpreendimento({
         <NovaTipologiaForm empreendimentoId={detalhe.id} onCriada={onAtualizado} onErro={onErro} />
       </Painel>
 
+      <Painel titulo="Categorias de custo">
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {detalhe.categoriasCusto.length === 0 && (
+            <div style={{ fontSize: 13, color: "var(--ink-muted)" }}>Nenhuma categoria de custo cadastrada ainda.</div>
+          )}
+          {detalhe.categoriasCusto.map((cc) => (
+            <div key={cc.id} style={{ fontSize: 12.5, color: "var(--ink-secondary)" }}>
+              <span style={{ fontWeight: 700, color: "var(--ink-primary)" }}>{cc.nome}</span>
+              {" — "}
+              {ROTULO_INCIDENCIA[cc.tipoIncidencia]}
+            </div>
+          ))}
+        </div>
+
+        <NovaCategoriaCustoForm empreendimentoId={detalhe.id} onCriada={onAtualizado} onErro={onErro} />
+      </Painel>
+
       <Painel titulo="Cenários">
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {detalhe.cenarios.length === 0 && (
@@ -365,75 +387,327 @@ function CartaoCenario({
           </div>
         </div>
         <Button variant="secondary" onClick={() => setExpandido((v) => !v)} style={{ padding: "6px 10px", fontSize: 12 }}>
-          {expandido ? "Fechar" : "Velocidade de vendas"}
+          {expandido ? "Fechar" : "Detalhes do cenário"}
         </Button>
       </div>
 
       {expandido && detalhe && (
-        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-          {detalhe.tipologiasDisponiveis.length === 0 ? (
-            <div style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>Cadastre uma tipologia antes de definir velocidade de vendas.</div>
-          ) : (
-            <>
-              {detalhe.premissasVelocidade.length > 0 && (
-                <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
-                      <th style={{ fontWeight: 600, paddingBottom: 4 }}>Tipologia</th>
-                      <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
-                      <th style={{ fontWeight: 600, paddingBottom: 4 }}>Unidades</th>
-                    </tr>
-                  </thead>
-                  <tbody style={{ font: "var(--text-mono-body)" }}>
-                    {detalhe.premissasVelocidade.map((p) => (
-                      <tr key={p.id}>
-                        <td style={{ padding: "2px 0" }}>{p.tipologiaNome}</td>
-                        <td>{p.mes}</td>
-                        <td>{p.unidadesPrevistas}</td>
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)", marginBottom: 8 }}>
+              Velocidade de vendas
+            </div>
+            {detalhe.tipologiasDisponiveis.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>Cadastre uma tipologia antes de definir velocidade de vendas.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {detalhe.premissasVelocidade.length > 0 && (
+                  <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
+                        <th style={{ fontWeight: 600, paddingBottom: 4 }}>Tipologia</th>
+                        <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
+                        <th style={{ fontWeight: 600, paddingBottom: 4 }}>Unidades</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-
-              <form onSubmit={adicionarPremissa} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-                <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 150 }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Tipologia</span>
-                  <select
-                    value={tipologiaId}
-                    onChange={(e) => setTipologiaId(e.target.value)}
-                    style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
-                  >
-                    {detalhe.tipologiasDisponiveis.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.nome}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div style={{ width: 80 }}>
-                  <TextField label="Mês" type="number" min={1} value={mes} onChange={(e) => setMes(e.target.value)} required />
-                </div>
-                <div style={{ width: 100 }}>
-                  <TextField label="Unidades" type="number" min={1} value={unidadesPrevistas} onChange={(e) => setUnidadesPrevistas(e.target.value)} required />
-                </div>
-                <Button type="submit" disabled={salvandoPremissa}>
-                  {salvandoPremissa ? "Salvando…" : "Adicionar"}
-                </Button>
-              </form>
-
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, paddingTop: 10, borderTop: "1px solid var(--border-subtle)" }}>
-                <Button onClick={executarGeracaoVendas} disabled={gerando || detalhe.premissasVelocidade.length === 0}>
-                  {gerando ? "Gerando…" : "Gerar vendas"}
-                </Button>
-                {resultadoGeracao && (
-                  <span style={{ fontSize: 12.5, color: "var(--status-good-text)", fontWeight: 600 }}>{resultadoGeracao}</span>
+                    </thead>
+                    <tbody style={{ font: "var(--text-mono-body)" }}>
+                      {detalhe.premissasVelocidade.map((p) => (
+                        <tr key={p.id}>
+                          <td style={{ padding: "2px 0" }}>{p.tipologiaNome}</td>
+                          <td>{p.mes}</td>
+                          <td>{p.unidadesPrevistas}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 )}
+
+                <form onSubmit={adicionarPremissa} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 150 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Tipologia</span>
+                    <select
+                      value={tipologiaId}
+                      onChange={(e) => setTipologiaId(e.target.value)}
+                      style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+                    >
+                      {detalhe.tipologiasDisponiveis.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.nome}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div style={{ width: 80 }}>
+                    <TextField label="Mês" type="number" min={1} value={mes} onChange={(e) => setMes(e.target.value)} required />
+                  </div>
+                  <div style={{ width: 100 }}>
+                    <TextField label="Unidades" type="number" min={1} value={unidadesPrevistas} onChange={(e) => setUnidadesPrevistas(e.target.value)} required />
+                  </div>
+                  <Button type="submit" disabled={salvandoPremissa}>
+                    {salvandoPremissa ? "Salvando…" : "Adicionar"}
+                  </Button>
+                </form>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <Button onClick={executarGeracaoVendas} disabled={gerando || detalhe.premissasVelocidade.length === 0}>
+                    {gerando ? "Gerando…" : "Gerar vendas"}
+                  </Button>
+                  {resultadoGeracao && (
+                    <span style={{ fontSize: 12.5, color: "var(--status-good-text)", fontWeight: 600 }}>{resultadoGeracao}</span>
+                  )}
+                </div>
               </div>
-            </>
-          )}
+            )}
+          </div>
+
+          <div style={{ paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)", marginBottom: 8 }}>
+              Cronograma físico-financeiro
+            </div>
+            <CronogramaSecao cenarioId={cenarioResumo.id} cronograma={detalhe.cronograma} onAtualizado={recarregar} onErro={onErro} />
+          </div>
+
+          <div style={{ paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)", marginBottom: 8 }}>
+              Custos
+            </div>
+            <CustosSecao
+              cenarioId={cenarioResumo.id}
+              custos={detalhe.custos}
+              categoriasDisponiveis={detalhe.categoriasCustoDisponiveis}
+              onAtualizado={recarregar}
+              onErro={onErro}
+            />
+          </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function CronogramaSecao({
+  cenarioId,
+  cronograma,
+  onAtualizado,
+  onErro,
+}: {
+  cenarioId: string;
+  cronograma: CenarioDetalhe["cronograma"];
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [pontos, setPontos] = useState<{ mes: string; percentualExecucaoMensal: string }[]>([{ mes: "1", percentualExecucaoMensal: "" }]);
+  const [salvando, setSalvando] = useState(false);
+
+  const soma = pontos.reduce((acc, p) => acc + (Number(p.percentualExecucaoMensal) || 0), 0);
+  const somaFecha = Math.abs(soma - 1) < 0.001;
+
+  function atualizarPonto(i: number, patch: Partial<{ mes: string; percentualExecucaoMensal: string }>) {
+    setPontos((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  }
+
+  function adicionarLinha() {
+    setPontos((rows) => [...rows, { mes: String(rows.length + 1), percentualExecucaoMensal: "" }]);
+  }
+
+  function removerLinha(i: number) {
+    setPontos((rows) => rows.filter((_, idx) => idx !== i));
+  }
+
+  async function submeter(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await criarCronograma(
+        cenarioId,
+        pontos.map((p) => ({ mes: Number(p.mes), percentualExecucaoMensal: p.percentualExecucaoMensal })),
+      );
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  if (cronograma.length > 0) {
+    return (
+      <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
+            <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
+            <th style={{ fontWeight: 600, paddingBottom: 4 }}>% de execução</th>
+          </tr>
+        </thead>
+        <tbody style={{ font: "var(--text-mono-body)" }}>
+          {cronograma.map((p) => (
+            <tr key={p.mes}>
+              <td style={{ padding: "2px 0" }}>{p.mes}</td>
+              <td>{(Number(p.percentualExecucaoMensal) * 100).toFixed(1)}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+
+  return (
+    <form onSubmit={submeter} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {pontos.map((p, i) => (
+        <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+          <div style={{ width: 80 }}>
+            <TextField label="Mês" type="number" min={1} value={p.mes} onChange={(e) => atualizarPonto(i, { mes: e.target.value })} required />
+          </div>
+          <div style={{ width: 110 }}>
+            <TextField
+              label="% (0–1)"
+              value={p.percentualExecucaoMensal}
+              onChange={(e) => atualizarPonto(i, { percentualExecucaoMensal: e.target.value })}
+              placeholder="0.3"
+              required
+            />
+          </div>
+          {pontos.length > 1 && (
+            <Button type="button" variant="secondary" onClick={() => removerLinha(i)} style={{ padding: "8px 10px", fontSize: 12 }}>
+              Remover
+            </Button>
+          )}
+        </div>
+      ))}
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button type="button" variant="secondary" onClick={adicionarLinha} style={{ padding: "6px 10px", fontSize: 12 }}>
+          + Mês
+        </Button>
+        <span style={{ fontSize: 12, fontWeight: 600, color: somaFecha ? "var(--status-good-text)" : "var(--status-warning-text)" }}>
+          Soma: {(soma * 100).toFixed(1)}% {somaFecha ? "" : "(precisa fechar em 100%)"}
+        </span>
+        <Button type="submit" disabled={salvando || !somaFecha}>
+          {salvando ? "Salvando…" : "Salvar cronograma"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function CustosSecao({
+  cenarioId,
+  custos,
+  categoriasDisponiveis,
+  onAtualizado,
+  onErro,
+}: {
+  cenarioId: string;
+  custos: CenarioDetalhe["custos"];
+  categoriasDisponiveis: CategoriaCustoResumo[];
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [categoriaId, setCategoriaId] = useState(categoriasDisponiveis[0]?.id ?? "");
+  const [valorPrevisto, setValorPrevisto] = useState("");
+  const [percentual, setPercentual] = useState("");
+  const [competenciaMes, setCompetenciaMes] = useState("");
+  const [recorrencia, setRecorrencia] = useState<"unico" | "mensal">("unico");
+  const [salvando, setSalvando] = useState(false);
+
+  const categoriaSelecionada = categoriasDisponiveis.find((c) => c.id === categoriaId);
+  const incidenciaPorValor = categoriaSelecionada?.tipoIncidencia === "fixo" || categoriaSelecionada?.tipoIncidencia === "pct_execucao";
+
+  async function submeter(e: React.FormEvent) {
+    e.preventDefault();
+    if (!categoriaId) return;
+    setSalvando(true);
+    try {
+      await criarCusto(cenarioId, {
+        categoriaId,
+        valorPrevisto: incidenciaPorValor ? valorPrevisto : undefined,
+        percentual: incidenciaPorValor ? undefined : percentual,
+        competenciaMes: categoriaSelecionada?.tipoIncidencia === "fixo" ? Number(competenciaMes) : undefined,
+        recorrencia: categoriaSelecionada?.tipoIncidencia === "fixo" ? recorrencia : undefined,
+      });
+      setValorPrevisto("");
+      setPercentual("");
+      setCompetenciaMes("");
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  if (categoriasDisponiveis.length === 0) {
+    return <div style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>Cadastre uma categoria de custo antes de lançar custos.</div>;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {custos.length > 0 && (
+        <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Categoria</th>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Valor</th>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
+            </tr>
+          </thead>
+          <tbody style={{ font: "var(--text-mono-body)" }}>
+            {custos.map((c) => (
+              <tr key={c.id}>
+                <td style={{ padding: "2px 0" }}>{c.categoriaNome}</td>
+                <td>{c.valorPrevisto ? formatBRL(c.valorPrevisto) : `${(Number(c.percentual) * 100).toFixed(1)}%`}</td>
+                <td>{c.competenciaMes ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <form onSubmit={submeter} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 190 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Categoria</span>
+          <select
+            value={categoriaId}
+            onChange={(e) => setCategoriaId(e.target.value)}
+            style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+          >
+            {categoriasDisponiveis.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nome}
+              </option>
+            ))}
+          </select>
+        </label>
+        {incidenciaPorValor ? (
+          <div style={{ width: 140 }}>
+            <TextField label="Valor previsto" value={valorPrevisto} onChange={(e) => setValorPrevisto(e.target.value)} placeholder="500000" required />
+          </div>
+        ) : (
+          <div style={{ width: 100 }}>
+            <TextField label="% (0–1)" value={percentual} onChange={(e) => setPercentual(e.target.value)} placeholder="0.05" required />
+          </div>
+        )}
+        {categoriaSelecionada?.tipoIncidencia === "fixo" && (
+          <>
+            <div style={{ width: 90 }}>
+              <TextField label="Mês" type="number" min={1} value={competenciaMes} onChange={(e) => setCompetenciaMes(e.target.value)} required />
+            </div>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 130 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Recorrência</span>
+              <select
+                value={recorrencia}
+                onChange={(e) => setRecorrencia(e.target.value as "unico" | "mensal")}
+                style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+              >
+                <option value="unico">Único</option>
+                <option value="mensal">Mensal</option>
+              </select>
+            </label>
+          </>
+        )}
+        <Button type="submit" disabled={salvando}>
+          {salvando ? "Salvando…" : "Adicionar"}
+        </Button>
+      </form>
     </div>
   );
 }
@@ -552,6 +826,66 @@ function CartaoTipologia({
         />
       )}
     </div>
+  );
+}
+
+const ROTULO_INCIDENCIA: Record<TipoIncidenciaCusto, string> = {
+  fixo: "Valor fixo",
+  pct_vgv_vendido_no_mes: "% do vendido no mês",
+  pct_recebido_mes_anterior: "% do recebido no mês anterior",
+  pct_execucao: "% da curva de execução (cronograma)",
+};
+
+function NovaCategoriaCustoForm({
+  empreendimentoId,
+  onCriada,
+  onErro,
+}: {
+  empreendimentoId: string;
+  onCriada: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [nome, setNome] = useState("");
+  const [tipoIncidencia, setTipoIncidencia] = useState<TipoIncidenciaCusto>("fixo");
+  const [salvando, setSalvando] = useState(false);
+
+  async function submeter(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await criarCategoriaCusto(empreendimentoId, { nome, tipoIncidencia });
+      setNome("");
+      onCriada();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submeter} style={{ display: "flex", gap: 8, marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border-subtle)", alignItems: "flex-end", flexWrap: "wrap" }}>
+      <div style={{ flex: 1, minWidth: 140 }}>
+        <TextField label="Nova categoria" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Comissão de vendas" required />
+      </div>
+      <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 240 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Incidência</span>
+        <select
+          value={tipoIncidencia}
+          onChange={(e) => setTipoIncidencia(e.target.value as TipoIncidenciaCusto)}
+          style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+        >
+          {(Object.keys(ROTULO_INCIDENCIA) as TipoIncidenciaCusto[]).map((t) => (
+            <option key={t} value={t}>
+              {ROTULO_INCIDENCIA[t]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <Button type="submit" disabled={salvando || !nome.trim()}>
+        {salvando ? "Salvando…" : "Adicionar"}
+      </Button>
+    </form>
   );
 }
 

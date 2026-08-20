@@ -70,6 +70,14 @@ export interface CenarioResumo {
   horizonteProjecaoMeses: number;
 }
 
+export type TipoIncidenciaCusto = "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao";
+
+export interface CategoriaCustoResumo {
+  id: string;
+  nome: string;
+  tipoIncidencia: TipoIncidenciaCusto;
+}
+
 export interface EmpreendimentoDetalhe {
   id: string;
   nome: string;
@@ -77,6 +85,17 @@ export interface EmpreendimentoDetalhe {
   endereco: string | null;
   cenarios: CenarioResumo[];
   tipologias: TipologiaResumo[];
+  categoriasCusto: CategoriaCustoResumo[];
+}
+
+export interface CustoResumo {
+  id: string;
+  categoriaNome: string;
+  tipoIncidencia: TipoIncidenciaCusto;
+  valorPrevisto: string | null;
+  percentual: string | null;
+  competenciaMes: number | null;
+  recorrencia: string;
 }
 
 export interface CenarioDetalhe {
@@ -86,7 +105,10 @@ export interface CenarioDetalhe {
   horizonteProjecaoMeses: number;
   empreendimento: { id: string; nome: string };
   tipologiasDisponiveis: { id: string; nome: string }[];
+  categoriasCustoDisponiveis: CategoriaCustoResumo[];
   premissasVelocidade: { id: string; tipologiaId: string; tipologiaNome: string; mes: number; unidadesPrevistas: string }[];
+  custos: CustoResumo[];
+  cronograma: { mes: number; percentualExecucaoMensal: string }[];
   totalVendasGeradas: number;
 }
 
@@ -146,4 +168,19 @@ export function criarPremissasVelocidade(
 
 export function gerarVendas(cenarioId: string) {
   return postJson<{ totalVendasCriadas: number }>(`/api/cenarios/${cenarioId}/gerar-vendas`, {});
+}
+
+export function criarCategoriaCusto(empreendimentoId: string, input: { nome: string; tipoIncidencia: TipoIncidenciaCusto }) {
+  return postJson<CategoriaCustoResumo>(`/api/empreendimentos/${empreendimentoId}/categorias-custo`, input);
+}
+
+export function criarCusto(
+  cenarioId: string,
+  input: { categoriaId: string; valorPrevisto?: string; percentual?: string; competenciaMes?: number; recorrencia?: "unico" | "mensal" },
+) {
+  return postJson<CustoResumo>(`/api/cenarios/${cenarioId}/custos`, input);
+}
+
+export function criarCronograma(cenarioId: string, pontos: { mes: number; percentualExecucaoMensal: string }[]) {
+  return postJson<{ criados: number }>(`/api/cenarios/${cenarioId}/cronograma`, { pontos });
 }

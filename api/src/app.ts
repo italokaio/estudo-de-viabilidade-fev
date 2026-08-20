@@ -1,8 +1,11 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import {
+  criarCategoriaCusto,
   criarCenario,
   criarCondicaoPagamento,
+  criarCronograma,
+  criarCusto,
   criarEmpreendimento,
   criarPremissaVelocidade,
   criarTipologia,
@@ -56,6 +59,7 @@ export async function buildApp() {
           orderBy: { createdAt: "asc" },
         },
         cenarios: { orderBy: { createdAt: "asc" } },
+        categoriasCusto: { orderBy: { nome: "asc" } },
       },
     });
     if (!empreendimento) {
@@ -73,6 +77,7 @@ export async function buildApp() {
         tipo: c.tipo,
         horizonteProjecaoMeses: c.horizonteProjecaoMeses,
       })),
+      categoriasCusto: empreendimento.categoriasCusto.map((cc) => ({ id: cc.id, nome: cc.nome, tipoIncidencia: cc.tipoIncidencia })),
       tipologias: empreendimento.tipologias.map((t) => ({
         id: t.id,
         nome: t.nome,
@@ -143,6 +148,34 @@ export async function buildApp() {
       });
       reply.code(201);
       return unidades;
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { nome?: string; tipoIncidencia?: string } }>(
+    "/api/empreendimentos/:id/categorias-custo",
+    async (req, reply) => {
+      const { nome, tipoIncidencia } = req.body ?? {};
+      const tiposValidos = ["fixo", "pct_vgv_vendido_no_mes", "pct_recebido_mes_anterior", "pct_execucao"];
+      if (!nome || !nome.trim()) {
+        reply.code(400);
+        return { erro: "Nome da categoria de custo é obrigatório" };
+      }
+      if (!tipoIncidencia || !tiposValidos.includes(tipoIncidencia)) {
+        reply.code(400);
+        return { erro: `Tipo de incidência deve ser um de: ${tiposValidos.join(", ")}` };
+      }
+      const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
+      if (!empreendimento) {
+        reply.code(404);
+        return { erro: "Empreendimento não encontrado" };
+      }
+      const categoria = await criarCategoriaCusto({
+        empreendimentoId: req.params.id,
+        nome: nome.trim(),
+        tipoIncidencia: tipoIncidencia as "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao",
+      });
+      reply.code(201);
+      return categoria;
     },
   );
 
@@ -217,9 +250,16 @@ export async function buildApp() {
       where: { id: req.params.id },
       include: {
         empreendimento: {
-          select: { id: true, nome: true, tipologias: { select: { id: true, nome: true } } },
+          select: {
+            id: true,
+            nome: true,
+            tipologias: { select: { id: true, nome: true } },
+            categoriasCusto: { select: { id: true, nome: true, tipoIncidencia: true } },
+          },
         },
         premissasVelocidade: { include: { tipologia: { select: { nome: true } } }, orderBy: { mes: "asc" } },
+        custos: { include: { categoria: true }, orderBy: { createdAt: "asc" } },
+        cronograma: { orderBy: { mes: "asc" } },
         _count: { select: { vendas: true } },
       },
     });
@@ -234,6 +274,7 @@ export async function buildApp() {
       horizonteProjecaoMeses: cenario.horizonteProjecaoMeses,
       empreendimento: { id: cenario.empreendimento.id, nome: cenario.empreendimento.nome },
       tipologiasDisponiveis: cenario.empreendimento.tipologias,
+      categoriasCustoDisponiveis: cenario.empreendimento.categoriasCusto,
       premissasVelocidade: cenario.premissasVelocidade.map((p) => ({
         id: p.id,
         tipologiaId: p.tipologiaId,
@@ -241,9 +282,93 @@ export async function buildApp() {
         mes: p.mes,
         unidadesPrevistas: p.unidadesPrevistas,
       })),
+      custos: cenario.custos.map((c) => ({
+        id: c.id,
+        categoriaNome: c.categoria.nome,
+        tipoIncidencia: c.categoria.tipoIncidencia,
+        valorPrevisto: c.valorPrevisto,
+        percentual: c.percentual,
+        competenciaMes: c.competenciaMes,
+        recorrencia: c.recorrencia,
+      })),
+      cronograma: cenario.cronograma.map((p) => ({ mes: p.mes, percentualExecucaoMensal: p.percentualExecucaoMensal })),
       totalVendasGeradas: cenario._count.vendas,
     };
   });
+
+  app.post<{
+    Params: { id: string };
+    Body: { categoriaId?: string; valorPrevisto?: string; percentual?: string; competenciaMes?: number; recorrencia?: string };
+  }>("/api/cenarios/:id/custos", async (req, reply) => {
+    const { categoriaId, valorPrevisto, percentual, competenciaMes, recorrencia } = req.body ?? {};
+    if (!categoriaId) {
+      reply.code(400);
+      return { erro: "Categoria de custo é obrigatória" };
+    }
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    const categoria = await prisma.categoriaCusto.findUnique({ where: { id: categoriaId } });
+    if (!categoria) {
+      reply.code(404);
+      return { erro: "Categoria de custo não encontrada" };
+    }
+    const incidenciaPorValor = categoria.tipoIncidencia === "fixo" || categoria.tipoIncidencia === "pct_execucao";
+    if (incidenciaPorValor && (!valorPrevisto || !valorPrevisto.trim())) {
+      reply.code(400);
+      return { erro: "Valor previsto é obrigatório para esta categoria de custo" };
+    }
+    if (!incidenciaPorValor && (!percentual || !percentual.trim())) {
+      reply.code(400);
+      return { erro: "Percentual é obrigatório para esta categoria de custo" };
+    }
+    if (categoria.tipoIncidencia === "fixo" && (!competenciaMes || competenciaMes < 1)) {
+      reply.code(400);
+      return { erro: "Mês de competência é obrigatório para custo fixo" };
+    }
+    const custo = await criarCusto({
+      empreendimentoId: cenario.empreendimentoId,
+      cenarioId: cenario.id,
+      categoriaId,
+      valorPrevisto: incidenciaPorValor ? valorPrevisto : undefined,
+      percentual: incidenciaPorValor ? undefined : percentual,
+      competenciaMes: categoria.tipoIncidencia === "fixo" ? competenciaMes : undefined,
+      recorrencia: (recorrencia as "unico" | "mensal") ?? "unico",
+    });
+    reply.code(201);
+    return custo;
+  });
+
+  app.post<{ Params: { id: string }; Body: { pontos?: { mes: number; percentualExecucaoMensal: string }[] } }>(
+    "/api/cenarios/:id/cronograma",
+    async (req, reply) => {
+      const { pontos } = req.body ?? {};
+      if (!pontos || pontos.length === 0) {
+        reply.code(400);
+        return { erro: "É preciso ao menos um ponto de cronograma" };
+      }
+      const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+      if (!cenario) {
+        reply.code(404);
+        return { erro: "Cenário não encontrado" };
+      }
+      const existentes = await prisma.cronogramaFisicoFinanceiro.count({ where: { cenarioId: cenario.id } });
+      if (existentes > 0) {
+        reply.code(400);
+        return { erro: "Este cenário já tem um cronograma cadastrado" };
+      }
+      try {
+        await criarCronograma({ empreendimentoId: cenario.empreendimentoId, cenarioId: cenario.id, pontos });
+        reply.code(201);
+        return { criados: pontos.length };
+      } catch (e: any) {
+        reply.code(400);
+        return { erro: String(e.message ?? e) };
+      }
+    },
+  );
 
   app.post<{ Params: { id: string }; Body: { itens?: { tipologiaId: string; mes: number; unidadesPrevistas: string }[] } }>(
     "/api/cenarios/:id/premissas-velocidade",
