@@ -298,6 +298,37 @@ export function desfazerPermuta(unidadeId: string) {
   return del(`/api/unidades/${unidadeId}/permuta`);
 }
 
+export function atualizarCondicaoPagamento(id: string, input: { nome?: string; modalidades?: ModalidadeInput[] }) {
+  return patchJson<CondicaoPagamentoResumo>(`/api/condicoes-pagamento/${id}`, input);
+}
+
+export function excluirCondicaoPagamento(id: string) {
+  return del(`/api/condicoes-pagamento/${id}`);
+}
+
+export function atualizarCategoriaCusto(id: string, input: { nome?: string; tipoIncidencia?: TipoIncidenciaCusto }) {
+  return patchJson<CategoriaCustoResumo>(`/api/categorias-custo/${id}`, input);
+}
+
+export function excluirCategoriaCusto(id: string) {
+  return del(`/api/categorias-custo/${id}`);
+}
+
+export function atualizarCusto(
+  id: string,
+  input: { valorPrevisto?: string | null; percentual?: string | null; competenciaMes?: number | null; recorrencia?: "unico" | "mensal" },
+) {
+  return patchJson<CustoResumo>(`/api/custos/${id}`, input);
+}
+
+export function excluirCusto(id: string) {
+  return del(`/api/custos/${id}`);
+}
+
+export function excluirCronograma(cenarioId: string) {
+  return del(`/api/cenarios/${cenarioId}/cronograma`);
+}
+
 export type Papel = "admin" | "usuario";
 
 export interface Usuario {

@@ -155,6 +155,27 @@ Quinto e último item da lista de "próxima fase" aprovada em bloco. Até aqui a
 
 **Não implementado nesta fatia:** recuperação de senha, expiração/renovação automática de sessão na interface (uma sessão expirada só é percebida no próximo request, mostrado como erro genérico na tela em vez de redirecionar para o login), permissão por empreendimento, edição de usuário (só criar/excluir), 2FA.
 
+## Fase 1 (código) — décima fatia: edição/exclusão completa (este repositório, concluída)
+
+Fecha a lacuna deixada na quinta fatia: agora condição de pagamento, categoria de custo, custo e cronograma também podem ser editados/excluídos pela interface — as quatro entidades que faltavam depois de empreendimento/tipologia/cenário.
+
+**Regras de bloqueio, por entidade (nunca apagar/alterar dado que outra tabela referencia):**
+- **Condição de pagamento** — editar as modalidades ou excluir é bloqueado se alguma `Venda` já usa a condição (trocaria o `id` de uma `ModalidadePagamento` que `RecebimentoProjetado` já referencia). O nome pode ser editado mesmo em uso.
+- **Categoria de custo** — trocar o tipo de incidência é bloqueado se algum `Custo` já usa a categoria (os campos que um `Custo` preenche dependem do tipo). O nome pode ser editado mesmo em uso.
+- **Custo** — não tem nada que dependa dele; editar e excluir são diretos.
+- **Cronograma** — sem edição ponto a ponto (quebraria a soma=100%, regra R6, sem uma tela de diffing completa); a forma de "editar" é excluir o cronograma inteiro e recriar — o formulário de criação já reaparece assim que a tabela fica vazia. Sem bloqueio: nenhuma linha depende de `CronogramaFisicoFinanceiro` por FK.
+
+**Achado durante a verificação em navegador — um bug real, não um problema do script de teste desta vez:** a tela sempre envia `tipoIncidencia` junto com `nome` ao salvar a edição de uma categoria de custo (mesmo quando só o nome mudou), e a rota `PATCH /api/categorias-custo/:id` bloqueava qualquer requisição que carregasse `tipoIncidencia` assim que a categoria tivesse um custo — mesmo quando o valor enviado era **idêntico** ao já salvo. Na prática, renomear uma categoria já em uso ficava impossível pela tela. Corrigido em `atualizarCategoriaCusto` (`src/db/cadastro.ts`): o bloqueio agora só dispara quando o valor de `tipoIncidencia` realmente muda em relação ao que está salvo. Adicionado um teste de regressão específico para este caso (renomear com o mesmo `tipoIncidencia` reenviado).
+
+**Implementado:**
+- `src/db/cadastro.ts` — `atualizarCondicaoPagamento`/`excluirCondicaoPagamento`, `atualizarCategoriaCusto`/`excluirCategoriaCusto`, `atualizarCusto`/`excluirCusto`, `excluirCronograma`.
+- API — `PATCH`/`DELETE /api/condicoes-pagamento/:id`, `PATCH`/`DELETE /api/categorias-custo/:id`, `DELETE /api/custos/:id`, `DELETE /api/cenarios/:id/cronograma`. A rota `PATCH /api/custos/:id` já existia (para registrar valor realizado, sétima fatia) e passou a despachar duas ações pela presença de `valorRealizado` no corpo — sem quebrar o comportamento anterior.
+- Web — condição de pagamento, categoria de custo e cada linha de custo ganharam "Editar"/"Excluir" inline; cronograma já criado ganhou um botão "Excluir cronograma".
+- 9 novos testes de API (`tests/integration/api.edicaoEExclusao2.test.ts`), incluindo o caso de regressão acima, os bloqueios de cada entidade, e a prova de que usuário comum recebe 403 ao tentar excluir qualquer uma delas. Suíte total: 18 arquivos, 89 testes.
+- Verificado num navegador real: editou nome de condição de pagamento e de categoria de custo (esta última já em uso, o caso que expôs o bug acima), editou valor e mês de um custo, excluiu o custo, excluiu o cronograma inteiro e confirmou que o formulário de criação reaparece.
+
+**Não implementado nesta fatia:** edição de modalidades de uma condição de pagamento pela tela (só o nome — editar modalidades continua possível via API, mas a tela não expõe periodicidade/mês fixo no formato que a API de leitura devolve), edição ponto a ponto de cronograma.
+
 ## Próxima fase
 
-Os cinco itens da lista aprovada em bloco estão concluídos. Aguardando direção do usuário sobre o que vem a seguir.
+Os cinco itens da lista aprovada em bloco, mais esta décima fatia de edição/exclusão completa, estão concluídos. Aguardando direção do usuário sobre o que vem a seguir.

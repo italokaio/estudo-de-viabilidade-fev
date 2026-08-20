@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import {
+  atualizarCategoriaCusto,
   atualizarCenario,
+  atualizarCondicaoPagamento,
+  atualizarCusto,
   atualizarEmpreendimento,
   atualizarTipologia,
   criarCategoriaCusto,
@@ -14,7 +17,11 @@ import {
   criarUnidadesEmLote,
   criarUnidadesPorAndar,
   desfazerPermuta,
+  excluirCategoriaCusto,
   excluirCenario,
+  excluirCondicaoPagamento,
+  excluirCronograma,
+  excluirCusto,
   excluirEmpreendimento,
   excluirTipologia,
   fetchCenarioDetalhe,
@@ -250,11 +257,7 @@ function DetalheEmpreendimento({
             <div style={{ fontSize: 13, color: "var(--ink-muted)" }}>Nenhuma categoria de custo cadastrada ainda.</div>
           )}
           {detalhe.categoriasCusto.map((cc) => (
-            <div key={cc.id} style={{ fontSize: 12.5, color: "var(--ink-secondary)" }}>
-              <span style={{ fontWeight: 700, color: "var(--ink-primary)" }}>{cc.nome}</span>
-              {" — "}
-              {ROTULO_INCIDENCIA[cc.tipoIncidencia]}
-            </div>
+            <LinhaCategoriaCusto key={cc.id} categoria={cc} onAtualizado={onAtualizado} onErro={onErro} />
           ))}
         </div>
 
@@ -661,9 +664,23 @@ function CronogramaSecao({
 }) {
   const [pontos, setPontos] = useState<{ mes: string; percentualExecucaoMensal: string }[]>([{ mes: "1", percentualExecucaoMensal: "" }]);
   const [salvando, setSalvando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
 
   const soma = pontos.reduce((acc, p) => acc + (Number(p.percentualExecucaoMensal) || 0), 0);
   const somaFecha = Math.abs(soma - 1) < 0.001;
+
+  async function excluir() {
+    if (!window.confirm("Excluir o cronograma inteiro deste cenário? Você poderá cadastrar um novo em seguida.")) return;
+    setExcluindo(true);
+    try {
+      await excluirCronograma(cenarioId);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setExcluindo(false);
+    }
+  }
 
   function atualizarPonto(i: number, patch: Partial<{ mes: string; percentualExecucaoMensal: string }>) {
     setPontos((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -695,22 +712,29 @@ function CronogramaSecao({
 
   if (cronograma.length > 0) {
     return (
-      <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
-        <thead>
-          <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
-            <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
-            <th style={{ fontWeight: 600, paddingBottom: 4 }}>% de execução</th>
-          </tr>
-        </thead>
-        <tbody style={{ font: "var(--text-mono-body)" }}>
-          {cronograma.map((p) => (
-            <tr key={p.mes}>
-              <td style={{ padding: "2px 0" }}>{p.mes}</td>
-              <td>{(Number(p.percentualExecucaoMensal) * 100).toFixed(1)}%</td>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>% de execução</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody style={{ font: "var(--text-mono-body)" }}>
+            {cronograma.map((p) => (
+              <tr key={p.mes}>
+                <td style={{ padding: "2px 0" }}>{p.mes}</td>
+                <td>{(Number(p.percentualExecucaoMensal) * 100).toFixed(1)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div>
+          <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+            {excluindo ? "Excluindo…" : "Excluir cronograma"}
+          </Button>
+        </div>
+      </div>
     );
   }
 
@@ -811,15 +835,12 @@ function CustosSecao({
               <th style={{ fontWeight: 600, paddingBottom: 4 }}>Categoria</th>
               <th style={{ fontWeight: 600, paddingBottom: 4 }}>Valor</th>
               <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
+              <th></th>
             </tr>
           </thead>
           <tbody style={{ font: "var(--text-mono-body)" }}>
             {custos.map((c) => (
-              <tr key={c.id}>
-                <td style={{ padding: "2px 0" }}>{c.categoriaNome}</td>
-                <td>{c.valorPrevisto ? formatBRL(c.valorPrevisto) : `${(Number(c.percentual) * 100).toFixed(1)}%`}</td>
-                <td>{c.competenciaMes ?? "—"}</td>
-              </tr>
+              <LinhaCusto key={c.id} custo={c} onAtualizado={onAtualizado} onErro={onErro} />
             ))}
           </tbody>
         </table>
@@ -872,6 +893,118 @@ function CustosSecao({
         </Button>
       </form>
     </div>
+  );
+}
+
+function LinhaCusto({
+  custo,
+  onAtualizado,
+  onErro,
+}: {
+  custo: CenarioDetalhe["custos"][number];
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [valorPrevisto, setValorPrevisto] = useState(custo.valorPrevisto ?? "");
+  const [percentual, setPercentual] = useState(custo.percentual ?? "");
+  const [competenciaMes, setCompetenciaMes] = useState(custo.competenciaMes?.toString() ?? "");
+  const [recorrencia, setRecorrencia] = useState<"unico" | "mensal">((custo.recorrencia as "unico" | "mensal") ?? "unico");
+  const [salvando, setSalvando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+
+  const incidenciaPorValor = custo.tipoIncidencia === "fixo" || custo.tipoIncidencia === "pct_execucao";
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await atualizarCusto(custo.id, {
+        valorPrevisto: incidenciaPorValor ? valorPrevisto : undefined,
+        percentual: incidenciaPorValor ? undefined : percentual,
+        competenciaMes: custo.tipoIncidencia === "fixo" ? Number(competenciaMes) : undefined,
+        recorrencia: custo.tipoIncidencia === "fixo" ? recorrencia : undefined,
+      });
+      setEditando(false);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function excluir() {
+    if (!window.confirm(`Excluir o custo "${custo.categoriaNome}"?`)) return;
+    setExcluindo(true);
+    try {
+      await excluirCusto(custo.id);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setExcluindo(false);
+    }
+  }
+
+  if (editando) {
+    return (
+      <tr>
+        <td colSpan={4} style={{ padding: "6px 0" }}>
+          <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", font: "var(--text-body)" }}>
+            {incidenciaPorValor ? (
+              <div style={{ width: 130 }}>
+                <TextField label="Valor previsto" value={valorPrevisto} onChange={(e) => setValorPrevisto(e.target.value)} required />
+              </div>
+            ) : (
+              <div style={{ width: 90 }}>
+                <TextField label="% (0–1)" value={percentual} onChange={(e) => setPercentual(e.target.value)} required />
+              </div>
+            )}
+            {custo.tipoIncidencia === "fixo" && (
+              <>
+                <div style={{ width: 80 }}>
+                  <TextField label="Mês" type="number" min={1} value={competenciaMes} onChange={(e) => setCompetenciaMes(e.target.value)} required />
+                </div>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 110 }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Recorrência</span>
+                  <select
+                    value={recorrencia}
+                    onChange={(e) => setRecorrencia(e.target.value as "unico" | "mensal")}
+                    style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+                  >
+                    <option value="unico">Único</option>
+                    <option value="mensal">Mensal</option>
+                  </select>
+                </label>
+              </>
+            )}
+            <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
+              {salvando ? "Salvando…" : "Salvar"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
+              Cancelar
+            </Button>
+          </form>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr>
+      <td style={{ padding: "2px 0" }}>{custo.categoriaNome}</td>
+      <td>{custo.valorPrevisto ? formatBRL(custo.valorPrevisto) : `${(Number(custo.percentual) * 100).toFixed(1)}%`}</td>
+      <td>{custo.competenciaMes ?? "—"}</td>
+      <td style={{ textAlign: "right" }}>
+        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
+          Editar
+        </Button>{" "}
+        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+          {excluindo ? "…" : "Excluir"}
+        </Button>
+      </td>
+    </tr>
   );
 }
 
@@ -1021,11 +1154,7 @@ function CartaoTipologia({
       {tipologia.condicoesPagamento.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
           {tipologia.condicoesPagamento.map((cp) => (
-            <div key={cp.id} style={{ fontSize: 12, color: "var(--ink-secondary)" }}>
-              <span style={{ fontWeight: 700, color: "var(--ink-primary)" }}>{cp.nome}</span>
-              {" — "}
-              {cp.modalidades.map((m) => `${m.nome} ${(Number(m.percentual) * 100).toFixed(0)}%`).join(", ")}
-            </div>
+            <LinhaCondicaoPagamento key={cp.id} condicao={cp} onAtualizado={onAtualizado} onErro={onErro} />
           ))}
         </div>
       )}
@@ -1382,6 +1511,97 @@ const ROTULO_INCIDENCIA: Record<TipoIncidenciaCusto, string> = {
   pct_execucao: "% da curva de execução (cronograma)",
 };
 
+function LinhaCategoriaCusto({
+  categoria,
+  onAtualizado,
+  onErro,
+}: {
+  categoria: CategoriaCustoResumo;
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [nome, setNome] = useState(categoria.nome);
+  const [tipoIncidencia, setTipoIncidencia] = useState<TipoIncidenciaCusto>(categoria.tipoIncidencia);
+  const [salvando, setSalvando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await atualizarCategoriaCusto(categoria.id, { nome, tipoIncidencia });
+      setEditando(false);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function excluir() {
+    if (!window.confirm(`Excluir a categoria "${categoria.nome}"?`)) return;
+    setExcluindo(true);
+    try {
+      await excluirCategoriaCusto(categoria.id);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setExcluindo(false);
+    }
+  }
+
+  if (editando) {
+    return (
+      <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 140 }}>
+          <TextField label="Nome" value={nome} onChange={(e) => setNome(e.target.value)} required />
+        </div>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 220 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Incidência</span>
+          <select
+            value={tipoIncidencia}
+            onChange={(e) => setTipoIncidencia(e.target.value as TipoIncidenciaCusto)}
+            style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+          >
+            {(Object.keys(ROTULO_INCIDENCIA) as TipoIncidenciaCusto[]).map((t) => (
+              <option key={t} value={t}>
+                {ROTULO_INCIDENCIA[t]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button type="submit" disabled={salvando || !nome.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
+          {salvando ? "Salvando…" : "Salvar"}
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
+          Cancelar
+        </Button>
+      </form>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12.5, color: "var(--ink-secondary)" }}>
+      <span>
+        <span style={{ fontWeight: 700, color: "var(--ink-primary)" }}>{categoria.nome}</span>
+        {" — "}
+        {ROTULO_INCIDENCIA[categoria.tipoIncidencia]}
+      </span>
+      <div style={{ display: "flex", gap: 6 }}>
+        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
+          Editar
+        </Button>
+        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+          {excluindo ? "…" : "Excluir"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function NovaCategoriaCustoForm({
   empreendimentoId,
   onCriada,
@@ -1441,6 +1661,82 @@ const TIPOS_DISTRIBUICAO: { valor: TipoDistribuicao; rotulo: string }[] = [
   { valor: "periodica", rotulo: "Periódica" },
   { valor: "mes_fixo", rotulo: "Mês fixo" },
 ];
+
+function LinhaCondicaoPagamento({
+  condicao,
+  onAtualizado,
+  onErro,
+}: {
+  condicao: EmpreendimentoDetalhe["tipologias"][number]["condicoesPagamento"][number];
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [nome, setNome] = useState(condicao.nome);
+  const [salvando, setSalvando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await atualizarCondicaoPagamento(condicao.id, { nome });
+      setEditando(false);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function excluir() {
+    if (!window.confirm(`Excluir a condição de pagamento "${condicao.nome}"?`)) return;
+    setExcluindo(true);
+    try {
+      await excluirCondicaoPagamento(condicao.id);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setExcluindo(false);
+    }
+  }
+
+  if (editando) {
+    return (
+      <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <div style={{ width: 200 }}>
+          <TextField label="Nome" value={nome} onChange={(e) => setNome(e.target.value)} required />
+        </div>
+        <Button type="submit" disabled={salvando || !nome.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
+          {salvando ? "Salvando…" : "Salvar"}
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
+          Cancelar
+        </Button>
+      </form>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "var(--ink-secondary)" }}>
+      <span>
+        <span style={{ fontWeight: 700, color: "var(--ink-primary)" }}>{condicao.nome}</span>
+        {" — "}
+        {condicao.modalidades.map((m) => `${m.nome} ${(Number(m.percentual) * 100).toFixed(0)}%`).join(", ")}
+      </span>
+      <div style={{ display: "flex", gap: 6 }}>
+        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
+          Editar nome
+        </Button>
+        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+          {excluindo ? "…" : "Excluir"}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function CondicaoPagamentoForm({
   tipologiaId,

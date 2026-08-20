@@ -3,7 +3,10 @@ import cors from "@fastify/cors";
 import { Decimal } from "decimal.js";
 import Fastify from "fastify";
 import {
+  atualizarCategoriaCusto,
   atualizarCenario,
+  atualizarCondicaoPagamento,
+  atualizarCusto,
   atualizarEmpreendimento,
   atualizarTipologia,
   criarCategoriaCusto,
@@ -17,7 +20,11 @@ import {
   criarUnidadesEmLote,
   criarUnidadesPorAndar,
   desfazerPermuta,
+  excluirCategoriaCusto,
   excluirCenario,
+  excluirCondicaoPagamento,
+  excluirCronograma,
+  excluirCusto,
   excluirEmpreendimento,
   excluirTipologia,
   registrarPermuta,
@@ -478,6 +485,55 @@ export async function buildApp() {
     },
   );
 
+  app.patch<{ Params: { id: string }; Body: { nome?: string; tipoIncidencia?: string } }>(
+    "/api/categorias-custo/:id",
+    async (req, reply) => {
+      const { nome, tipoIncidencia } = req.body ?? {};
+      const tiposValidos = ["fixo", "pct_vgv_vendido_no_mes", "pct_recebido_mes_anterior", "pct_execucao"];
+      if (nome !== undefined && !nome.trim()) {
+        reply.code(400);
+        return { erro: "Nome da categoria de custo não pode ficar vazio" };
+      }
+      if (tipoIncidencia !== undefined && !tiposValidos.includes(tipoIncidencia)) {
+        reply.code(400);
+        return { erro: `Tipo de incidência deve ser um de: ${tiposValidos.join(", ")}` };
+      }
+      const categoria = await prisma.categoriaCusto.findUnique({ where: { id: req.params.id } });
+      if (!categoria) {
+        reply.code(404);
+        return { erro: "Categoria de custo não encontrada" };
+      }
+      const resultado = await atualizarCategoriaCusto(req.params.id, {
+        nome: nome?.trim(),
+        tipoIncidencia: tipoIncidencia as "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao" | undefined,
+      });
+      if ("erro" in resultado) {
+        reply.code(400);
+        return { erro: resultado.erro };
+      }
+      return resultado.categoria;
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>("/api/categorias-custo/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const categoria = await prisma.categoriaCusto.findUnique({ where: { id: req.params.id } });
+    if (!categoria) {
+      reply.code(404);
+      return { erro: "Categoria de custo não encontrada" };
+    }
+    const erro = await excluirCategoriaCusto(req.params.id);
+    if (erro) {
+      reply.code(400);
+      return { erro };
+    }
+    reply.code(204);
+    return null;
+  });
+
   app.post<{ Params: { id: string }; Body: { tipo?: string; nome?: string; horizonteProjecaoMeses?: number } }>(
     "/api/empreendimentos/:id/cenarios",
     async (req, reply) => {
@@ -543,6 +599,51 @@ export async function buildApp() {
       }
     },
   );
+
+  app.patch<{ Params: { id: string }; Body: { nome?: string; modalidades?: ModalidadeInput[] } }>(
+    "/api/condicoes-pagamento/:id",
+    async (req, reply) => {
+      const { nome, modalidades } = req.body ?? {};
+      if (nome !== undefined && !nome.trim()) {
+        reply.code(400);
+        return { erro: "Nome da condição de pagamento não pode ficar vazio" };
+      }
+      if (modalidades !== undefined && modalidades.length === 0) {
+        reply.code(400);
+        return { erro: "É preciso ao menos uma modalidade de pagamento" };
+      }
+      const condicao = await prisma.condicaoPagamento.findUnique({ where: { id: req.params.id } });
+      if (!condicao) {
+        reply.code(404);
+        return { erro: "Condição de pagamento não encontrada" };
+      }
+      const resultado = await atualizarCondicaoPagamento(req.params.id, { nome: nome?.trim(), modalidades });
+      if ("erro" in resultado) {
+        reply.code(400);
+        return { erro: resultado.erro };
+      }
+      return resultado.condicao;
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>("/api/condicoes-pagamento/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const condicao = await prisma.condicaoPagamento.findUnique({ where: { id: req.params.id } });
+    if (!condicao) {
+      reply.code(404);
+      return { erro: "Condição de pagamento não encontrada" };
+    }
+    const erro = await excluirCondicaoPagamento(req.params.id);
+    if (erro) {
+      reply.code(400);
+      return { erro };
+    }
+    reply.code(204);
+    return null;
+  });
 
   app.get<{ Params: { id: string } }>("/api/cenarios/:id", async (req, reply) => {
     const cenario = await prisma.cenario.findUnique({
@@ -678,6 +779,36 @@ export async function buildApp() {
     return custo;
   });
 
+  app.delete<{ Params: { id: string } }>("/api/custos/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const custo = await prisma.custo.findUnique({ where: { id: req.params.id } });
+    if (!custo) {
+      reply.code(404);
+      return { erro: "Custo não encontrado" };
+    }
+    await excluirCusto(req.params.id);
+    reply.code(204);
+    return null;
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/cenarios/:id/cronograma", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    await excluirCronograma(req.params.id);
+    reply.code(204);
+    return null;
+  });
+
   app.post<{ Params: { id: string }; Body: { pontos?: { mes: number; percentualExecucaoMensal: string }[] } }>(
     "/api/cenarios/:id/cronograma",
     async (req, reply) => {
@@ -707,25 +838,37 @@ export async function buildApp() {
     },
   );
 
-  app.patch<{ Params: { id: string }; Body: { valorRealizado?: string } }>("/api/custos/:id", async (req, reply) => {
-    const { valorRealizado } = req.body ?? {};
-    if (!valorRealizado || !valorRealizado.trim()) {
-      reply.code(400);
-      return { erro: "Valor realizado é obrigatório" };
-    }
+  // Uma unica rota PATCH cobre duas acoes distintas, despachadas pela
+  // presenca de valorRealizado no corpo: registrar o realizado (Fase 1,
+  // fluxo de realizado x projetado) ou editar os campos previstos
+  // (competenciaMes, valorPrevisto, percentual, recorrencia).
+  app.patch<{
+    Params: { id: string };
+    Body: { valorRealizado?: string; valorPrevisto?: string | null; percentual?: string | null; competenciaMes?: number | null; recorrencia?: "unico" | "mensal" };
+  }>("/api/custos/:id", async (req, reply) => {
+    const { valorRealizado, valorPrevisto, percentual, competenciaMes, recorrencia } = req.body ?? {};
     const custo = await prisma.custo.findUnique({ where: { id: req.params.id }, include: { categoria: true } });
     if (!custo) {
       reply.code(404);
       return { erro: "Custo não encontrado" };
     }
-    if (custo.categoria.tipoIncidencia !== "fixo") {
-      reply.code(400);
-      return {
-        erro:
-          "Só é possível registrar valor realizado para custos de incidência fixa (com mês de competência definido) — custos percentuais são recalculados pelo motor a cada mês, sem uma única linha para marcar",
-      };
+
+    if (valorRealizado !== undefined) {
+      if (!valorRealizado.trim()) {
+        reply.code(400);
+        return { erro: "Valor realizado é obrigatório" };
+      }
+      if (custo.categoria.tipoIncidencia !== "fixo") {
+        reply.code(400);
+        return {
+          erro:
+            "Só é possível registrar valor realizado para custos de incidência fixa (com mês de competência definido) — custos percentuais são recalculados pelo motor a cada mês, sem uma única linha para marcar",
+        };
+      }
+      return prisma.custo.update({ where: { id: req.params.id }, data: { valorRealizado: valorRealizado.trim(), status: "realizado" } });
     }
-    return prisma.custo.update({ where: { id: req.params.id }, data: { valorRealizado: valorRealizado.trim(), status: "realizado" } });
+
+    return atualizarCusto(req.params.id, { valorPrevisto, percentual, competenciaMes, recorrencia });
   });
 
   app.get<{ Params: { id: string } }>("/api/cenarios/:id/recebimentos", async (req, reply) => {

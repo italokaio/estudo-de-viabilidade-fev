@@ -348,6 +348,77 @@ export async function criarCondicaoPagamento(input: CriarCondicaoPagamentoInput)
   });
 }
 
+export interface AtualizarCondicaoPagamentoInput {
+  nome?: string;
+  modalidades?: ModalidadeInput[];
+}
+
+/**
+ * Atualiza uma condicao de pagamento — bloqueada se alguma Venda ja a usa
+ * (mesma logica de excluirCondicaoPagamento: trocar as modalidades depois
+ * que ja existem RecebimentoProjetado gerados a partir delas deixaria
+ * recebimentos orfaos ou com um id de modalidade que deixou de existir).
+ * Sem `modalidades` no input, atualiza so o nome.
+ */
+export async function atualizarCondicaoPagamento(id: string, input: AtualizarCondicaoPagamentoInput): Promise<{ erro: string } | { condicao: Awaited<ReturnType<typeof prisma.condicaoPagamento.update>> }> {
+  const emUso = await prisma.venda.count({ where: { condicaoPagamentoId: id } });
+  if (emUso > 0 && input.modalidades) {
+    return { erro: `Esta condição de pagamento já foi usada em ${emUso} venda(s) — não é possível alterar as modalidades sem antes excluir o cenário que gerou essas vendas.` };
+  }
+
+  if (input.modalidades) {
+    const condicaoAtual = await prisma.condicaoPagamento.findUnique({ where: { id } });
+    if (!condicaoAtual) return { erro: "Condição de pagamento não encontrada" };
+    const condicaoParaValidar: CondicaoPagamentoCore = {
+      id: "pre-atualizacao",
+      nome: input.nome ?? condicaoAtual.nome,
+      modalidades: input.modalidades.map((m, i) => ({
+        id: `pre-${i}`,
+        nome: m.nome,
+        percentual: new Decimal(m.percentual),
+        tipoDistribuicao: m.tipoDistribuicao,
+        periodicidadeMeses: m.periodicidadeMeses,
+        mesFixo: m.mesFixo,
+        repeticoesSobreTotal: m.repeticoesSobreTotal ?? 1,
+        geraEventoParcial: m.geraEventoParcial ?? false,
+        ordem: m.ordem ?? i,
+      })),
+    };
+    const validacao = validarCondicaoPagamento(condicaoParaValidar);
+    if (!validacao.valida) {
+      return { erro: `Condição de pagamento inválida: ${validacao.erros.join("; ")}` };
+    }
+    await prisma.modalidadePagamento.deleteMany({ where: { condicaoPagamentoId: id } });
+    await prisma.modalidadePagamento.createMany({
+      data: input.modalidades.map((m, i) => ({
+        condicaoPagamentoId: id,
+        nome: m.nome,
+        percentual: m.percentual,
+        tipoDistribuicao: m.tipoDistribuicao,
+        periodicidadeMeses: m.periodicidadeMeses,
+        mesFixo: m.mesFixo,
+        repeticoesSobreTotal: m.repeticoesSobreTotal ?? 1,
+        geraEventoParcial: m.geraEventoParcial ?? false,
+        ordem: m.ordem ?? i,
+      })),
+    });
+  }
+
+  const condicao = await prisma.condicaoPagamento.update({ where: { id }, data: { nome: input.nome } });
+  return { condicao };
+}
+
+/** Apaga uma condicao de pagamento — bloqueada se alguma Venda ja a usa. */
+export async function excluirCondicaoPagamento(id: string): Promise<string | null> {
+  const emUso = await prisma.venda.count({ where: { condicaoPagamentoId: id } });
+  if (emUso > 0) {
+    return `Esta condição de pagamento já foi usada em ${emUso} venda(s) — não é possível excluí-la sem antes excluir o cenário que gerou essas vendas.`;
+  }
+  await prisma.modalidadePagamento.deleteMany({ where: { condicaoPagamentoId: id } });
+  await prisma.condicaoPagamento.delete({ where: { id } });
+  return null;
+}
+
 export interface CriarPremissaVelocidadeInput {
   empreendimentoId: string;
   cenarioId: string;
@@ -370,6 +441,47 @@ export async function criarCategoriaCusto(input: CriarCategoriaCustoInput) {
   return prisma.categoriaCusto.create({ data: input });
 }
 
+export interface AtualizarCategoriaCustoInput {
+  nome?: string;
+  tipoIncidencia?: "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao";
+}
+
+/**
+ * Atualiza uma categoria de custo. Trocar o tipo de incidencia e bloqueado
+ * se algum Custo ja usa esta categoria — os campos preenchidos num Custo
+ * dependem do tipo (fixo pede valorPrevisto+competenciaMes, percentual
+ * pede so percentual — ver /api/cenarios/:id/custos), trocar o tipo por
+ * baixo quebraria essa suposicao sem re-cadastrar os custos existentes.
+ * O nome pode ser alterado livremente, mesmo em uso.
+ */
+export async function atualizarCategoriaCusto(id: string, input: AtualizarCategoriaCustoInput): Promise<{ erro: string } | { categoria: Awaited<ReturnType<typeof prisma.categoriaCusto.update>> }> {
+  if (input.tipoIncidencia) {
+    const categoriaAtual = await prisma.categoriaCusto.findUnique({ where: { id } });
+    if (!categoriaAtual) return { erro: "Categoria de custo não encontrada" };
+    // so bloqueia se o tipo esta REALMENTE mudando — reenviar o mesmo valor
+    // (ex.: um formulario que sempre manda tipoIncidencia junto do nome)
+    // nao pode impedir renomear uma categoria ja em uso.
+    if (input.tipoIncidencia !== categoriaAtual.tipoIncidencia) {
+      const emUso = await prisma.custo.count({ where: { categoriaId: id } });
+      if (emUso > 0) {
+        return { erro: `Esta categoria já tem ${emUso} custo(s) cadastrado(s) — não é possível trocar o tipo de incidência sem antes excluir esses custos.` };
+      }
+    }
+  }
+  const categoria = await prisma.categoriaCusto.update({ where: { id }, data: input });
+  return { categoria };
+}
+
+/** Apaga uma categoria de custo — bloqueada se algum Custo ja a usa. */
+export async function excluirCategoriaCusto(id: string): Promise<string | null> {
+  const emUso = await prisma.custo.count({ where: { categoriaId: id } });
+  if (emUso > 0) {
+    return `Esta categoria tem ${emUso} custo(s) cadastrado(s) — não é possível excluí-la sem antes excluir esses custos.`;
+  }
+  await prisma.categoriaCusto.delete({ where: { id } });
+  return null;
+}
+
 export interface CriarCustoInput {
   empreendimentoId: string;
   cenarioId: string;
@@ -386,6 +498,22 @@ export async function criarCusto(input: CriarCustoInput) {
   return prisma.custo.create({
     data: { recorrencia: "unico", participaFluxoCaixa: true, ...input },
   });
+}
+
+export interface AtualizarCustoInput {
+  valorPrevisto?: string | null;
+  percentual?: string | null;
+  competenciaMes?: number | null;
+  recorrencia?: "unico" | "mensal";
+}
+
+/** Custo nao tem nada que dependa dele — atualizar e excluir sao diretos. */
+export async function atualizarCusto(id: string, input: AtualizarCustoInput) {
+  return prisma.custo.update({ where: { id }, data: input });
+}
+
+export async function excluirCusto(id: string) {
+  await prisma.custo.delete({ where: { id } });
 }
 
 export interface CriarCronogramaInput {
@@ -411,4 +539,18 @@ export async function criarCronograma(input: CriarCronogramaInput) {
       percentualExecucaoMensal: p.percentualExecucaoMensal,
     })),
   });
+}
+
+/**
+ * Apaga o cronograma inteiro de um cenario — nao um ponto isolado. Editar
+ * ou apagar um unico mes quebraria a regra de soma=100% (R6) sem uma tela
+ * de edicao completa; a forma corrigida de "editar" um cronograma nesta
+ * fase e excluir tudo e recriar (o formulario de criacao ja reaparece
+ * assim que a tabela fica vazia — ver CronogramaSecao no web). Sem
+ * bloqueio: nenhuma linha depende de CronogramaFisicoFinanceiro por FK —
+ * um custo pct_execucao sem cronograma simplesmente nao gera desembolso
+ * ate um novo cronograma ser cadastrado.
+ */
+export async function excluirCronograma(cenarioId: string) {
+  await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { cenarioId } });
 }
