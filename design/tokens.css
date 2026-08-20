@@ -1,0 +1,198 @@
+/**
+ * Design tokens — "Painel de Comando" (Direção C)
+ *
+ * Fonte de verdade dos valores visuais do produto. Telas, componentes e
+ * qualquer CSS futuro do frontend devem consumir estas variáveis por papel
+ * (--accent, --ink-primary...), nunca um hex direto — é o que garante que
+ * trocar de tema, ou ajustar uma cor no futuro, não vire uma varredura por
+ * todo o código.
+ *
+ * Tema padrão: claro. Escuro ativa por duas vias, que devem sempre
+ * concordar: preferência do sistema operacional (prefers-color-scheme) OU
+ * escolha explícita do usuário (atributo data-theme="dark" na raiz).
+ *
+ * Ver docs/DESIGN_SYSTEM.md para a justificativa de cada decisão.
+ */
+
+:root {
+  /* ---- Superfícies ---- */
+  --bg: #F5F6F7;
+  --surface: #FFFFFF;
+  --surface-2: #EEF0F2;
+  --surface-3: #E4E7EA;
+  --border: #DADFE3;
+  --border-subtle: #E7EAEC;
+
+  /* ---- Texto ---- */
+  --ink-primary: #14161A;
+  --ink-secondary: #4B5259;
+  --ink-muted: #7C838C;
+  --ink-on-accent: #14161A;
+
+  /* ---- Marca — âmbar (ação primária, destaque) ---- */
+  --accent: #E0961F;
+  --accent-hover: #C97F12;
+  --accent-active: #B06E0E;
+  --accent-text: #B8720A;
+  --accent-soft-bg: #FBEED4;
+  --accent-border: #F0C989;
+
+  /* ---- Marca — ciano (ação secundária, dado em destaque) ---- */
+  --accent-2: #1D97A6;
+  --accent-2-hover: #167F8C;
+  --accent-2-text: #1D97A6;
+  --accent-2-soft-bg: #DFF4F6;
+
+  /* ---- Status (semânticos — nunca reaproveitar para outra coisa) ---- */
+  --status-good: #1E8F5E;
+  --status-good-text: #1E8F5E;
+  --status-good-soft-bg: #DFF3EA;
+
+  --status-warning: #9A6B12;
+  --status-warning-text: #9A6B12;
+  --status-warning-soft-bg: #F6EBD4;
+
+  --status-critical: #C2453B;
+  --status-critical-text: #C2453B;
+  --status-critical-soft-bg: #FBE4E1;
+
+  --status-info: var(--accent-2);
+  --status-info-text: var(--accent-2-text);
+  --status-info-soft-bg: var(--accent-2-soft-bg);
+
+  /* ---- Elevação ---- */
+  --shadow-sm: 0 1px 2px rgba(20, 22, 26, .06);
+  --shadow-md: 0 8px 20px -8px rgba(20, 22, 26, .16);
+  --shadow-lg: 0 16px 40px -12px rgba(20, 22, 26, .22);
+  --focus-ring: 0 0 0 3px rgba(224, 150, 31, .35);
+
+  /* ---- Raio ---- */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* ---- Espaçamento (escala de 4px) ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ---- Tipografia ---- */
+  --font-ui: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
+
+  --text-display: 700 32px/1.15 var(--font-ui);
+  --text-h1: 700 24px/1.2 var(--font-ui);
+  --text-h2: 700 19px/1.3 var(--font-ui);
+  --text-h3: 600 15px/1.4 var(--font-ui);
+  --text-body: 400 14px/1.6 var(--font-ui);
+  --text-body-sm: 400 13px/1.5 var(--font-ui);
+  --text-caption: 600 11.5px/1.4 var(--font-ui); /* uso: letter-spacing .05em, uppercase */
+  --text-mono-lg: 600 20px/1.2 var(--font-mono); /* valores monetários em destaque */
+  --text-mono-body: 500 13px/1.5 var(--font-mono); /* valores em tabela */
+
+  /* ---- Movimento ---- */
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0F1114;
+    --surface: #14161A;
+    --surface-2: #1B1E23;
+    --surface-3: #20242A;
+    --border: #2A2E35;
+    --border-subtle: #22262C;
+
+    --ink-primary: #F3F4F6;
+    --ink-secondary: #B7BCC4;
+    --ink-muted: #6B7280;
+    --ink-on-accent: #14161A;
+
+    --accent: #E8A33D;
+    --accent-hover: #F0B255;
+    --accent-active: #F5C077;
+    --accent-text: #E8A33D;
+    --accent-soft-bg: rgba(232, 163, 61, .14);
+    --accent-border: rgba(232, 163, 61, .35);
+
+    --accent-2: #4FC8D8;
+    --accent-2-hover: #6DD6E3;
+    --accent-2-text: #4FC8D8;
+    --accent-2-soft-bg: rgba(79, 200, 216, .14);
+
+    --status-good: #35B37E;
+    --status-good-text: #35B37E;
+    --status-good-soft-bg: rgba(53, 179, 126, .14);
+
+    --status-warning: #D9A22B;
+    --status-warning-text: #D9A22B;
+    --status-warning-soft-bg: rgba(217, 162, 43, .14);
+
+    --status-critical: #E8756B;
+    --status-critical-text: #E8756B;
+    --status-critical-soft-bg: rgba(232, 117, 107, .14);
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+    --shadow-md: 0 12px 28px -10px rgba(0, 0, 0, .55);
+    --shadow-lg: 0 20px 48px -14px rgba(0, 0, 0, .65);
+    --focus-ring: 0 0 0 3px rgba(232, 163, 61, .3);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0F1114;
+  --surface: #14161A;
+  --surface-2: #1B1E23;
+  --surface-3: #20242A;
+  --border: #2A2E35;
+  --border-subtle: #22262C;
+
+  --ink-primary: #F3F4F6;
+  --ink-secondary: #B7BCC4;
+  --ink-muted: #6B7280;
+  --ink-on-accent: #14161A;
+
+  --accent: #E8A33D;
+  --accent-hover: #F0B255;
+  --accent-active: #F5C077;
+  --accent-text: #E8A33D;
+  --accent-soft-bg: rgba(232, 163, 61, .14);
+  --accent-border: rgba(232, 163, 61, .35);
+
+  --accent-2: #4FC8D8;
+  --accent-2-hover: #6DD6E3;
+  --accent-2-text: #4FC8D8;
+  --accent-2-soft-bg: rgba(79, 200, 216, .14);
+
+  --status-good: #35B37E;
+  --status-good-text: #35B37E;
+  --status-good-soft-bg: rgba(53, 179, 126, .14);
+
+  --status-warning: #D9A22B;
+  --status-warning-text: #D9A22B;
+  --status-warning-soft-bg: rgba(217, 162, 43, .14);
+
+  --status-critical: #E8756B;
+  --status-critical-text: #E8756B;
+  --status-critical-soft-bg: rgba(232, 117, 107, .14);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-md: 0 12px 28px -10px rgba(0, 0, 0, .55);
+  --shadow-lg: 0 20px 48px -14px rgba(0, 0, 0, .65);
+  --focus-ring: 0 0 0 3px rgba(232, 163, 61, .3);
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink-primary);
+  font: var(--text-body);
+}
