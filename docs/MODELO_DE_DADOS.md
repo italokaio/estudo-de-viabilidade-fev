@@ -1,6 +1,6 @@
 # Modelo de dados — Fase 0
 
-Schema completo em [`prisma/schema.prisma`](../prisma/schema.prisma). 18 tabelas (13 da Fase 0 + `permuta`, `usuario`, `sessao`, `empreendimento_usuario` e `indice_correcao`, adicionadas na Fase 1), todas genéricas — nenhuma coluna ou valor específico de um empreendimento. O que muda entre o Splendido e qualquer outro empreendimento são as **linhas**, nunca a tabela.
+Schema completo em [`prisma/schema.prisma`](../prisma/schema.prisma). 19 tabelas (13 da Fase 0 + `permuta`, `usuario`, `sessao`, `empreendimento_usuario`, `indice_correcao` e `distrato`, adicionadas na Fase 1), todas genéricas — nenhuma coluna ou valor específico de um empreendimento. O que muda entre o Splendido e qualquer outro empreendimento são as **linhas**, nunca a tabela.
 
 Convenção: todo valor monetário ou percentual é `String` (texto decimal), nunca `Float`. Ver `docs/ARQUITETURA.md`, princípio B.
 
@@ -24,6 +24,7 @@ Convenção: todo valor monetário ou percentual é `String` (texto decimal), nu
 | `sessao` | Token de sessão ativo (Fase 1) | Token opaco (não JWT), verificado a cada request; revogar é apagar a linha |
 | `empreendimento_usuario` | Vínculo de acesso usuário×empreendimento (Fase 1, achado F5) | Só existe para `papel='usuario'` — `admin` nunca é restringido por ela; sem vínculo, um `usuario` não vê o empreendimento na listagem e recebe 404 (não 403) ao tentar acessá-lo direto |
 | `indice_correcao` | Série de variação mensal de índice de correção monetária, por cenário (Fase 1, achado F6) | `mes` × `percentual` (pode ser negativo — deflação), `@@unique([cenarioId, mes])`; nunca lida diretamente pelo motor de recebimentos — `src/core/motorCorrecao.ts` aplica o fator acumulado por cima, sempre recomputado, nunca persistido em `recebimento_projetado` (mesmo padrão do achado F1) |
+| `distrato` | Registro nominal do cancelamento de uma venda (Fase 1, achado F7) | 1:1 com `venda` (`vendaId` único); nunca lido pelo motor — `Venda.status='distratada'` (existente desde a Fase 0) já é suficiente, o motor só busca vendas `status="ativa"`. Guarda `valorRecebidoAteDistrato`/`percentualRetencao`/`valorRetido`/`valorReembolsar`, calculados sobre o valor **realizado**, nunca o previsto |
 
 ## O que foi deliberadamente deixado de fora da Fase 0
 
@@ -33,4 +34,4 @@ Ver `docs/DECISOES.md` para a justificativa de cada item — nenhum foi esquecid
 - `MovimentoCaixa` — **removida como tabela**, é serviço computado (achado F1)
 - `FinanciamentoProducao`, `AlertaRisco`, `SimulacaoSensibilidade`, `VersaoCenario`, `EstruturaComissao`, `IndiceCorrecao`, `Distrato` — todas fora do MVP definido, sem impacto no motor financeiro
 
-Itens desta lista original já foram implementados na Fase 1 (ver `docs/FASES.md`): `Permuta` (cadastro nominal, achado F3), a cascata de preço por andar (achado F2, sem tabela nova — ver `src/core/precificacaoAndar.ts`), `Usuario`/`Sessao` (login e permissão por ação), `EmpreendimentoUsuario` (permissão por empreendimento, achado F5) e `IndiceCorrecao` (correção monetária, achado F6). Ainda fora do escopo: `FinanciamentoProducao`, `AlertaRisco`, `SimulacaoSensibilidade`, `VersaoCenario`, `EstruturaComissao`, `Distrato`.
+Itens desta lista original já foram implementados na Fase 1 (ver `docs/FASES.md`): `Permuta` (cadastro nominal, achado F3), a cascata de preço por andar (achado F2, sem tabela nova — ver `src/core/precificacaoAndar.ts`), `Usuario`/`Sessao` (login e permissão por ação), `EmpreendimentoUsuario` (permissão por empreendimento, achado F5), `IndiceCorrecao` (correção monetária, achado F6) e `Distrato` (achado F7). Ainda fora do escopo: `FinanciamentoProducao`, `AlertaRisco`, `SimulacaoSensibilidade`, `VersaoCenario`, `EstruturaComissao`.

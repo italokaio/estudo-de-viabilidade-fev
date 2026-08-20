@@ -99,6 +99,7 @@ model Empreendimento {
   permutas            Permuta[]
   usuariosVinculados  EmpreendimentoUsuario[]
   indicesCorrecao     IndiceCorrecao[]
+  distratos           Distrato[]
 
   @@map("empreendimento")
 }
@@ -272,6 +273,7 @@ model Venda {
   unidade           Unidade                @relation(fields: [unidadeId], references: [id])
   condicaoPagamento CondicaoPagamento      @relation(fields: [condicaoPagamentoId], references: [id])
   recebimentos      RecebimentoProjetado[]
+  distrato          Distrato?
 
   @@map("venda")
 }
@@ -368,4 +370,32 @@ model IndiceCorrecao {
 
   @@unique([cenarioId, mes])
   @@map("indice_correcao")
+}
+
+/**
+ * Cancelamento de uma venda (achado F7, docs/DECISOES.md):
+ * Venda.status='distratada' ja e suficiente para o motor financeiro --
+ * rodarMotorParaCenario() so busca vendas status="ativa" (src/db/servicoMotor.ts),
+ * entao uma venda distratada some do fluxo de caixa e seus
+ * RecebimentoProjetado sao limpos automaticamente por persistirRecebimentos
+ * no proximo recalculo, sem nenhuma mudanca necessaria no motor. Esta
+ * tabela e so o registro nominal do que aconteceu -- quanto ja tinha sido
+ * recebido e quanto foi retido -- nunca lida pelo motor, mesmo padrao do
+ * achado F3 (Permuta).
+ */
+model Distrato {
+  id                       String   @id @default(cuid())
+  empreendimentoId         String
+  vendaId                  String   @unique
+  dataDistrato             DateTime @default(now())
+  valorRecebidoAteDistrato String // decimal-as-string, soma dos RecebimentoProjetado.valorRealizado ja marcados "recebido" no momento do distrato
+  percentualRetencao       String // decimal-as-string, 0..1 -- fracao do valor recebido que a incorporadora retem
+  valorRetido              String // decimal-as-string = valorRecebidoAteDistrato * percentualRetencao
+  valorReembolsar          String // decimal-as-string = valorRecebidoAteDistrato - valorRetido
+  motivo                   String?
+
+  empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
+  venda          Venda          @relation(fields: [vendaId], references: [id])
+
+  @@map("distrato")
 }

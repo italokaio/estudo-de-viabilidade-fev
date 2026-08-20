@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import {
+  estornarCustoRealizado,
+  estornarRecebimentoRealizado,
   fetchCenarioDetalhe,
   fetchRecebimentos,
   registrarCustoRealizado,
@@ -80,7 +82,7 @@ export function RealizadoPanel({ cenarioId, onAtualizado }: { cenarioId: string;
 
 function LinhaRecebimento({ recebimento, onRegistrado }: { recebimento: RecebimentoResumo; onRegistrado: () => void }) {
   const [editando, setEditando] = useState(false);
-  const [valor, setValor] = useState(recebimento.valorPrevisto);
+  const [valor, setValor] = useState(recebimento.valorRealizado ?? recebimento.valorPrevisto);
   const [salvando, setSalvando] = useState(false);
 
   const jaRecebido = recebimento.status === "recebido";
@@ -96,6 +98,16 @@ function LinhaRecebimento({ recebimento, onRegistrado }: { recebimento: Recebime
       alert(String(err.message ?? err));
     } finally {
       setSalvando(false);
+    }
+  }
+
+  async function estornar() {
+    if (!window.confirm("Estornar este recebimento? Ele volta a ficar como previsto, sem valor realizado.")) return;
+    try {
+      await estornarRecebimentoRealizado(recebimento.id);
+      onRegistrado();
+    } catch (err: any) {
+      alert(String(err.message ?? err));
     }
   }
 
@@ -122,7 +134,15 @@ function LinhaRecebimento({ recebimento, onRegistrado }: { recebimento: Recebime
         <span style={{ font: "var(--text-mono-body)", color: "var(--ink-primary)" }}>{formatBRL(recebimento.valorPrevisto)}</span>
       </span>
       {jaRecebido ? (
-        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--status-good-text)" }}>✓ {formatBRL(recebimento.valorRealizado!)}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--status-good-text)" }}>✓ {formatBRL(recebimento.valorRealizado!)}</span>
+          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 7px", fontSize: 10.5 }}>
+            Editar
+          </Button>
+          <Button variant="secondary" onClick={estornar} style={{ padding: "3px 7px", fontSize: 10.5, color: "var(--status-critical-text)" }}>
+            Estornar
+          </Button>
+        </span>
       ) : (
         <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "4px 8px", fontSize: 11 }}>
           Marcar recebido
@@ -134,7 +154,7 @@ function LinhaRecebimento({ recebimento, onRegistrado }: { recebimento: Recebime
 
 function LinhaCusto({ custo, onRegistrado }: { custo: CustoResumo; onRegistrado: () => void }) {
   const [editando, setEditando] = useState(false);
-  const [valor, setValor] = useState(custo.valorPrevisto ?? "");
+  const [valor, setValor] = useState(custo.valorRealizado ?? custo.valorPrevisto ?? "");
   const [salvando, setSalvando] = useState(false);
 
   const jaPago = custo.status === "realizado";
@@ -150,6 +170,16 @@ function LinhaCusto({ custo, onRegistrado }: { custo: CustoResumo; onRegistrado:
       alert(String(err.message ?? err));
     } finally {
       setSalvando(false);
+    }
+  }
+
+  async function estornar() {
+    if (!window.confirm("Estornar este custo? Ele volta a ficar como previsto, sem valor realizado.")) return;
+    try {
+      await estornarCustoRealizado(custo.id);
+      onRegistrado();
+    } catch (err: any) {
+      alert(String(err.message ?? err));
     }
   }
 
@@ -176,7 +206,15 @@ function LinhaCusto({ custo, onRegistrado }: { custo: CustoResumo; onRegistrado:
         <span style={{ font: "var(--text-mono-body)", color: "var(--ink-primary)" }}>{formatBRL(custo.valorPrevisto ?? "0")}</span>
       </span>
       {jaPago ? (
-        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--status-good-text)" }}>✓ {formatBRL(custo.valorRealizado!)}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--status-good-text)" }}>✓ {formatBRL(custo.valorRealizado!)}</span>
+          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 7px", fontSize: 10.5 }}>
+            Editar
+          </Button>
+          <Button variant="secondary" onClick={estornar} style={{ padding: "3px 7px", fontSize: 10.5, color: "var(--status-critical-text)" }}>
+            Estornar
+          </Button>
+        </span>
       ) : (
         <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "4px 8px", fontSize: 11 }}>
           Marcar pago

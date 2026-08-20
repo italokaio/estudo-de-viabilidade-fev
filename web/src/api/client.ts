@@ -54,7 +54,15 @@ export interface ModalidadeInput {
 export interface CondicaoPagamentoResumo {
   id: string;
   nome: string;
-  modalidades: { nome: string; percentual: string; tipoDistribuicao: string }[];
+  modalidades: {
+    nome: string;
+    percentual: string;
+    tipoDistribuicao: TipoDistribuicao;
+    periodicidadeMeses: number | null;
+    mesFixo: number | null;
+    repeticoesSobreTotal: number;
+    geraEventoParcial: boolean;
+  }[];
 }
 
 export interface TipologiaResumo {
@@ -81,11 +89,23 @@ export interface CategoriaCustoResumo {
   tipoIncidencia: TipoIncidenciaCusto;
 }
 
+export type StatusValidacaoArea = "pendente" | "validado" | "conflitante";
+export type FormaAquisicaoTerreno = "compra" | "permuta" | "misto";
+
+export interface TerrenoResumo {
+  areaValor: string | null;
+  areaUnidade: string;
+  areaStatusValidacao: StatusValidacaoArea;
+  areaObservacao: string | null;
+  formaAquisicao: FormaAquisicaoTerreno | null;
+}
+
 export interface EmpreendimentoDetalhe {
   id: string;
   nome: string;
   incorporador: string | null;
   endereco: string | null;
+  terreno: TerrenoResumo | null;
   cenarios: CenarioResumo[];
   tipologias: TipologiaResumo[];
   categoriasCusto: CategoriaCustoResumo[];
@@ -242,8 +262,16 @@ export function registrarRecebimentoRealizado(id: string, input: { valorRealizad
   return patchJson<RecebimentoResumo>(`/api/recebimentos/${id}`, input);
 }
 
+export function estornarRecebimentoRealizado(id: string) {
+  return patchJson<RecebimentoResumo>(`/api/recebimentos/${id}`, { estornar: true });
+}
+
 export function registrarCustoRealizado(id: string, input: { valorRealizado: string }) {
   return patchJson<CustoResumo>(`/api/custos/${id}`, input);
+}
+
+export function estornarCustoRealizado(id: string) {
+  return patchJson<CustoResumo>(`/api/custos/${id}`, { estornar: true });
 }
 
 export function atualizarEmpreendimento(id: string, input: { nome?: string; incorporador?: string | null; endereco?: string | null }) {
@@ -252,6 +280,13 @@ export function atualizarEmpreendimento(id: string, input: { nome?: string; inco
 
 export function excluirEmpreendimento(id: string) {
   return del(`/api/empreendimentos/${id}`);
+}
+
+export function definirTerreno(
+  empreendimentoId: string,
+  input: { areaValor?: string; areaUnidade?: string; areaStatusValidacao?: StatusValidacaoArea; areaObservacao?: string; formaAquisicao?: FormaAquisicaoTerreno },
+) {
+  return postJson<TerrenoResumo>(`/api/empreendimentos/${empreendimentoId}/terreno`, input);
 }
 
 export function atualizarTipologia(
@@ -273,6 +308,21 @@ export function excluirCenario(id: string) {
   return del(`/api/cenarios/${id}`);
 }
 
+export interface DistratoResumo {
+  valorRecebidoAteDistrato: string;
+  percentualRetencao: string;
+  valorRetido: string;
+  valorReembolsar: string;
+}
+
+export interface VendaResumo {
+  id: string;
+  status: string;
+  mesOrigem: number;
+  valorVenda: string;
+  distrato: DistratoResumo | null;
+}
+
 export interface UnidadeResumo {
   id: string;
   numero: string;
@@ -281,6 +331,7 @@ export interface UnidadeResumo {
   precoVenda: string | null;
   status: string;
   permuta: { id: string; nomeContraparte: string; documento: string | null; valorAtribuido: string | null } | null;
+  venda: VendaResumo | null;
 }
 
 export async function fetchUnidades(tipologiaId: string): Promise<UnidadeResumo[]> {
@@ -296,8 +347,23 @@ export function registrarPermuta(
   return postJson<{ id: string }>(`/api/unidades/${unidadeId}/permuta`, input);
 }
 
+export function atualizarPermuta(
+  unidadeId: string,
+  input: { nomeContraparte?: string; documento?: string; valorAtribuido?: string; observacao?: string },
+) {
+  return patchJson<{ id: string }>(`/api/unidades/${unidadeId}/permuta`, input);
+}
+
 export function desfazerPermuta(unidadeId: string) {
   return del(`/api/unidades/${unidadeId}/permuta`);
+}
+
+export function registrarDistrato(vendaId: string, input: { percentualRetencao?: string; motivo?: string }) {
+  return postJson<DistratoResumo>(`/api/vendas/${vendaId}/distrato`, input);
+}
+
+export function desfazerDistrato(vendaId: string) {
+  return del(`/api/vendas/${vendaId}/distrato`);
 }
 
 export function atualizarCondicaoPagamento(id: string, input: { nome?: string; modalidades?: ModalidadeInput[] }) {

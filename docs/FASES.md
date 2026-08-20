@@ -209,6 +209,56 @@ Primeiro item de uma nova lista de candidatos apresentada ao usuário (correçã
 
 **Não implementado nesta fatia:** correção monetária sobre custos (ex.: obra corrigida pelo INCC/CUB — mesmo padrão poderia ser aplicado a `Custo`, mas fora do escopo desta fatia), um índice "padrão de mercado" pré-cadastrado (IGP-M/INCC reais) — o usuário digita os valores manualmente, cadastro em lote de uma série completa de uma vez (só um mês por vez no formulário, deliberado — ver decisão de upsert acima).
 
+## Fase 1 (código) — décima terceira fatia: distrato (este repositório, concluída)
+
+Segundo item da lista de candidatos (correção monetária, distrato, terreno pela interface, polimento de lacunas menores) — pedido pelo usuário em sequência, sem pausa entre as três. Implementa o achado F7 (`docs/DECISOES.md`): o schema já previa `Venda.status: "ativa" | "distratada"` desde a Fase 0, e `rodarMotorParaCenario()` já filtrava vendas por `status: "ativa"` — o motor estava pronto para distrato desde sempre, só faltava a ação de cadastro que efetivamente cancela uma venda.
+
+**Achado confirmado ao implementar:** como o motor só lê vendas `status="ativa"`, marcar uma venda como `"distratada"` já é suficiente — no próximo recálculo do fluxo de caixa, `persistirRecebimentos()` (achado F4) automaticamente identifica os `RecebimentoProjetado` daquela venda como obsoletos (não aparecem mais no resultado do motor) e os apaga, sem nenhuma mudança em `src/core/`.
+
+**Implementado:**
+- Schema — tabela nova `Distrato` (`empreendimentoId`, `vendaId` único, `dataDistrato`, `valorRecebidoAteDistrato`, `percentualRetencao`, `valorRetido`, `valorReembolsar`, `motivo?`) — registro nominal histórico, nunca lido pelo motor, mesmo padrão do achado F3 (`Permuta`). O valor retido/a reembolsar é calculado sobre o que **já foi efetivamente recebido** (`RecebimentoProjetado.valorRealizado` com `status="recebido"`), nunca sobre o previsto — um distrato antes de qualquer recebimento tem retenção e reembolso zero, corretamente.
+- `src/db/cadastro.ts` — `registrarDistrato` (marca a venda como distratada, devolve a unidade ao estoque, grava o registro nominal) e `desfazerDistrato` (bloqueado se a unidade já teve outro destino desde então — vendida de novo ou permutada — mesma regra de "um destino por vez" já usada em permuta).
+- API — `POST`/`DELETE /api/vendas/:id/distrato`. `GET /api/tipologias/:id/unidades` passou a incluir a venda mais recente de cada unidade (e o distrato dela, se houver) — necessário para a tela decidir se mostra "Distratar" (venda ativa) ou "Desfazer distrato" (venda distratada, unidade ainda em estoque).
+- Web — na seção "Permuta" de cada tipologia (que passou a cobrir permuta e distrato, já que ambas agem sobre o destino de uma unidade), unidades vendidas ganharam "Distratar" (com campo de retenção e motivo opcional) e, após o distrato, "Desfazer distrato" com o valor a reembolsar/retido exibido inline.
+- 9 novos testes de API (`tests/integration/api.distrato.test.ts`): cálculo de retenção sobre o valor realizado (não o previsto), venda some do fluxo de caixa no próximo recálculo, bloqueio de desfazer quando a unidade já foi revendida, 403 para usuário comum, 404 para usuário sem vínculo. Suíte total: 22 arquivos, 121 testes.
+- **Achado de UX na verificação em navegador (corrigido ainda nesta fatia, não uma fatia separada):** a primeira versão só mostrava "Registrar permuta" quando a unidade não tinha nenhum distrato pendurado, escondendo a opção justamente na unidade que acabou de voltar ao estoque por um distrato — o caso mais comum de "preciso fazer algo novo com essa unidade". Corrigido: "Registrar permuta" aparece sempre que a unidade está em estoque, independente de haver um distrato para desfazer — as duas ações já eram seguras de coexistir, porque `desfazerDistrato` bloqueia no servidor se a unidade não estiver mais em estoque.
+- Verificado num navegador real (claro e escuro): marcou um recebimento como recebido (R$100.000), distratou a venda com 20% de retenção, conferiu "Reembolsar R$80.000,00 · retido R$20.000,00" exibido na tela, registrou uma permuta na unidade liberada, editou a permuta, desfez a permuta — voltando a mostrar "Registrar permuta" e "Desfazer distrato" lado a lado, exatamente o achado de UX corrigido acima.
+
+**Não implementado nesta fatia:** distrato parcial (só cancelamento total da venda), reembolso automatizado (o valor a reembolsar é só um cálculo exibido, não dispara nenhuma ação financeira real).
+
+## Fase 1 (código) — décima quarta fatia: terreno pela interface (este repositório, concluída)
+
+Terceiro item da lista de candidatos. `src/db/cadastro.ts` já tinha `criarTerreno` desde a Fase 0, usado pelos dois scripts de importação — mas nunca existiu rota de API nem tela para isso, então cadastrar ou corrigir os dados de terreno de um empreendimento cadastrado do zero pela interface era impossível.
+
+**Decisão de escopo:** como `Terreno` é 1:1 com `Empreendimento` (`Terreno.empreendimentoId @unique`), a rota de escrita é um upsert — cria na primeira chamada, atualiza nas seguintes — em vez de rotas separadas de criar/editar. Simplifica a tela: o mesmo botão "Salvar" funciona tanto para cadastrar quanto para corrigir depois.
+
+**Implementado:**
+- `src/db/cadastro.ts` — `definirTerreno(empreendimentoId, input)`, upsert por `empreendimentoId`. `criarTerreno` (usado pelos importadores) ficou intocado.
+- API — `POST /api/empreendimentos/:id/terreno`. `GET /api/empreendimentos/:id` passou a incluir `terreno` (`null` quando nada foi cadastrado ainda).
+- Web — novo painel "Terreno" no detalhe do empreendimento (`CadastroPage.tsx`), entre o cabeçalho e as Tipologias: área/unidade, status de validação (pendente/validado/conflitante — os mesmos três valores herdados do achado da Fase 0 sobre `Terreno.areaStatusValidacao`), forma de aquisição, observação livre.
+- 5 novos testes de API (`tests/integration/api.terreno.test.ts`): `terreno: null` antes de cadastrar, upsert cria na primeira chamada e atualiza (sem duplicar) na segunda, 404 para empreendimento inexistente, 404 para usuário sem vínculo. Suíte total: 23 arquivos, 126 testes.
+- Verificado num navegador real (claro e escuro): editou o terreno já existente do empreendimento fictício importado (Recanto das Aroeiras) — área e observação atualizadas e refletidas imediatamente na tela — confirmando o caminho de edição (upsert) tanto quanto o de criação, já que os dois empreendimentos de exemplo já tinham terreno vindo da importação.
+
+**Não implementado nesta fatia:** múltiplas matrículas/áreas por empreendimento (schema continua 1:1, fiel à Fase 0), histórico de alterações de área (cada `Salvar` sobrescreve os campos anteriores, sem trilha de auditoria além de `updatedAt`).
+
+## Fase 1 (código) — décima quinta fatia: polimento de lacunas menores (este repositório, concluída)
+
+Quarto e último item da lista de candidatos apresentada — um pacote de quatro lacunas pequenas, cada uma uma fatia de dias-de-Fase-0 concluída, mas com uma ponta solta reconhecida na época:
+
+1. **Editar modalidades de condição de pagamento pela tela** (deixado pendente na décima fatia): a rota `PATCH /api/condicoes-pagamento/:id` já aceitava `modalidades`, mas `GET /api/empreendimentos/:id` só devolvia `nome`/`percentual`/`tipoDistribuicao` de cada modalidade — faltavam `periodicidadeMeses`, `mesFixo`, `repeticoesSobreTotal`, `geraEventoParcial` para pré-preencher um formulário de edição sem perder dado. Corrigido expondo os campos que faltavam; a tela ganhou "Editar modalidades" ao lado de "Editar nome", reaproveitando as mesmas linhas dinâmicas do formulário de criação (extraídas para `ModalidadesFields`, componente compartilhado).
+2. **Edição ponto a ponto de cronograma** (decisão original da décima fatia: "sem edição, exclua e recrie"): a regra R6 (soma=100%) continua exigindo substituição completa, não edição de uma linha isolada — mas a tela agora faz esse "excluir e recriar" por trás de um único botão "Editar" que pré-preenche o formulário com os valores atuais, em vez de obrigar o usuário a apagar tudo primeiro e digitar de novo do zero.
+3. **Editar/estornar um valor já registrado como realizado** (limitação documentada na sétima fatia): `PATCH /api/recebimentos/:id` e `PATCH /api/custos/:id` ganharam a opção `estornar: true`, que limpa `valorRealizado` e devolve o status a `"previsto"`. Editar um valor já registrado não precisou de rota nova — a mesma `PATCH` já aceitava sobrescrever; só faltava expor "Editar" na tela ao lado do já existente "✓ valor".
+4. **Editar uma permuta já registrada** (decisão original da oitava fatia: "só registrar/desfazer"): nova rota `PATCH /api/unidades/:id/permuta` e função `atualizarPermuta`, que só altera os dados nominais (contraparte/documento/valor atribuído) sem tocar no status da unidade — isso continua sendo papel exclusivo de registrar/desfazer.
+
+**Implementado:**
+- `src/db/cadastro.ts` — `atualizarPermuta`.
+- API — `PATCH /api/unidades/:id/permuta`; `estornar` em `PATCH /api/recebimentos/:id` e `PATCH /api/custos/:id`; `GET /api/empreendimentos/:id` expõe os campos completos de modalidade.
+- Web — `ModalidadesFields` (componente extraído, reused por criar e editar condição de pagamento), "Editar" em `CronogramaSecao` (pré-preenche e substitui via excluir+recriar), "Editar"/"Estornar" em `RealizadoPanel` para recebimentos e custos, "Editar" em `LinhaUnidadePermuta` para permuta.
+- 5 novos testes de API (`tests/integration/api.polimento.test.ts`): modalidade completa devolvida pela leitura, estorno de recebimento e de custo revertendo ao status previsto, edição de permuta, 404/400 nos casos de erro. Suíte total: 24 arquivos, 131 testes.
+- Verificado num navegador real (claro e escuro): editou as modalidades de uma condição de pagamento **em uso** e confirmou que a tela mostra corretamente o erro de bloqueio ("já foi usada em N venda(s)") em vez de aceitar silenciosamente — a mesma regra de integridade da décima fatia, agora exercitada pelo novo caminho de edição; editou um cronograma de 1 ponto (100% no mês 1) para 2 pontos (40%/60%); marcou um recebimento como recebido, estornou, e marcou de novo — o valor e o estado refletiram corretamente em cada passo.
+
+**Não implementado nesta fatia:** histórico de estornos (um estorno simplesmente apaga o valor realizado anterior, sem guardar o que era), edição de modalidades de uma condição já em uso (bloqueio de integridade original da décima fatia continua valendo, agora só verificado através de um caminho de UI novo).
+
 ## Próxima fase
 
-A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento e a décima segunda de correção monetária estão concluídas. Aguardando direção do usuário sobre o que vem a seguir.
+A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, e a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores) estão concluídas. Aguardando direção do usuário sobre o que vem a seguir.

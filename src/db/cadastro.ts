@@ -41,6 +41,7 @@ export async function atualizarEmpreendimento(id: string, input: AtualizarEmpree
 export async function excluirEmpreendimento(id: string) {
   const vendaIds = (await prisma.venda.findMany({ where: { empreendimentoId: id }, select: { id: true } })).map((v) => v.id);
   await prisma.recebimentoProjetado.deleteMany({ where: { vendaId: { in: vendaIds } } });
+  await prisma.distrato.deleteMany({ where: { vendaId: { in: vendaIds } } });
   await prisma.venda.deleteMany({ where: { empreendimentoId: id } });
   await prisma.premissaVelocidadeVendas.deleteMany({ where: { empreendimentoId: id } });
   await prisma.modalidadePagamento.deleteMany({ where: { condicaoPagamento: { empreendimentoId: id } } });
@@ -92,6 +93,7 @@ export async function excluirCenario(id: string) {
   const unidadeIds = vendas.map((v) => v.unidadeId);
 
   await prisma.recebimentoProjetado.deleteMany({ where: { vendaId: { in: vendaIds } } });
+  await prisma.distrato.deleteMany({ where: { vendaId: { in: vendaIds } } });
   await prisma.venda.deleteMany({ where: { cenarioId: id } });
   if (unidadeIds.length > 0) {
     await prisma.unidade.updateMany({ where: { id: { in: unidadeIds } }, data: { status: "estoque" } });
@@ -114,6 +116,23 @@ export interface CriarTerrenoInput {
 
 export async function criarTerreno(input: CriarTerrenoInput) {
   return prisma.terreno.create({ data: { areaUnidade: "m2", areaStatusValidacao: "pendente", ...input } });
+}
+
+export interface DefinirTerrenoInput {
+  areaValor?: string | null;
+  areaUnidade?: string;
+  areaStatusValidacao?: "pendente" | "validado" | "conflitante";
+  areaObservacao?: string | null;
+  formaAquisicao?: "compra" | "permuta" | "misto" | null;
+}
+
+/** Cria ou atualiza o terreno de um empreendimento pela interface — upsert, já que é 1:1 (no máximo um terreno por empreendimento). */
+export async function definirTerreno(empreendimentoId: string, input: DefinirTerrenoInput) {
+  return prisma.terreno.upsert({
+    where: { empreendimentoId },
+    update: input,
+    create: { empreendimentoId, areaUnidade: "m2", areaStatusValidacao: "pendente", ...input },
+  });
 }
 
 export interface CriarTipologiaInput {
@@ -279,12 +298,93 @@ export async function registrarPermuta(input: RegistrarPermutaInput): Promise<{ 
   return { permuta };
 }
 
+export interface AtualizarPermutaInput {
+  nomeContraparte?: string;
+  documento?: string | null;
+  valorAtribuido?: string | null;
+  dataAcordo?: Date | null;
+  observacao?: string | null;
+}
+
+/** Atualiza os dados nominais de uma permuta já registrada — nunca muda o status da unidade (isso é papel de registrar/desfazer). */
+export async function atualizarPermuta(unidadeId: string, input: AtualizarPermutaInput): Promise<{ erro: string } | { permuta: Awaited<ReturnType<typeof prisma.permuta.update>> }> {
+  const existente = await prisma.permuta.findUnique({ where: { unidadeId } });
+  if (!existente) return { erro: "Esta unidade não tem permuta registrada" };
+  const permuta = await prisma.permuta.update({ where: { unidadeId }, data: input });
+  return { permuta };
+}
+
 /** Desfaz uma permuta: apaga o registro e devolve a unidade ao estoque. */
 export async function desfazerPermuta(unidadeId: string): Promise<string | null> {
   const permuta = await prisma.permuta.findUnique({ where: { unidadeId } });
   if (!permuta) return "Esta unidade não tem permuta registrada";
   await prisma.permuta.delete({ where: { unidadeId } });
   await prisma.unidade.update({ where: { id: unidadeId }, data: { status: "estoque" } });
+  return null;
+}
+
+export interface RegistrarDistratoInput {
+  vendaId: string;
+  /** 0..1 — fração do valor já recebido que a incorporadora retém. Sem informar, assume 0 (reembolso integral). */
+  percentualRetencao?: string;
+  motivo?: string;
+}
+
+/**
+ * Cancela uma venda (achado F7, docs/DECISOES.md). Marca a Venda como
+ * "distratada" -- o motor ja filtra por status="ativa" ao ler vendas do
+ * cenario (src/db/servicoMotor.ts), entao esta venda simplesmente some do
+ * proximo fluxo de caixa recalculado, sem nenhuma mudanca necessaria no
+ * motor. A unidade volta ao estoque, disponivel para uma nova venda. O
+ * valor retido/a reembolsar e calculado sobre o que ja foi efetivamente
+ * recebido (RecebimentoProjetado.valorRealizado, nao o previsto) ate o
+ * momento do distrato -- e um registro historico, nunca recalculado depois.
+ */
+export async function registrarDistrato(input: RegistrarDistratoInput): Promise<{ erro: string } | { distrato: Awaited<ReturnType<typeof prisma.distrato.create>> }> {
+  const venda = await prisma.venda.findUnique({ where: { id: input.vendaId } });
+  if (!venda) return { erro: "Venda não encontrada" };
+  if (venda.status === "distratada") return { erro: "Esta venda já foi distratada" };
+
+  const recebidos = await prisma.recebimentoProjetado.findMany({ where: { vendaId: venda.id, status: "recebido" } });
+  const valorRecebido = recebidos.reduce((acc, r) => acc.plus(new Decimal(r.valorRealizado ?? "0")), new Decimal(0));
+  const percentualRetencao = input.percentualRetencao ?? "0";
+  const valorRetido = valorRecebido.times(new Decimal(percentualRetencao));
+  const valorReembolsar = valorRecebido.minus(valorRetido);
+
+  const distrato = await prisma.distrato.create({
+    data: {
+      empreendimentoId: venda.empreendimentoId,
+      vendaId: venda.id,
+      valorRecebidoAteDistrato: valorRecebido.toFixed(2),
+      percentualRetencao,
+      valorRetido: valorRetido.toFixed(2),
+      valorReembolsar: valorReembolsar.toFixed(2),
+      motivo: input.motivo,
+    },
+  });
+  await prisma.venda.update({ where: { id: venda.id }, data: { status: "distratada" } });
+  await prisma.unidade.update({ where: { id: venda.unidadeId }, data: { status: "estoque" } });
+
+  return { distrato };
+}
+
+/**
+ * Desfaz um distrato: apaga o registro, reativa a venda e marca a unidade
+ * como vendida de novo. Bloqueado se a unidade ja teve outro destino desde
+ * o distrato (vendida de novo, permutada) -- mesma logica de
+ * "uma unidade so tem um destino" usada em registrarPermuta.
+ */
+export async function desfazerDistrato(vendaId: string): Promise<string | null> {
+  const distrato = await prisma.distrato.findUnique({ where: { vendaId } });
+  if (!distrato) return "Esta venda não tem distrato registrado";
+  const venda = await prisma.venda.findUniqueOrThrow({ where: { id: vendaId } });
+  const unidade = await prisma.unidade.findUniqueOrThrow({ where: { id: venda.unidadeId } });
+  if (unidade.status !== "estoque") {
+    return `A unidade está com status "${unidade.status}" — não é possível desfazer o distrato sem antes desfazer o que foi feito com ela depois.`;
+  }
+  await prisma.distrato.delete({ where: { vendaId } });
+  await prisma.venda.update({ where: { id: vendaId }, data: { status: "ativa" } });
+  await prisma.unidade.update({ where: { id: venda.unidadeId }, data: { status: "vendida" } });
   return null;
 }
 

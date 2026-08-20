@@ -8,6 +8,7 @@ import {
   atualizarCondicaoPagamento,
   atualizarCusto,
   atualizarEmpreendimento,
+  atualizarPermuta,
   atualizarTipologia,
   criarCategoriaCusto,
   criarCenario,
@@ -20,6 +21,8 @@ import {
   criarUnidadesEmLote,
   criarUnidadesPorAndar,
   definirPontoIndiceCorrecao,
+  definirTerreno,
+  desfazerDistrato,
   desfazerPermuta,
   excluirCategoriaCusto,
   excluirCenario,
@@ -29,6 +32,7 @@ import {
   excluirEmpreendimento,
   excluirPontoIndiceCorrecao,
   excluirTipologia,
+  registrarDistrato,
   registrarPermuta,
   type ModalidadeInput,
 } from "../../src/db/cadastro.js";
@@ -267,6 +271,7 @@ export async function buildApp() {
         },
         cenarios: { orderBy: { createdAt: "asc" } },
         categoriasCusto: { orderBy: { nome: "asc" } },
+        terreno: true,
       },
     });
     if (!empreendimento) {
@@ -278,6 +283,15 @@ export async function buildApp() {
       nome: empreendimento.nome,
       incorporador: empreendimento.incorporador,
       endereco: empreendimento.endereco,
+      terreno: empreendimento.terreno
+        ? {
+            areaValor: empreendimento.terreno.areaValor,
+            areaUnidade: empreendimento.terreno.areaUnidade,
+            areaStatusValidacao: empreendimento.terreno.areaStatusValidacao,
+            areaObservacao: empreendimento.terreno.areaObservacao,
+            formaAquisicao: empreendimento.terreno.formaAquisicao,
+          }
+        : null,
       cenarios: empreendimento.cenarios.map((c) => ({
         id: c.id,
         nome: c.nome,
@@ -294,10 +308,40 @@ export async function buildApp() {
         condicoesPagamento: t.condicoesPagamento.map((cp) => ({
           id: cp.id,
           nome: cp.nome,
-          modalidades: cp.modalidades.map((m) => ({ nome: m.nome, percentual: m.percentual, tipoDistribuicao: m.tipoDistribuicao })),
+          modalidades: cp.modalidades.map((m) => ({
+            nome: m.nome,
+            percentual: m.percentual,
+            tipoDistribuicao: m.tipoDistribuicao,
+            periodicidadeMeses: m.periodicidadeMeses,
+            mesFixo: m.mesFixo,
+            repeticoesSobreTotal: m.repeticoesSobreTotal,
+            geraEventoParcial: m.geraEventoParcial,
+          })),
         })),
       })),
     };
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: {
+      areaValor?: string | null;
+      areaUnidade?: string;
+      areaStatusValidacao?: "pendente" | "validado" | "conflitante";
+      areaObservacao?: string | null;
+      formaAquisicao?: "compra" | "permuta" | "misto" | null;
+    };
+  }>("/api/empreendimentos/:id/terreno", async (req, reply) => {
+    if (!(await garantirAcesso(req, reply, req.params.id))) return;
+    const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
+    if (!empreendimento) {
+      reply.code(404);
+      return { erro: "Empreendimento não encontrado" };
+    }
+    const { areaValor, areaUnidade, areaStatusValidacao, areaObservacao, formaAquisicao } = req.body ?? {};
+    const terreno = await definirTerreno(req.params.id, { areaValor, areaUnidade, areaStatusValidacao, areaObservacao, formaAquisicao });
+    reply.code(200);
+    return terreno;
   });
 
   app.patch<{ Params: { id: string }; Body: { nome?: string; incorporador?: string | null; endereco?: string | null } }>(
@@ -457,18 +501,37 @@ export async function buildApp() {
     if (!(await garantirAcesso(req, reply, tipologia.empreendimentoId))) return;
     const unidades = await prisma.unidade.findMany({
       where: { tipologiaId: req.params.id },
-      include: { permuta: true },
+      include: { permuta: true, vendas: { orderBy: { createdAt: "desc" }, take: 1, include: { distrato: true } } },
       orderBy: [{ andar: "asc" }, { numero: "asc" }],
     });
-    return unidades.map((u) => ({
-      id: u.id,
-      numero: u.numero,
-      andar: u.andar,
-      areaPrivativa: u.areaPrivativa,
-      precoVenda: u.precoVenda,
-      status: u.status,
-      permuta: u.permuta ? { id: u.permuta.id, nomeContraparte: u.permuta.nomeContraparte, documento: u.permuta.documento, valorAtribuido: u.permuta.valorAtribuido } : null,
-    }));
+    return unidades.map((u) => {
+      const ultimaVenda = u.vendas[0];
+      return {
+        id: u.id,
+        numero: u.numero,
+        andar: u.andar,
+        areaPrivativa: u.areaPrivativa,
+        precoVenda: u.precoVenda,
+        status: u.status,
+        permuta: u.permuta ? { id: u.permuta.id, nomeContraparte: u.permuta.nomeContraparte, documento: u.permuta.documento, valorAtribuido: u.permuta.valorAtribuido } : null,
+        venda: ultimaVenda
+          ? {
+              id: ultimaVenda.id,
+              status: ultimaVenda.status,
+              mesOrigem: ultimaVenda.mesOrigem,
+              valorVenda: ultimaVenda.valorVenda,
+              distrato: ultimaVenda.distrato
+                ? {
+                    valorRecebidoAteDistrato: ultimaVenda.distrato.valorRecebidoAteDistrato,
+                    percentualRetencao: ultimaVenda.distrato.percentualRetencao,
+                    valorRetido: ultimaVenda.distrato.valorRetido,
+                    valorReembolsar: ultimaVenda.distrato.valorReembolsar,
+                  }
+                : null,
+            }
+          : null,
+      };
+    });
   });
 
   app.post<{
@@ -502,6 +565,35 @@ export async function buildApp() {
     return resultado.permuta;
   });
 
+  app.patch<{
+    Params: { id: string };
+    Body: { nomeContraparte?: string; documento?: string | null; valorAtribuido?: string | null; dataAcordo?: string | null; observacao?: string | null };
+  }>("/api/unidades/:id/permuta", async (req, reply) => {
+    const { nomeContraparte, documento, valorAtribuido, dataAcordo, observacao } = req.body ?? {};
+    if (nomeContraparte !== undefined && !nomeContraparte.trim()) {
+      reply.code(400);
+      return { erro: "Nome da contraparte não pode ficar vazio" };
+    }
+    const unidade = await prisma.unidade.findUnique({ where: { id: req.params.id } });
+    if (!unidade) {
+      reply.code(404);
+      return { erro: "Unidade não encontrada" };
+    }
+    if (!(await garantirAcesso(req, reply, unidade.empreendimentoId))) return;
+    const resultado = await atualizarPermuta(req.params.id, {
+      nomeContraparte: nomeContraparte?.trim(),
+      documento,
+      valorAtribuido,
+      dataAcordo: dataAcordo === undefined ? undefined : dataAcordo === null ? null : new Date(dataAcordo),
+      observacao,
+    });
+    if ("erro" in resultado) {
+      reply.code(404);
+      return { erro: resultado.erro };
+    }
+    return resultado.permuta;
+  });
+
   app.delete<{ Params: { id: string } }>("/api/unidades/:id/permuta", async (req, reply) => {
     if (req.usuario!.papel !== "admin") {
       reply.code(403);
@@ -510,6 +602,50 @@ export async function buildApp() {
     const erro = await desfazerPermuta(req.params.id);
     if (erro) {
       reply.code(404);
+      return { erro };
+    }
+    reply.code(204);
+    return null;
+  });
+
+  // Distrato (achado F7, docs/DECISOES.md): cancela uma venda. O motor ja
+  // filtra vendas por status="ativa" (src/db/servicoMotor.ts), entao marcar
+  // a venda como "distratada" e suficiente -- nenhuma rota de fluxo de
+  // caixa precisou mudar.
+  app.post<{ Params: { id: string }; Body: { percentualRetencao?: string; motivo?: string } }>(
+    "/api/vendas/:id/distrato",
+    async (req, reply) => {
+      const { percentualRetencao, motivo } = req.body ?? {};
+      const venda = await prisma.venda.findUnique({ where: { id: req.params.id } });
+      if (!venda) {
+        reply.code(404);
+        return { erro: "Venda não encontrada" };
+      }
+      if (!(await garantirAcesso(req, reply, venda.empreendimentoId))) return;
+      const resultado = await registrarDistrato({ vendaId: req.params.id, percentualRetencao, motivo });
+      if ("erro" in resultado) {
+        reply.code(400);
+        return { erro: resultado.erro };
+      }
+      reply.code(201);
+      return resultado.distrato;
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>("/api/vendas/:id/distrato", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const venda = await prisma.venda.findUnique({ where: { id: req.params.id } });
+    if (!venda) {
+      reply.code(404);
+      return { erro: "Venda não encontrada" };
+    }
+    if (!(await garantirAcesso(req, reply, venda.empreendimentoId))) return;
+    const erro = await desfazerDistrato(req.params.id);
+    if (erro) {
+      reply.code(400);
       return { erro };
     }
     reply.code(204);
@@ -995,15 +1131,26 @@ export async function buildApp() {
   // (competenciaMes, valorPrevisto, percentual, recorrencia).
   app.patch<{
     Params: { id: string };
-    Body: { valorRealizado?: string; valorPrevisto?: string | null; percentual?: string | null; competenciaMes?: number | null; recorrencia?: "unico" | "mensal" };
+    Body: {
+      valorRealizado?: string;
+      valorPrevisto?: string | null;
+      percentual?: string | null;
+      competenciaMes?: number | null;
+      recorrencia?: "unico" | "mensal";
+      estornar?: boolean;
+    };
   }>("/api/custos/:id", async (req, reply) => {
-    const { valorRealizado, valorPrevisto, percentual, competenciaMes, recorrencia } = req.body ?? {};
+    const { valorRealizado, valorPrevisto, percentual, competenciaMes, recorrencia, estornar } = req.body ?? {};
     const custo = await prisma.custo.findUnique({ where: { id: req.params.id }, include: { categoria: true } });
     if (!custo) {
       reply.code(404);
       return { erro: "Custo não encontrado" };
     }
     if (!(await garantirAcesso(req, reply, custo.empreendimentoId))) return;
+
+    if (estornar) {
+      return prisma.custo.update({ where: { id: req.params.id }, data: { valorRealizado: null, status: "previsto" } });
+    }
 
     if (valorRealizado !== undefined) {
       if (!valorRealizado.trim()) {
@@ -1046,18 +1193,20 @@ export async function buildApp() {
     }));
   });
 
-  app.patch<{ Params: { id: string }; Body: { valorRealizado?: string; status?: string } }>(
+  app.patch<{ Params: { id: string }; Body: { valorRealizado?: string; status?: string; estornar?: boolean } }>(
     "/api/recebimentos/:id",
     async (req, reply) => {
-      const { valorRealizado, status } = req.body ?? {};
-      if (!valorRealizado || !valorRealizado.trim()) {
-        reply.code(400);
-        return { erro: "Valor realizado é obrigatório" };
-      }
-      const tiposValidos = ["recebido", "atrasado"];
-      if (status !== undefined && !tiposValidos.includes(status)) {
-        reply.code(400);
-        return { erro: `Status deve ser um de: ${tiposValidos.join(", ")}` };
+      const { valorRealizado, status, estornar } = req.body ?? {};
+      if (!estornar) {
+        if (!valorRealizado || !valorRealizado.trim()) {
+          reply.code(400);
+          return { erro: "Valor realizado é obrigatório" };
+        }
+        const tiposValidos = ["recebido", "atrasado"];
+        if (status !== undefined && !tiposValidos.includes(status)) {
+          reply.code(400);
+          return { erro: `Status deve ser um de: ${tiposValidos.join(", ")}` };
+        }
       }
       const recebimento = await prisma.recebimentoProjetado.findUnique({
         where: { id: req.params.id },
@@ -1068,9 +1217,12 @@ export async function buildApp() {
         return { erro: "Recebimento não encontrado" };
       }
       if (!(await garantirAcesso(req, reply, recebimento.venda.empreendimentoId))) return;
+      if (estornar) {
+        return prisma.recebimentoProjetado.update({ where: { id: req.params.id }, data: { valorRealizado: null, status: "previsto" } });
+      }
       return prisma.recebimentoProjetado.update({
         where: { id: req.params.id },
-        data: { valorRealizado: valorRealizado.trim(), status: status ?? "recebido" },
+        data: { valorRealizado: valorRealizado!.trim(), status: status ?? "recebido" },
       });
     },
   );

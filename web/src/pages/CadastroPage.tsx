@@ -14,9 +14,12 @@ import {
   criarEmpreendimento,
   criarPremissasVelocidade,
   criarTipologia,
+  atualizarPermuta,
   criarUnidadesEmLote,
   criarUnidadesPorAndar,
   definirPontoIndiceCorrecao,
+  definirTerreno,
+  desfazerDistrato,
   desfazerPermuta,
   excluirCategoriaCusto,
   excluirCenario,
@@ -31,12 +34,15 @@ import {
   fetchEmpreendimentos,
   fetchUnidades,
   gerarVendas,
+  registrarDistrato,
   registrarPermuta,
   type CategoriaCustoResumo,
   type CenarioDetalhe,
   type EmpreendimentoDetalhe,
   type EmpreendimentoResumo,
+  type FormaAquisicaoTerreno,
   type ModalidadeInput,
+  type StatusValidacaoArea,
   type TipoDistribuicao,
   type TipoIncidenciaCusto,
   type TipoIncrementoAndar,
@@ -240,6 +246,10 @@ function DetalheEmpreendimento({
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <EmpreendimentoHeader detalhe={detalhe} onAtualizado={onAtualizado} onExcluido={onExcluido} onErro={onErro} />
 
+      <Painel titulo="Terreno">
+        <TerrenoSecao empreendimentoId={detalhe.id} terreno={detalhe.terreno} onAtualizado={onAtualizado} onErro={onErro} />
+      </Painel>
+
       <Painel titulo="Tipologias">
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {detalhe.tipologias.length === 0 && (
@@ -278,6 +288,119 @@ function DetalheEmpreendimento({
 
         <NovoCenarioForm empreendimentoId={detalhe.id} onCriado={onAtualizado} onErro={onErro} />
       </Painel>
+    </div>
+  );
+}
+
+const selectFieldStyle: React.CSSProperties = {
+  fontFamily: "var(--font-ui)",
+  fontSize: 13,
+  color: "var(--ink-primary)",
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  padding: "8px 10px",
+};
+
+function TerrenoSecao({
+  empreendimentoId,
+  terreno,
+  onAtualizado,
+  onErro,
+}: {
+  empreendimentoId: string;
+  terreno: EmpreendimentoDetalhe["terreno"];
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [areaValor, setAreaValor] = useState(terreno?.areaValor ?? "");
+  const [areaUnidade, setAreaUnidade] = useState(terreno?.areaUnidade ?? "m2");
+  const [areaStatusValidacao, setAreaStatusValidacao] = useState<StatusValidacaoArea>(terreno?.areaStatusValidacao ?? "pendente");
+  const [areaObservacao, setAreaObservacao] = useState(terreno?.areaObservacao ?? "");
+  const [formaAquisicao, setFormaAquisicao] = useState<FormaAquisicaoTerreno | "">(terreno?.formaAquisicao ?? "");
+  const [salvando, setSalvando] = useState(false);
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await definirTerreno(empreendimentoId, {
+        areaValor: areaValor || undefined,
+        areaUnidade: areaUnidade || undefined,
+        areaStatusValidacao,
+        areaObservacao: areaObservacao || undefined,
+        formaAquisicao: formaAquisicao || undefined,
+      });
+      setEditando(false);
+      onAtualizado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  if (editando || !terreno) {
+    return (
+      <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div style={{ width: 100 }}>
+          <TextField label="Área" value={areaValor} onChange={(e) => setAreaValor(e.target.value)} placeholder="5000" />
+        </div>
+        <div style={{ width: 70 }}>
+          <TextField label="Unidade" value={areaUnidade} onChange={(e) => setAreaUnidade(e.target.value)} placeholder="m2" />
+        </div>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Status</span>
+          <select value={areaStatusValidacao} onChange={(e) => setAreaStatusValidacao(e.target.value as StatusValidacaoArea)} style={selectFieldStyle}>
+            <option value="pendente">Pendente</option>
+            <option value="validado">Validado</option>
+            <option value="conflitante">Conflitante</option>
+          </select>
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Aquisição</span>
+          <select value={formaAquisicao} onChange={(e) => setFormaAquisicao(e.target.value as FormaAquisicaoTerreno)} style={selectFieldStyle}>
+            <option value="">—</option>
+            <option value="compra">Compra</option>
+            <option value="permuta">Permuta</option>
+            <option value="misto">Misto</option>
+          </select>
+        </label>
+        <div style={{ width: 220 }}>
+          <TextField label="Observação" value={areaObservacao} onChange={(e) => setAreaObservacao(e.target.value)} placeholder="opcional" />
+        </div>
+        <Button type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+          {salvando ? "Salvando…" : "Salvar"}
+        </Button>
+        {terreno && (
+          <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+            Cancelar
+          </Button>
+        )}
+      </form>
+    );
+  }
+
+  const corStatus =
+    terreno.areaStatusValidacao === "validado"
+      ? "var(--status-good-text)"
+      : terreno.areaStatusValidacao === "conflitante"
+        ? "var(--status-critical-text)"
+        : "var(--ink-muted)";
+
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+      <div style={{ fontSize: 13, color: "var(--ink-secondary)" }}>
+        {terreno.areaValor ? `${terreno.areaValor} ${terreno.areaUnidade}` : "Área não informada"}
+        {" · "}
+        <span style={{ color: corStatus, fontWeight: 600 }}>{terreno.areaStatusValidacao}</span>
+        {terreno.formaAquisicao && ` · ${terreno.formaAquisicao}`}
+        {terreno.areaObservacao && <div style={{ fontSize: 12, color: "var(--ink-muted)", marginTop: 4 }}>{terreno.areaObservacao}</div>}
+      </div>
+      <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12, flex: "none" }}>
+        Editar
+      </Button>
     </div>
   );
 }
@@ -671,7 +794,12 @@ function CronogramaSecao({
   onAtualizado: () => void;
   onErro: (msg: string) => void;
 }) {
-  const [pontos, setPontos] = useState<{ mes: string; percentualExecucaoMensal: string }[]>([{ mes: "1", percentualExecucaoMensal: "" }]);
+  const [editando, setEditando] = useState(false);
+  const [pontos, setPontos] = useState<{ mes: string; percentualExecucaoMensal: string }[]>(
+    cronograma.length > 0
+      ? cronograma.map((p) => ({ mes: String(p.mes), percentualExecucaoMensal: p.percentualExecucaoMensal }))
+      : [{ mes: "1", percentualExecucaoMensal: "" }],
+  );
   const [salvando, setSalvando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
 
@@ -691,6 +819,11 @@ function CronogramaSecao({
     }
   }
 
+  function editar() {
+    setPontos(cronograma.map((p) => ({ mes: String(p.mes), percentualExecucaoMensal: p.percentualExecucaoMensal })));
+    setEditando(true);
+  }
+
   function atualizarPonto(i: number, patch: Partial<{ mes: string; percentualExecucaoMensal: string }>) {
     setPontos((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   }
@@ -707,10 +840,14 @@ function CronogramaSecao({
     e.preventDefault();
     setSalvando(true);
     try {
+      // editar um cronograma existente e excluir + recriar (regra R6: soma=100%
+      // precisa valer sempre, sem uma tela de diffing ponto a ponto).
+      if (cronograma.length > 0) await excluirCronograma(cenarioId);
       await criarCronograma(
         cenarioId,
         pontos.map((p) => ({ mes: Number(p.mes), percentualExecucaoMensal: p.percentualExecucaoMensal })),
       );
+      setEditando(false);
       onAtualizado();
     } catch (e: any) {
       onErro(String(e.message ?? e));
@@ -719,7 +856,7 @@ function CronogramaSecao({
     }
   }
 
-  if (cronograma.length > 0) {
+  if (cronograma.length > 0 && !editando) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
@@ -738,7 +875,10 @@ function CronogramaSecao({
             ))}
           </tbody>
         </table>
-        <div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button variant="secondary" onClick={editar} style={{ padding: "4px 8px", fontSize: 11 }}>
+            Editar
+          </Button>
           <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
             {excluindo ? "Excluindo…" : "Excluir cronograma"}
           </Button>
@@ -780,6 +920,11 @@ function CronogramaSecao({
         <Button type="submit" disabled={salvando || !somaFecha}>
           {salvando ? "Salvando…" : "Salvar cronograma"}
         </Button>
+        {editando && (
+          <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+            Cancelar
+          </Button>
+        )}
       </div>
     </form>
   );
@@ -1386,7 +1531,7 @@ function PermutaSecao({
             <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
               <th style={{ fontWeight: 600, paddingBottom: 4 }}>Unidade</th>
               <th style={{ fontWeight: 600, paddingBottom: 4 }}>Status</th>
-              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Contraparte</th>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Contraparte / distrato</th>
               <th style={{ fontWeight: 600, paddingBottom: 4 }}></th>
             </tr>
           </thead>
@@ -1414,13 +1559,34 @@ function LinhaUnidadePermuta({
   const [nomeContraparte, setNomeContraparte] = useState("");
   const [documento, setDocumento] = useState("");
   const [valorAtribuido, setValorAtribuido] = useState("");
+  const [distratando, setDistratando] = useState(false);
+  const [percentualRetencao, setPercentualRetencao] = useState("0");
+  const [motivo, setMotivo] = useState("");
   const [salvando, setSalvando] = useState(false);
+
+  function abrirRegistro() {
+    setNomeContraparte("");
+    setDocumento("");
+    setValorAtribuido("");
+    setEditando(true);
+  }
+
+  function abrirEdicaoPermuta() {
+    setNomeContraparte(unidade.permuta?.nomeContraparte ?? "");
+    setDocumento(unidade.permuta?.documento ?? "");
+    setValorAtribuido(unidade.permuta?.valorAtribuido ?? "");
+    setEditando(true);
+  }
 
   async function registrar(e: React.FormEvent) {
     e.preventDefault();
     setSalvando(true);
     try {
-      await registrarPermuta(unidade.id, { nomeContraparte, documento: documento || undefined, valorAtribuido: valorAtribuido || undefined });
+      if (unidade.permuta) {
+        await atualizarPermuta(unidade.id, { nomeContraparte, documento: documento || undefined, valorAtribuido: valorAtribuido || undefined });
+      } else {
+        await registrarPermuta(unidade.id, { nomeContraparte, documento: documento || undefined, valorAtribuido: valorAtribuido || undefined });
+      }
       setEditando(false);
       onRegistrado();
     } catch (err: any) {
@@ -1434,6 +1600,32 @@ function LinhaUnidadePermuta({
     if (!window.confirm(`Desfazer a permuta da unidade "${unidade.numero}"? Ela volta para o estoque.`)) return;
     try {
       await desfazerPermuta(unidade.id);
+      onRegistrado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    }
+  }
+
+  async function distratar(e: React.FormEvent) {
+    e.preventDefault();
+    if (!unidade.venda) return;
+    setSalvando(true);
+    try {
+      await registrarDistrato(unidade.venda.id, { percentualRetencao: percentualRetencao || undefined, motivo: motivo || undefined });
+      setDistratando(false);
+      onRegistrado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function desfazerDistratoAcao() {
+    if (!unidade.venda) return;
+    if (!window.confirm(`Desfazer o distrato da unidade "${unidade.numero}"? A venda volta a ficar ativa.`)) return;
+    try {
+      await desfazerDistrato(unidade.venda.id);
       onRegistrado();
     } catch (err: any) {
       onErro(String(err.message ?? err));
@@ -1466,20 +1658,63 @@ function LinhaUnidadePermuta({
     );
   }
 
+  if (distratando) {
+    return (
+      <tr>
+        <td colSpan={4} style={{ padding: "6px 0" }}>
+          <form onSubmit={distratar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div style={{ width: 140 }}>
+              <TextField label="Retenção (0–1)" value={percentualRetencao} onChange={(e) => setPercentualRetencao(e.target.value)} placeholder="0.2 = 20%" />
+            </div>
+            <div style={{ width: 200 }}>
+              <TextField label="Motivo" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="opcional" />
+            </div>
+            <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+              {salvando ? "Salvando…" : "Confirmar distrato"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setDistratando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
+              Cancelar
+            </Button>
+          </form>
+        </td>
+      </tr>
+    );
+  }
+
+  const distratoInfo = unidade.status === "estoque" && unidade.venda?.status === "distratada" ? unidade.venda.distrato : null;
+
   return (
     <tr>
       <td style={{ padding: "4px 0", color: "var(--ink-primary)", font: "var(--text-mono-body)" }}>{unidade.numero}</td>
       <td style={{ color: "var(--ink-secondary)" }}>{unidade.status}</td>
-      <td style={{ color: "var(--ink-secondary)" }}>{unidade.permuta?.nomeContraparte ?? "—"}</td>
+      <td style={{ color: "var(--ink-secondary)" }}>
+        {unidade.permuta?.nomeContraparte ??
+          (distratoInfo ? `Reembolsar ${formatBRL(distratoInfo.valorReembolsar)} · retido ${formatBRL(distratoInfo.valorRetido)}` : "—")}
+      </td>
       <td style={{ textAlign: "right" }}>
         {unidade.status === "estoque" && (
-          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "4px 8px", fontSize: 11 }}>
+          <Button variant="secondary" onClick={abrirRegistro} style={{ padding: "4px 8px", fontSize: 11, marginRight: distratoInfo ? 6 : 0 }}>
             Registrar permuta
           </Button>
         )}
         {unidade.status === "permutada" && (
-          <Button variant="secondary" onClick={desfazer} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
-            Desfazer
+          <>
+            <Button variant="secondary" onClick={abrirEdicaoPermuta} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
+              Editar
+            </Button>
+            <Button variant="secondary" onClick={desfazer} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+              Desfazer
+            </Button>
+          </>
+        )}
+        {unidade.status === "vendida" && unidade.venda?.status === "ativa" && (
+          <Button variant="secondary" onClick={() => setDistratando(true)} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+            Distratar
+          </Button>
+        )}
+        {distratoInfo && (
+          <Button variant="secondary" onClick={desfazerDistratoAcao} style={{ padding: "4px 8px", fontSize: 11 }}>
+            Desfazer distrato
           </Button>
         )}
       </td>
@@ -1763,131 +1998,25 @@ const TIPOS_DISTRIBUICAO: { valor: TipoDistribuicao; rotulo: string }[] = [
   { valor: "mes_fixo", rotulo: "Mês fixo" },
 ];
 
-function LinhaCondicaoPagamento({
-  condicao,
-  onAtualizado,
-  onErro,
-}: {
-  condicao: EmpreendimentoDetalhe["tipologias"][number]["condicoesPagamento"][number];
-  onAtualizado: () => void;
-  onErro: (msg: string) => void;
-}) {
-  const [editando, setEditando] = useState(false);
-  const [nome, setNome] = useState(condicao.nome);
-  const [salvando, setSalvando] = useState(false);
-  const [excluindo, setExcluindo] = useState(false);
-
-  async function salvar(e: React.FormEvent) {
-    e.preventDefault();
-    setSalvando(true);
-    try {
-      await atualizarCondicaoPagamento(condicao.id, { nome });
-      setEditando(false);
-      onAtualizado();
-    } catch (e: any) {
-      onErro(String(e.message ?? e));
-    } finally {
-      setSalvando(false);
-    }
+/** Linhas dinâmicas de modalidade (nome/%/distribuição), reutilizadas tanto para criar quanto para editar uma condição de pagamento. */
+function ModalidadesFields({ modalidades, onChange }: { modalidades: ModalidadeInput[]; onChange: (m: ModalidadeInput[]) => void }) {
+  function atualizarModalidade(i: number, patch: Partial<ModalidadeInput>) {
+    onChange(modalidades.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   }
 
-  async function excluir() {
-    if (!window.confirm(`Excluir a condição de pagamento "${condicao.nome}"?`)) return;
-    setExcluindo(true);
-    try {
-      await excluirCondicaoPagamento(condicao.id);
-      onAtualizado();
-    } catch (e: any) {
-      onErro(String(e.message ?? e));
-    } finally {
-      setExcluindo(false);
-    }
+  function adicionarLinha() {
+    onChange([...modalidades, { nome: "", percentual: "", tipoDistribuicao: "nivelada" }]);
   }
 
-  if (editando) {
-    return (
-      <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-        <div style={{ width: 200 }}>
-          <TextField label="Nome" value={nome} onChange={(e) => setNome(e.target.value)} required />
-        </div>
-        <Button type="submit" disabled={salvando || !nome.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
-          {salvando ? "Salvando…" : "Salvar"}
-        </Button>
-        <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
-          Cancelar
-        </Button>
-      </form>
-    );
+  function removerLinha(i: number) {
+    onChange(modalidades.filter((_, idx) => idx !== i));
   }
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "var(--ink-secondary)" }}>
-      <span>
-        <span style={{ fontWeight: 700, color: "var(--ink-primary)" }}>{condicao.nome}</span>
-        {" — "}
-        {condicao.modalidades.map((m) => `${m.nome} ${(Number(m.percentual) * 100).toFixed(0)}%`).join(", ")}
-      </span>
-      <div style={{ display: "flex", gap: 6 }}>
-        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
-          Editar nome
-        </Button>
-        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
-          {excluindo ? "…" : "Excluir"}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function CondicaoPagamentoForm({
-  tipologiaId,
-  onCriada,
-  onErro,
-}: {
-  tipologiaId: string;
-  onCriada: () => void;
-  onErro: (msg: string) => void;
-}) {
-  const [nome, setNome] = useState("");
-  const [modalidades, setModalidades] = useState<ModalidadeInput[]>([
-    { nome: "Ato", percentual: "1", tipoDistribuicao: "unica_na_venda" },
-  ]);
-  const [salvando, setSalvando] = useState(false);
 
   const soma = modalidades.reduce((acc, m) => acc + (Number(m.percentual) || 0), 0);
   const somaFecha = Math.abs(soma - 1) < 0.001;
 
-  function atualizarModalidade(i: number, patch: Partial<ModalidadeInput>) {
-    setModalidades((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-  }
-
-  function adicionarLinha() {
-    setModalidades((rows) => [...rows, { nome: "", percentual: "", tipoDistribuicao: "nivelada" }]);
-  }
-
-  function removerLinha(i: number) {
-    setModalidades((rows) => rows.filter((_, idx) => idx !== i));
-  }
-
-  async function submeter(e: React.FormEvent) {
-    e.preventDefault();
-    setSalvando(true);
-    try {
-      await criarCondicaoPagamento(tipologiaId, { nome, modalidades });
-      onCriada();
-    } catch (e: any) {
-      onErro(String(e.message ?? e));
-    } finally {
-      setSalvando(false);
-    }
-  }
-
   return (
-    <form onSubmit={submeter} style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
-      <div style={{ width: 220 }}>
-        <TextField label="Nome da condição" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Padrão" required />
-      </div>
-
+    <>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {modalidades.map((m, i) => (
           <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -1902,7 +2031,7 @@ function CondicaoPagamentoForm({
               <select
                 value={m.tipoDistribuicao}
                 onChange={(e) => atualizarModalidade(i, { tipoDistribuicao: e.target.value as TipoDistribuicao })}
-                style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+                style={selectFieldStyle}
               >
                 {TIPOS_DISTRIBUICAO.map((t) => (
                   <option key={t.valor} value={t.valor}>
@@ -1951,6 +2080,175 @@ function CondicaoPagamentoForm({
         <span style={{ fontSize: 12, fontWeight: 600, color: somaFecha ? "var(--status-good-text)" : "var(--status-warning-text)" }}>
           Soma: {(soma * 100).toFixed(1)}% {somaFecha ? "" : "(precisa fechar em 100%)"}
         </span>
+      </div>
+    </>
+  );
+}
+
+function LinhaCondicaoPagamento({
+  condicao,
+  onAtualizado,
+  onErro,
+}: {
+  condicao: EmpreendimentoDetalhe["tipologias"][number]["condicoesPagamento"][number];
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [editandoModalidades, setEditandoModalidades] = useState(false);
+  const [nome, setNome] = useState(condicao.nome);
+  const [modalidades, setModalidades] = useState<ModalidadeInput[]>(() =>
+    condicao.modalidades.map((m) => ({
+      nome: m.nome,
+      percentual: m.percentual,
+      tipoDistribuicao: m.tipoDistribuicao,
+      periodicidadeMeses: m.periodicidadeMeses ?? undefined,
+      mesFixo: m.mesFixo ?? undefined,
+      repeticoesSobreTotal: m.repeticoesSobreTotal,
+      geraEventoParcial: m.geraEventoParcial,
+    })),
+  );
+  const [salvando, setSalvando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+
+  const soma = modalidades.reduce((acc, m) => acc + (Number(m.percentual) || 0), 0);
+  const somaFecha = Math.abs(soma - 1) < 0.001;
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await atualizarCondicaoPagamento(condicao.id, { nome });
+      setEditando(false);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function salvarModalidades(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await atualizarCondicaoPagamento(condicao.id, { modalidades });
+      setEditandoModalidades(false);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function excluir() {
+    if (!window.confirm(`Excluir a condição de pagamento "${condicao.nome}"?`)) return;
+    setExcluindo(true);
+    try {
+      await excluirCondicaoPagamento(condicao.id);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setExcluindo(false);
+    }
+  }
+
+  if (editando) {
+    return (
+      <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <div style={{ width: 200 }}>
+          <TextField label="Nome" value={nome} onChange={(e) => setNome(e.target.value)} required />
+        </div>
+        <Button type="submit" disabled={salvando || !nome.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
+          {salvando ? "Salvando…" : "Salvar"}
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
+          Cancelar
+        </Button>
+      </form>
+    );
+  }
+
+  if (editandoModalidades) {
+    return (
+      <form onSubmit={salvarModalidades} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <ModalidadesFields modalidades={modalidades} onChange={setModalidades} />
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button type="submit" disabled={salvando || !somaFecha} style={{ padding: "6px 10px", fontSize: 12 }}>
+            {salvando ? "Salvando…" : "Salvar modalidades"}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => setEditandoModalidades(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
+            Cancelar
+          </Button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "var(--ink-secondary)" }}>
+      <span>
+        <span style={{ fontWeight: 700, color: "var(--ink-primary)" }}>{condicao.nome}</span>
+        {" — "}
+        {condicao.modalidades.map((m) => `${m.nome} ${(Number(m.percentual) * 100).toFixed(0)}%`).join(", ")}
+      </span>
+      <div style={{ display: "flex", gap: 6 }}>
+        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
+          Editar nome
+        </Button>
+        <Button variant="secondary" onClick={() => setEditandoModalidades(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
+          Editar modalidades
+        </Button>
+        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+          {excluindo ? "…" : "Excluir"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CondicaoPagamentoForm({
+  tipologiaId,
+  onCriada,
+  onErro,
+}: {
+  tipologiaId: string;
+  onCriada: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [nome, setNome] = useState("");
+  const [modalidades, setModalidades] = useState<ModalidadeInput[]>([
+    { nome: "Ato", percentual: "1", tipoDistribuicao: "unica_na_venda" },
+  ]);
+  const [salvando, setSalvando] = useState(false);
+
+  const soma = modalidades.reduce((acc, m) => acc + (Number(m.percentual) || 0), 0);
+  const somaFecha = Math.abs(soma - 1) < 0.001;
+
+  async function submeter(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await criarCondicaoPagamento(tipologiaId, { nome, modalidades });
+      onCriada();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submeter} style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
+      <div style={{ width: 220 }}>
+        <TextField label="Nome da condição" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Padrão" required />
+      </div>
+
+      <ModalidadesFields modalidades={modalidades} onChange={setModalidades} />
+
+      <div>
         <Button type="submit" disabled={salvando || !somaFecha || !nome.trim()}>
           {salvando ? "Salvando…" : "Salvar condição"}
         </Button>

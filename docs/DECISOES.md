@@ -48,6 +48,16 @@
 
 **Status.** Aprovado e implementado (décima segunda fatia). Testado em `tests/core/motorCorrecao.test.ts` e `tests/integration/api.correcaoMonetaria.test.ts`.
 
+## F7 — Distrato: o motor já estava pronto, só faltava a ação de cadastro (achado da Fase 1)
+
+**Contexto.** `Venda.status: "ativa" | "distratada"` existe desde a Fase 0 (schema original), e `rodarMotorParaCenario()` (`src/db/servicoMotor.ts`) sempre filtrou vendas por `status: "ativa"` ao montar a entrada do motor. Nenhuma dessas duas coisas foi alterada para implementar distrato — o motor já sabia, desde sempre, ignorar uma venda distratada.
+
+**Achado confirmado ao implementar.** Como `persistirRecebimentos()` (achado F4) já faz diff entre o que o motor calculou agora e o que existe no banco, marcar uma `Venda` como `"distratada"` é suficiente por si só: no próximo `GET /fluxo-caixa`, essa venda simplesmente não aparece mais no resultado do motor, e os `RecebimentoProjetado` que ela tinha gerado são identificados como obsoletos e apagados automaticamente — sem nenhuma linha de código nova em `src/core/`.
+
+**Decisão.** A parte que realmente faltava era o cadastro nominal do que aconteceu: quanto já tinha sido recebido, quanto a incorporadora retém, quanto precisa devolver. Isso vira uma tabela `Distrato` (registro histórico, nunca lido pelo motor — mesmo padrão do achado F3, `Permuta`), calculada sobre o valor **efetivamente recebido** (`RecebimentoProjetado.valorRealizado`), nunca sobre o previsto.
+
+**Status.** Aprovado e implementado (décima terceira fatia). Testado em `tests/integration/api.distrato.test.ts`.
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |
