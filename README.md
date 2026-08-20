@@ -16,6 +16,17 @@ npm run import:splendido   # popula o banco com o empreendimento Splendido
 npm run import:ficticio    # popula o banco com um empreendimento fictício de teste
 ```
 
+### Rodar a API e a tela (Fase 1)
+
+Em dois terminais separados, a partir da raiz do projeto:
+
+```bash
+cd api && npm install && npm run dev     # http://127.0.0.1:3333
+cd web && npm install && npm run dev     # http://localhost:5173
+```
+
+Abra `http://localhost:5173` — a tela de Fluxo de Caixa lê os dados reais do banco (rode os `import:*` acima antes, se o banco estiver vazio).
+
 ## Estrutura
 
 ```
@@ -23,8 +34,11 @@ prisma/schema.prisma   13 tabelas — modelo de dados genérico
 src/core/               motor financeiro puro — sem dependência de banco
 src/db/                 camada de persistência (Prisma) + tradução para/do motor
 src/import/             dados estruturados por empreendimento + scripts de carga
+api/                     API (Fastify) — casca fina sobre src/db, sem regra de negócio própria
+web/                     tela (Vite + React), consome design/tokens.css de verdade
+design/tokens.css       tokens reutilizáveis do Design System (ver docs/DESIGN_SYSTEM.md)
 tests/core/             testes unitários do motor (incluindo o teste obrigatório de genericidade)
-tests/integration/      testes de ponta a ponta (golden numbers, isolamento, ausência de hardcode)
+tests/integration/      testes de ponta a ponta (golden numbers, isolamento, API, ausência de hardcode)
 docs/                   documentação viva do projeto
 ```
 

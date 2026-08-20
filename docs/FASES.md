@@ -22,6 +22,20 @@ Confirmação dos 10 princípios arquiteturais, mapeamento dado/premissa/regra/m
 
 **Não implementado nesta fase (fora do escopo aprovado):** ver `docs/DECISOES.md` e a lista "fica para depois" da definição do MVP na "Fundação do ERP".
 
+## Design System — Painel de Comando (este repositório, concluído)
+
+Direção visual escolhida (claro + escuro) transformada em sistema reutilizável: tokens em `design/tokens.css` (consumidos por papel, nunca hex direto), componentes com todos os estados especificados, telas compostas nos dois temas. → [Diretrizes de Design](https://claude.ai/code/artifact/c79d06fa-45ec-4481-9bee-63b7b3d1b9c9) · `docs/DESIGN_SYSTEM.md`
+
+## Fase 1 (código) — primeira fatia: tela de Fluxo de Caixa (este repositório, em andamento)
+
+**Implementado:**
+- API (`api/`, Fastify) — casca fina sobre `src/db/servicoMotor.ts`, duas rotas: listar empreendimentos/cenários e calcular o fluxo de caixa de um cenário. Nenhuma regra de negócio nova.
+- Tela (`web/`, Vite + React) — Fluxo de Caixa real: KPIs, gráfico interativo (entradas/saídas/acumulado, com marcação do mês de pico e de recuperação), tabela mês a mês, seletor de empreendimento/cenário, alternância de tema claro/escuro. Consome `design/tokens.css` diretamente.
+- Verificado num navegador real (Playwright headless): os dois temas renderizam corretamente, a troca de cenário recarrega os dados certos, sem erros de console.
+- Teste automatizado da API via `app.inject()` (Fastify), conferindo que os números devolvidos batem com os golden numbers da Fase 0.
+
+**Não implementado nesta fatia:** cadastro (as outras entradas de menu — Vendas, Custos, Cronograma, Cenários — existem visualmente mas não são funcionais ainda), permuta nominal, precificação por andar, fluxo de realizado × projetado, autenticação.
+
 ## Próxima fase (aguardando aprovação)
 
-O relatório de conclusão da Fase 0 (entregue na conversa, não neste arquivo) propõe o escopo do restante do MVP: cadastro nominal de permutas, precificação por andar como segunda estratégia plugável, telas de cadastro, e o fluxo de lançamento de realizado × projetado. Aguardando validação antes de iniciar.
+Próxima fatia natural: uma tela de cadastro (empreendimento/tipologia/unidade) para provar a outra ponta do sistema — hoje só o Splendido e o fictício existem porque foram importados por script, não cadastrados pela interface.

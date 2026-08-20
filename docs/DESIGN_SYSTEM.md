@@ -35,6 +35,6 @@ Botão (primário / secundário / terciário / perigo — cada um com hover, act
 - **Fundo do modo claro não é branco puro nem creme**: `--bg` é um cinza levemente frio (`#F5F6F7`), para manter o caráter "instrumento de precisão" da direção escolhida — um fundo creme puxaria para a direção B (Autoridade Discreta), descartada.
 - **Todo valor monetário/numérico em fonte monoespaçada**: decisão deliberada para que colunas de números sempre alinhem verticalmente e para reforçar a sensação de precisão/instrumento — é a mesma convenção já usada no motor (`decimal.js`, nunca float) aplicada à interface.
 
-## Próximo passo
+## Aplicado
 
-Aplicar estes tokens às primeiras telas reais da Fase 1, começando pelo dashboard de fluxo de caixa (já prototipado no canvas) — sem inventar nenhum token novo fora deste arquivo.
+A tela de Fluxo de Caixa (`web/`) já consome `design/tokens.css` diretamente — nenhum token foi reinventado no código da tela. Próxima tela a construir segue o mesmo padrão: nenhum hex novo fora deste arquivo.
