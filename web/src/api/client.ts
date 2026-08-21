@@ -203,6 +203,7 @@ export interface CenarioDetalhe {
   nome: string;
   tipo: string;
   horizonteProjecaoMeses: number;
+  limiteNecessidadeMaximaCapital: string | null;
   empreendimento: { id: string; nome: string };
   tipologiasDisponiveis: { id: string; nome: string }[];
   categoriasCustoDisponiveis: CategoriaCustoResumo[];
@@ -376,7 +377,7 @@ export function excluirTipologia(id: string) {
   return del(`/api/tipologias/${id}`);
 }
 
-export function atualizarCenario(id: string, input: { nome?: string; horizonteProjecaoMeses?: number }) {
+export function atualizarCenario(id: string, input: { nome?: string; horizonteProjecaoMeses?: number; limiteNecessidadeMaximaCapital?: string | null }) {
   return patchJson<CenarioResumo>(`/api/cenarios/${id}`, input);
 }
 

@@ -838,6 +838,18 @@ function CartaoCenario({
 
           <div style={{ paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
             <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)", marginBottom: 8 }}>
+              Alertas de risco
+            </div>
+            <AlertasConfigSecao
+              cenarioId={cenarioResumo.id}
+              limiteNecessidadeMaximaCapital={detalhe.limiteNecessidadeMaximaCapital}
+              onAtualizado={recarregar}
+              onErro={onErro}
+            />
+          </div>
+
+          <div style={{ paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)", marginBottom: 8 }}>
               Custos
             </div>
             <CustosSecao
@@ -1175,6 +1187,93 @@ function FinanciamentoSecao({
         <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
           {excluindo ? "Excluindo…" : "Excluir"}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Limite de risco configurável por cenário (achado F15, docs/DECISOES.md
+ * — "alertas de risco configuráveis"): sem valor definido, o motor usa o
+ * padrão de 30% (`LIMITE_NECESSIDADE_MAXIMA_SOBRE_VGV_PADRAO`,
+ * src/core/motorAlertas.ts) — a mesma regra desde a décima oitava fatia.
+ */
+function AlertasConfigSecao({
+  cenarioId,
+  limiteNecessidadeMaximaCapital,
+  onAtualizado,
+  onErro,
+}: {
+  cenarioId: string;
+  limiteNecessidadeMaximaCapital: string | null;
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [valor, setValor] = useState(limiteNecessidadeMaximaCapital ?? "");
+  const [salvando, setSalvando] = useState(false);
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await atualizarCenario(cenarioId, { limiteNecessidadeMaximaCapital: valor.trim() || null });
+      setEditando(false);
+      onAtualizado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function restaurarPadrao() {
+    setSalvando(true);
+    try {
+      await atualizarCenario(cenarioId, { limiteNecessidadeMaximaCapital: null });
+      setValor("");
+      onAtualizado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  if (editando) {
+    return (
+      <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div style={{ width: 200 }}>
+          <TextField label="Limite (0–1, ex.: 0.3 = 30%)" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0.3" />
+        </div>
+        <Button type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+          {salvando ? "Salvando…" : "Salvar"}
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+          Cancelar
+        </Button>
+      </form>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ fontSize: 13, color: "var(--ink-secondary)" }}>
+        Necessidade máxima acima de{" "}
+        <strong style={{ color: "var(--ink-primary)" }}>
+          {limiteNecessidadeMaximaCapital ? `${(Number(limiteNecessidadeMaximaCapital) * 100).toFixed(0)}%` : "30% (padrão)"}
+        </strong>{" "}
+        do VGV dispara alerta crítico.
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+          Editar
+        </Button>
+        {limiteNecessidadeMaximaCapital && (
+          <Button variant="secondary" onClick={restaurarPadrao} disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
+            Restaurar padrão
+          </Button>
+        )}
       </div>
     </div>
   );

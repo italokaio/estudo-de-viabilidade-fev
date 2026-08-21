@@ -134,6 +134,16 @@
 
 **Status.** Aprovado e implementado (vigésima terceira fatia). Testado em `tests/integration/api.auth.test.ts` (redefinição funciona, senha antiga para de logar, redefinir encerra sessões ativas, 403 para usuário comum, validações de tamanho/existência). O evento global de sessão expirada não tem teste automatizado (sem suíte de componentes web) — verificado em navegador real, nos dois temas, reaproveitando `redefinirSenha` para invalidar a própria sessão em uso e confirmar que a próxima chamada pela UI redireciona corretamente ao login com o aviso.
 
+## F15 — Limite de alerta configurável por cenário, não por linha de negócio (achado da Fase 1)
+
+**Contexto.** `calcularAlertas()` (achado F9, décima oitava fatia) já recebia `limiteNecessidadeMaximaSobreVgv` como parâmetro opcional desde que foi escrito — o motor sempre foi flexível. A lacuna documentada era só a falta de um caminho, pela API/tela, para de fato configurar esse valor por cenário; o padrão de 30% ficava hardcoded em todo lugar que chamava a função.
+
+**Decisão.** Novo campo `Cenario.limiteNecessidadeMaximaCapital` (nullable) — nulo continua significando "usa o padrão do motor" (30%, `LIMITE_NECESSIDADE_MAXIMA_SOBRE_VGV_PADRAO`), preenchido substitui esse valor só para o alerta `necessidade_maxima_alta` daquele cenário. Deliberadamente um campo por cenário, não um parâmetro global do sistema nem por empreendimento: cenários diferentes do mesmo empreendimento (base/otimista/pessimista) legitimamente toleram riscos diferentes — um cenário pessimista propositalmente mais alavancado não deveria disparar o mesmo alerta que um cenário base conservador dispararia no mesmo número.
+
+**Decisão de escopo — histórico de alertas não implementado.** A outra lacuna documentada junto com esta ("manter um histórico de alertas ao longo do tempo") foi deliberadamente deixada de fora: alertas são recalculados a cada `GET /fluxo-caixa`, nunca persistidos (mesmo princípio do achado F1 para `MovimentoCaixa` e do achado F9 para os próprios alertas). Persistir um histórico exigiria decidir *quando* tirar cada "foto" (a cada view? um snapshot diário?) — uma decisão de produto em aberto, não uma lacuna técnica simples de fechar dentro desta fatia.
+
+**Status.** Aprovado e implementado (vigésima quarta fatia). Testado em `tests/integration/api.alertas.test.ts` (limite customizado suprime/antecipa o alerta em relação ao padrão, `null` explícito restaura os 30%, validação de valor negativo/inválido, preservação ao duplicar cenário).
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |

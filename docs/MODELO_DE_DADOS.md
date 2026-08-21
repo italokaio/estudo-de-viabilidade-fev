@@ -7,7 +7,7 @@ Convenção: todo valor monetário ou percentual é `String` (texto decimal), nu
 | Tabela | Finalidade | Observação |
 |---|---|---|
 | `empreendimento` | Raiz de tudo | `incorporador` é um campo texto simples nesta fase (achado da revisão: multiempresa real não é necessária ainda — só multiempreendimento) |
-| `cenario` | Base/otimista/pessimista/personalizado | `horizonteProjecaoMeses` é obrigatório e nunca hardcoded em nenhum outro lugar do sistema |
+| `cenario` | Base/otimista/pessimista/personalizado | `horizonteProjecaoMeses` é obrigatório e nunca hardcoded em nenhum outro lugar do sistema; `limiteNecessidadeMaximaCapital` (Fase 1, achado F15) é opcional — nulo usa o padrão de 30% do motor de alertas, por cenário (não por empreendimento), já que cenários base/otimista/pessimista legitimamente toleram riscos diferentes |
 | `terreno` | 1:1 com empreendimento | `areaStatusValidacao` (`pendente`/`validado`/`conflitante`) + `areaObservacao` registram divergências de fonte em vez de escondê-las (ver Splendido: conflito SÍNTESE×LEGAL) |
 | `tipologia` | Produto (ex.: "1 Quarto", "Loja") | Cadastro livre, sem lista fixa |
 | `unidade` | Unidade física vendável | `precoVenda` é um valor direto na linha — sempre foi assim, inclusive quando calculado por cascata de andar (Fase 1, achado F2): a estratégia de precificação decide o número no momento da criação, o schema nunca soube que existia mais de uma estratégia |

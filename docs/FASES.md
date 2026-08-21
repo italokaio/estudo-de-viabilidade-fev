@@ -398,6 +398,24 @@ Terceiro item da lista de três candidatos aprovada em bloco pelo usuário ("pod
 
 **Não implementado nesta fatia:** recuperação autoatendida por email (exigiria infraestrutura de envio de email, fora de escopo), 2FA, expiração configurável (fixa em 7 dias desde a nona fatia), notificar o usuário quando sua sessão é encerrada remotamente enquanto ele ainda está com a aba aberta em outra janela (só a próxima chamada de API percebe).
 
+## Fase 1 (código) — vigésima quarta fatia: alertas de risco configuráveis (este repositório, concluída)
+
+Último item da lista de três candidatos aprovada em bloco pelo usuário ("pode seguir com todas as implementações") — split nominal de comissão, segurança de sessão, alertas de risco configuráveis.
+
+**Decisão de escopo:** `calcularAlertas()` (achado F9) já aceitava um limite customizável como parâmetro desde que foi escrita na décima oitava fatia — só faltava um caminho pela API/tela para configurá-lo. Achado F15 (`docs/DECISOES.md`): o limite é um campo por **cenário**, não global nem por empreendimento — cenários base/otimista/pessimista do mesmo empreendimento legitimamente toleram riscos diferentes. A outra lacuna documentada junto ("histórico de alertas ao longo do tempo") foi deliberadamente deixada de fora — persistir contradiria o princípio de que alertas são sempre recalculados, nunca guardados (mesmo espírito dos achados F1 e F9), e decidir *quando* tirar cada "foto" é uma decisão de produto em aberto, não uma lacuna técnica simples.
+
+**Implementado:**
+- Schema — `Cenario.limiteNecessidadeMaximaCapital String?` (nulo = usa o padrão de 30% do motor).
+- `src/core/motorFinanceiro.ts` — `EntradaMotorFinanceiro.limiteNecessidadeMaximaCapital` (opcional), repassado para `calcularAlertas()`.
+- `src/db/servicoMotor.ts` — `montarEntradaMotor()` lê o campo do cenário.
+- `src/db/cadastro.ts` — `atualizarCenario` aceita o novo campo; `duplicarCenario` copia o valor configurado para o clone.
+- API — `PATCH /api/cenarios/:id` aceita `limiteNecessidadeMaximaCapital` (string decimal, ou `null` explícito para restaurar o padrão; rejeita negativo/inválido); `GET /api/cenarios/:id` expõe o valor atual.
+- Web — nova seção "Alertas de risco" no detalhe do cenário (`AlertasConfigSecao`, `CadastroPage.tsx`), mostrando "30% (padrão)" ou o valor configurado, com "Editar" e "Restaurar padrão" (só aparece quando há um valor customizado).
+- 6 novos testes de API (`tests/integration/api.alertas.test.ts`): limite customizado suprime um alerta que o padrão dispararia e vice-versa, `null` explícito restaura os 30%, validação de valor negativo/inválido, exposição via `GET`, preservação ao duplicar cenário. Suíte total: 34 arquivos, 218 testes.
+- Verificado num navegador real (claro e escuro) no cenário Splendido: editou o limite para 10%, confirmou o texto atualizado e o botão "Restaurar padrão" aparecendo; restaurou o padrão e confirmou o texto voltando a "30% (padrão)" e o botão desaparecendo.
+
+**Não implementado nesta fatia:** histórico de alertas ao longo do tempo (decisão deliberada, ver achado F15), limite configurável por regra individual (só `necessidade_maxima_alta` é configurável — as outras três regras continuam com critérios fixos), limite por empreendimento inteiro (é sempre por cenário).
+
 ## Próxima fase
 
-A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores), a décima sexta fatia de simulação de sensibilidade, a décima sétima de financiamento de produção, a décima oitava de alerta de risco, a décima nona de versão de cenário, a vigésima de estrutura de comissão, a vigésima primeira de correção monetária de custos, a vigésima segunda de split nominal de comissão e a vigésima terceira de segurança de sessão estão concluídas. Resta o último item da lista de três aprovada em bloco: alertas de risco configuráveis pela interface.
+A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores), a décima sexta fatia de simulação de sensibilidade, a décima sétima de financiamento de produção, a décima oitava de alerta de risco, a décima nona de versão de cenário, a vigésima de estrutura de comissão, a vigésima primeira de correção monetária de custos, a vigésima segunda de split nominal de comissão, a vigésima terceira de segurança de sessão e a vigésima quarta de alertas de risco configuráveis estão concluídas. A lista de três itens aprovada em bloco está esgotada. Aguardando direção do usuário sobre o que vem a seguir.

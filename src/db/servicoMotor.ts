@@ -76,6 +76,7 @@ async function montarEntradaMotor(cenarioId: string, opcoes: { taxaDescontoMensa
     taxaDescontoMensal: new Decimal(opcoes.taxaDescontoMensal ?? "0"),
     indiceCorrecao,
     financiamento,
+    limiteNecessidadeMaximaCapital: cenario.limiteNecessidadeMaximaCapital ? new Decimal(cenario.limiteNecessidadeMaximaCapital) : undefined,
   };
 }
 

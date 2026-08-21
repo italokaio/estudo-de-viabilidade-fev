@@ -75,6 +75,8 @@ export async function criarCenario(input: CriarCenarioInput) {
 export interface AtualizarCenarioInput {
   nome?: string;
   horizonteProjecaoMeses?: number;
+  /** Limite de risco configurável (achado F15) — null explícito volta a usar o padrão de 30% do motor. */
+  limiteNecessidadeMaximaCapital?: string | null;
 }
 
 export async function atualizarCenario(id: string, input: AtualizarCenarioInput) {
@@ -137,6 +139,7 @@ export async function duplicarCenario(cenarioId: string, novoNome: string) {
       nome: novoNome,
       horizonteProjecaoMeses: original.horizonteProjecaoMeses,
       derivadoDeCenarioId: original.id,
+      limiteNecessidadeMaximaCapital: original.limiteNecessidadeMaximaCapital,
     },
   });
 

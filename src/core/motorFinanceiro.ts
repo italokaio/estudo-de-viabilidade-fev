@@ -17,6 +17,8 @@ export interface EntradaMotorFinanceiro {
   indiceCorrecao?: PontoIndiceCorrecao[];
   /** financiamento bancario de producao do cenario (achado F8) -- omitido = sem financiamento, comportamento identico ao motor antes desta fatia */
   financiamento?: FinanciamentoInput;
+  /** limite de necessidade maxima de capital sobre o VGV, para o alerta "necessidade_maxima_alta" (achado F15) -- omitido = usa o padrao de 30% do motorAlertas */
+  limiteNecessidadeMaximaCapital?: Decimal;
 }
 
 export interface SaidaMotorFinanceiro {
@@ -124,14 +126,17 @@ export function executarMotorFinanceiro(entrada: EntradaMotorFinanceiro): SaidaM
     return { mes, valor: saidasCorrigidasPorMes.get(mes) ?? new Decimal(0) };
   });
 
-  const alertas = calcularAlertas({
-    vendas: entrada.vendas,
-    custos: entrada.custos,
-    cronograma: entrada.cronograma,
-    recebimentos,
-    indicadores,
-    financiamento,
-  });
+  const alertas = calcularAlertas(
+    {
+      vendas: entrada.vendas,
+      custos: entrada.custos,
+      cronograma: entrada.cronograma,
+      recebimentos,
+      indicadores,
+      financiamento,
+    },
+    entrada.limiteNecessidadeMaximaCapital,
+  );
 
   return { recebimentos, fluxo, indicadores, entradasCorrigidas, saidasCorrigidas, financiamento, alertas };
 }

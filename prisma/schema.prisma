@@ -112,6 +112,11 @@ model Cenario {
   nome                   String
   derivadoDeCenarioId    String?
   horizonteProjecaoMeses Int
+  // Limite de risco configuravel (achado F15, docs/DECISOES.md — "alertas
+  // de risco configuraveis"): nulo = usa o padrao de 30% definido no
+  // motor (LIMITE_NECESSIDADE_MAXIMA_SOBRE_VGV_PADRAO); preenchido, o
+  // alerta "necessidade_maxima_alta" passa a disparar acima deste valor.
+  limiteNecessidadeMaximaCapital String? // decimal-as-string, 0..1
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 

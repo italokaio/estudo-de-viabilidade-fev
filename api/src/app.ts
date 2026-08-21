@@ -947,6 +947,7 @@ export async function buildApp() {
       nome: cenario.nome,
       tipo: cenario.tipo,
       horizonteProjecaoMeses: cenario.horizonteProjecaoMeses,
+      limiteNecessidadeMaximaCapital: cenario.limiteNecessidadeMaximaCapital,
       empreendimento: { id: cenario.empreendimento.id, nome: cenario.empreendimento.nome },
       tipologiasDisponiveis: cenario.empreendimento.tipologias,
       categoriasCustoDisponiveis: cenario.empreendimento.categoriasCusto,
@@ -984,10 +985,10 @@ export async function buildApp() {
     };
   });
 
-  app.patch<{ Params: { id: string }; Body: { nome?: string; horizonteProjecaoMeses?: number } }>(
+  app.patch<{ Params: { id: string }; Body: { nome?: string; horizonteProjecaoMeses?: number; limiteNecessidadeMaximaCapital?: string | null } }>(
     "/api/cenarios/:id",
     async (req, reply) => {
-      const { nome, horizonteProjecaoMeses } = req.body ?? {};
+      const { nome, horizonteProjecaoMeses, limiteNecessidadeMaximaCapital } = req.body ?? {};
       if (nome !== undefined && !nome.trim()) {
         reply.code(400);
         return { erro: "Nome do cenário não pode ficar vazio" };
@@ -996,13 +997,27 @@ export async function buildApp() {
         reply.code(400);
         return { erro: "Horizonte de projeção deve ser um número inteiro de meses maior que zero" };
       }
+      // Achado F15 (docs/DECISOES.md — "alertas de risco configuraveis"):
+      // null explicito volta a usar o padrao de 30% do motor; string vazia
+      // e tratada como o mesmo "voltar ao padrao", nao como erro.
+      if (limiteNecessidadeMaximaCapital !== undefined && limiteNecessidadeMaximaCapital !== null && limiteNecessidadeMaximaCapital.trim() !== "") {
+        const valor = Number(limiteNecessidadeMaximaCapital);
+        if (Number.isNaN(valor) || valor < 0) {
+          reply.code(400);
+          return { erro: "Limite de risco deve ser um percentual válido, maior ou igual a zero" };
+        }
+      }
       const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
       if (!cenario) {
         reply.code(404);
         return { erro: "Cenário não encontrado" };
       }
       if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
-      return atualizarCenario(req.params.id, { nome: nome?.trim(), horizonteProjecaoMeses });
+      return atualizarCenario(req.params.id, {
+        nome: nome?.trim(),
+        horizonteProjecaoMeses,
+        limiteNecessidadeMaximaCapital: limiteNecessidadeMaximaCapital === undefined ? undefined : limiteNecessidadeMaximaCapital?.trim() || null,
+      });
     },
   );
 

@@ -92,4 +92,88 @@ describe("API — alertas de risco", () => {
     const alertas = res.json().alertas;
     expect(alertas.map((a: any) => a.tipo)).toContain("financiamento_amortizacao_sem_receita");
   });
+
+  /**
+   * Limite de risco configurável por cenário (achado F15, docs/DECISOES.md
+   * — "alertas de risco configuráveis"): PATCH /api/cenarios/:id aceita
+   * limiteNecessidadeMaximaCapital; nulo explícito volta ao padrão de 30%.
+   */
+  async function cadastrarCenarioComNecessidadeAlta() {
+    const { empreendimentoId, cenarioId } = await cadastrarEmpreendimentoVazio();
+    const tip = await app.inject({ method: "POST", url: `/api/empreendimentos/${empreendimentoId}/tipologias`, payload: { nome: "Studio", precoUnitarioPadrao: "10000" } });
+    const tipologiaId = tip.json().id as string;
+    await app.inject({ method: "POST", url: `/api/tipologias/${tipologiaId}/unidades`, payload: { quantidade: 1, precoVenda: "10000", prefixoNumero: "ST" } });
+    await app.inject({
+      method: "POST",
+      url: `/api/tipologias/${tipologiaId}/condicoes-pagamento`,
+      payload: { nome: "À vista", modalidades: [{ nome: "Ato", percentual: "1", tipoDistribuicao: "unica_na_venda" }] },
+    });
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/premissas-velocidade`, payload: { itens: [{ tipologiaId, mes: 6, unidadesPrevistas: "1" }] } });
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/gerar-vendas` });
+    // necessidade maxima ~40% do VGV (10000)
+    const cat = await app.inject({ method: "POST", url: `/api/empreendimentos/${empreendimentoId}/categorias-custo`, payload: { nome: "Obra", tipoIncidencia: "fixo" } });
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/custos`, payload: { categoriaId: cat.json().id, valorPrevisto: "4000", competenciaMes: 1 } });
+    return cenarioId;
+  }
+
+  it("GET /api/cenarios/:id expõe limiteNecessidadeMaximaCapital (nulo por padrão)", async () => {
+    const { cenarioId } = await cadastrarEmpreendimentoVazio();
+    const res = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}` });
+    expect(res.json().limiteNecessidadeMaximaCapital).toBeNull();
+  });
+
+  it("um limite customizado mais alto suprime o alerta que o padrão de 30% dispararia", async () => {
+    const cenarioId = await cadastrarCenarioComNecessidadeAlta();
+    const semLimite = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
+    expect(semLimite.json().alertas.map((a: any) => a.tipo)).toContain("necessidade_maxima_alta");
+
+    const patch = await app.inject({ method: "PATCH", url: `/api/cenarios/${cenarioId}`, payload: { limiteNecessidadeMaximaCapital: "0.5" } });
+    expect(patch.statusCode).toBe(200);
+
+    const comLimite = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
+    expect(comLimite.json().alertas.map((a: any) => a.tipo)).not.toContain("necessidade_maxima_alta");
+  });
+
+  it("um limite customizado mais baixo dispara o alerta antes do padrão de 30%", async () => {
+    const { cenarioId } = await cadastrarEmpreendimentoVazio();
+    const res = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
+    expect(res.json().alertas).toEqual([]); // cenario vazio, sem custo/venda -- sem alerta mesmo
+
+    await app.inject({ method: "PATCH", url: `/api/cenarios/${cenarioId}`, payload: { limiteNecessidadeMaximaCapital: "0" } });
+    const detalhe = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}` });
+    expect(detalhe.json().limiteNecessidadeMaximaCapital).toBe("0");
+  });
+
+  it("null explícito restaura o padrão de 30%", async () => {
+    const cenarioId = await cadastrarCenarioComNecessidadeAlta();
+    await app.inject({ method: "PATCH", url: `/api/cenarios/${cenarioId}`, payload: { limiteNecessidadeMaximaCapital: "0.5" } });
+    const suprimido = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
+    expect(suprimido.json().alertas.map((a: any) => a.tipo)).not.toContain("necessidade_maxima_alta");
+
+    await app.inject({ method: "PATCH", url: `/api/cenarios/${cenarioId}`, payload: { limiteNecessidadeMaximaCapital: null } });
+    const detalhe = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}` });
+    expect(detalhe.json().limiteNecessidadeMaximaCapital).toBeNull();
+
+    const restaurado = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
+    expect(restaurado.json().alertas.map((a: any) => a.tipo)).toContain("necessidade_maxima_alta");
+  });
+
+  it("rejeita um limite negativo ou inválido", async () => {
+    const { cenarioId } = await cadastrarEmpreendimentoVazio();
+    const negativo = await app.inject({ method: "PATCH", url: `/api/cenarios/${cenarioId}`, payload: { limiteNecessidadeMaximaCapital: "-0.1" } });
+    expect(negativo.statusCode).toBe(400);
+    const invalido = await app.inject({ method: "PATCH", url: `/api/cenarios/${cenarioId}`, payload: { limiteNecessidadeMaximaCapital: "abc" } });
+    expect(invalido.statusCode).toBe(400);
+  });
+
+  it("duplicar um cenário preserva o limite de risco configurado", async () => {
+    const cenarioId = await cadastrarCenarioComNecessidadeAlta();
+    await app.inject({ method: "PATCH", url: `/api/cenarios/${cenarioId}`, payload: { limiteNecessidadeMaximaCapital: "0.5" } });
+
+    const dup = await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/duplicar`, payload: { nome: "Base v2" } });
+    const novoId = dup.json().id as string;
+
+    const detalhe = await app.inject({ method: "GET", url: `/api/cenarios/${novoId}` });
+    expect(detalhe.json().limiteNecessidadeMaximaCapital).toBe("0.5");
+  });
 });
