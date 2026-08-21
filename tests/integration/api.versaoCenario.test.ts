@@ -135,4 +135,63 @@ describe("API — versão de cenário (duplicar)", () => {
     expect(cenarioNovo).toBeDefined();
     expect(cenarioNovo.derivadoDeNome).toBeNull();
   });
+
+  /**
+   * Comparação de cenários derivados (achado F18, docs/DECISOES.md):
+   * indicadores do cenário atual lado a lado com seu original (se
+   * derivado) e seus derivados diretos — só um nível para cada lado.
+   */
+  it("um cenário sem nenhuma relação de derivação só se vê na comparação", async () => {
+    const { cenarioId } = await cadastrarCenarioCompleto();
+    const res = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/comparacao` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().versoes).toHaveLength(1);
+    expect(res.json().versoes[0].relacao).toBe("atual");
+  });
+
+  it("a partir do original, a comparação inclui o cenário duplicado como 'derivado'", async () => {
+    const { cenarioId } = await cadastrarCenarioCompleto();
+    const dup = await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/duplicar`, payload: { nome: "Base v2" } });
+    const novoId = dup.json().id as string;
+
+    const res = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/comparacao` });
+    const versoes = res.json().versoes;
+    expect(versoes).toHaveLength(2);
+    expect(versoes.find((v: any) => v.id === cenarioId).relacao).toBe("atual");
+    expect(versoes.find((v: any) => v.id === novoId).relacao).toBe("derivado");
+    expect(versoes.find((v: any) => v.id === novoId).nome).toBe("Base v2");
+  });
+
+  it("a partir do cenário duplicado, a comparação inclui o original como 'original'", async () => {
+    const { cenarioId } = await cadastrarCenarioCompleto();
+    const dup = await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/duplicar`, payload: { nome: "Base v2" } });
+    const novoId = dup.json().id as string;
+
+    const res = await app.inject({ method: "GET", url: `/api/cenarios/${novoId}/comparacao` });
+    const versoes = res.json().versoes;
+    expect(versoes).toHaveLength(2);
+    expect(versoes.find((v: any) => v.id === novoId).relacao).toBe("atual");
+    expect(versoes.find((v: any) => v.id === cenarioId).relacao).toBe("original");
+    expect(versoes.find((v: any) => v.id === cenarioId).nome).toBe("Base");
+  });
+
+  it("os indicadores de cada versão refletem os dados daquele cenário especificamente (o derivado, sem vendas, tem VPL diferente do original)", async () => {
+    const { cenarioId } = await cadastrarCenarioCompleto();
+    const dup = await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/duplicar`, payload: { nome: "Base v2" } });
+    const novoId = dup.json().id as string;
+
+    const res = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/comparacao` });
+    const versoes = res.json().versoes;
+    const original = versoes.find((v: any) => v.id === cenarioId);
+    const derivado = versoes.find((v: any) => v.id === novoId);
+    // o original tem vendas geradas (VPL positivo pela receita); o
+    // derivado nao copia vendas (achado F10) -- so tem o custo de 50000,
+    // sem nenhuma receita -- VPL do derivado deve ser mais negativo.
+    expect(Number(derivado.vpl)).toBeLessThan(Number(original.vpl));
+  });
+
+  it("404 para cenário inexistente na comparação", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/cenarios/id-inexistente/comparacao" });
+    expect(res.statusCode).toBe(404);
+  });
 });

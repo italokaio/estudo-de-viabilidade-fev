@@ -170,6 +170,14 @@
 
 **Status.** Aprovado e implementado (vigésima sexta fatia). Testado em `tests/integration/api.renegociacaoVenda.test.ts` (registro, efeito no próximo recálculo do fluxo, validações de valor, rejeição para venda distratada, histórico de múltiplas renegociações, preservação de `valorRealizado`, e os dois testes de regressão da exclusão em cascata).
 
+## F18 — Comparação de cenários derivados: só um nível para cada lado, sem persistir nada (achado da Fase 1)
+
+**Contexto.** A décima nona fatia (achado F10, "versão de cenário") implementou duplicar um cenário, mas a única forma de enxergar a relação era um badge "Derivado de" no cartão — nenhuma tela mostrava os indicadores de um cenário e seus derivados lado a lado, que é a razão prática de existir a funcionalidade (comparar um cenário base com uma variação otimista/pessimista).
+
+**Decisão.** Nova rota `GET /api/cenarios/:id/comparacao` monta a "família" do cenário — ele mesmo, o cenário do qual deriva (se houver) e todos os seus derivados diretos — e roda `rodarMotorParaCenario()` (já existente, sem nenhuma mudança) para cada um, devolvendo os quatro indicadores principais (VPL, necessidade máxima, mês do pico, mês de recuperação) lado a lado. Deliberadamente **só um nível para cada lado** — o pai direto e os filhos diretos, não a árvore inteira de derivações em cascata (um cenário derivado de um derivado não aparece na comparação do avô). Mesmo padrão de simulação de sensibilidade: nada é persistido além do que `rodarMotorParaCenario()` já persiste normalmente (`RecebimentoProjetado` de cada cenário, como qualquer `GET /fluxo-caixa` individual já faz).
+
+**Status.** Aprovado e implementado (vigésima sétima fatia). Testado em `tests/integration/api.versaoCenario.test.ts` (cenário sem relação só se vê a si mesmo; a partir do original o derivado aparece como "derivado"; a partir do derivado o original aparece como "original"; os indicadores refletem os dados de cada cenário especificamente — o derivado sem vendas copiadas tem VPL menor que o original).
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |

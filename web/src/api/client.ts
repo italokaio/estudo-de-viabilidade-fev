@@ -100,6 +100,23 @@ export async function fetchSensibilidade(cenarioId: string, eixo: EixoSensibilid
   return res.json();
 }
 
+export interface VersaoComparada {
+  id: string;
+  nome: string;
+  tipo: string;
+  relacao: "atual" | "original" | "derivado";
+  necessidadeMaximaCapital: string;
+  mesPico: number | null;
+  mesRecuperacao: number | null;
+  vpl: string;
+}
+
+export async function fetchComparacaoCenarios(cenarioId: string): Promise<{ versoes: VersaoComparada[] }> {
+  const res = await apiFetch(`/api/cenarios/${cenarioId}/comparacao`);
+  if (!res.ok) throw new Error(`Falha ao comparar versões (${res.status})`);
+  return res.json();
+}
+
 export type TipoDistribuicao = "unica_na_venda" | "nivelada" | "periodica" | "mes_fixo";
 
 export interface ModalidadeInput {

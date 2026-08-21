@@ -1669,5 +1669,50 @@ export async function buildApp() {
     },
   );
 
+  // Comparacao de cenarios derivados (achado F18, docs/DECISOES.md —
+  // "versao de cenario" ganha comparacao real): roda o motor para o
+  // cenario atual, o cenario do qual ele deriva (se houver) e todos os
+  // seus derivados diretos -- so um nivel para cada lado, nao a arvore
+  // inteira. Cada rodada persiste RecebimentoProjetado normalmente (mesmo
+  // comportamento de /fluxo-caixa para cada cenario individualmente).
+  app.get<{ Params: { id: string } }>("/api/cenarios/:id/comparacao", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({
+      where: { id: req.params.id },
+      include: {
+        derivadoDe: { select: { id: true, nome: true, tipo: true } },
+        derivados: { select: { id: true, nome: true, tipo: true }, orderBy: { createdAt: "asc" } },
+      },
+    });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+
+    const familia: { id: string; nome: string; tipo: string; relacao: "atual" | "original" | "derivado" }[] = [
+      { id: cenario.id, nome: cenario.nome, tipo: cenario.tipo, relacao: "atual" },
+      ...(cenario.derivadoDe ? [{ id: cenario.derivadoDe.id, nome: cenario.derivadoDe.nome, tipo: cenario.derivadoDe.tipo, relacao: "original" as const }] : []),
+      ...cenario.derivados.map((d) => ({ id: d.id, nome: d.nome, tipo: d.tipo, relacao: "derivado" as const })),
+    ];
+
+    const versoes = await Promise.all(
+      familia.map(async (f) => {
+        const resultado = await rodarMotorParaCenario(f.id, { taxaDescontoMensal: "0.005" });
+        return {
+          id: f.id,
+          nome: f.nome,
+          tipo: f.tipo,
+          relacao: f.relacao,
+          necessidadeMaximaCapital: resultado.indicadores.necessidadeMaximaCapital.toFixed(2),
+          mesPico: resultado.indicadores.mesPico,
+          mesRecuperacao: resultado.indicadores.mesRecuperacao,
+          vpl: resultado.indicadores.vpl.toFixed(2),
+        };
+      }),
+    );
+
+    return { versoes };
+  });
+
   return app;
 }
