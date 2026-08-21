@@ -1,7 +1,7 @@
 import { Decimal } from "decimal.js";
 import { describe, expect, it } from "vitest";
-import { calcularFatorCorrecao, corrigirRecebimentos } from "../../src/core/motorCorrecao.js";
-import type { PontoIndiceCorrecao, RecebimentoGerado } from "../../src/core/types.js";
+import { calcularFatorCorrecao, corrigirDesembolsos, corrigirRecebimentos } from "../../src/core/motorCorrecao.js";
+import type { DesembolsoMensal, PontoIndiceCorrecao, RecebimentoGerado } from "../../src/core/types.js";
 
 describe("motor de correção monetária", () => {
   it("sem índice cadastrado, o fator é sempre 1", () => {
@@ -60,5 +60,28 @@ describe("motor de correção monetária", () => {
     ];
     const corrigidos = corrigirRecebimentos(recebimentos, new Map([["v1", 1]]), []);
     expect(corrigidos[0]!.valorCorrigido.toString()).toBe("500");
+  });
+
+  it("corrigirDesembolsos aplica o fator sobre o valor, usando um único mes-base para todos os custos (achado F12)", () => {
+    const desembolsos: DesembolsoMensal[] = [
+      { custoId: "c1", mes: 1, valor: new Decimal("1000") },
+      { custoId: "c1", mes: 3, valor: new Decimal("1000") },
+    ];
+    const indices: PontoIndiceCorrecao[] = [
+      { mes: 2, percentual: new Decimal("0.01") },
+      { mes: 3, percentual: new Decimal("0.01") },
+    ];
+    const corrigidos = corrigirDesembolsos(desembolsos, 1, indices);
+    expect(corrigidos).toHaveLength(2);
+    // mes 1 == mes-base -> nunca corrige a si mesmo
+    expect(corrigidos[0]!.valorCorrigido.toString()).toBe("1000");
+    // mes 3: 1000 * 1.01 * 1.01 = 1020.10
+    expect(corrigidos[1]!.valorCorrigido.toDecimalPlaces(2).toString()).toBe("1020.1");
+  });
+
+  it("corrigirDesembolsos sem índice algum é idêntico ao valor nominal", () => {
+    const desembolsos: DesembolsoMensal[] = [{ custoId: "c1", mes: 10, valor: new Decimal("5000") }];
+    const corrigidos = corrigirDesembolsos(desembolsos, 1, []);
+    expect(corrigidos[0]!.valorCorrigido.toString()).toBe("5000");
   });
 });

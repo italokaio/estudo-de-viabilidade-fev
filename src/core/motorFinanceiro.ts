@@ -1,6 +1,6 @@
 import { Decimal } from "decimal.js";
 import { calcularAlertas, type Alerta } from "./motorAlertas.js";
-import { corrigirRecebimentos } from "./motorCorrecao.js";
+import { corrigirDesembolsos, corrigirRecebimentos } from "./motorCorrecao.js";
 import { gerarDesembolsosMensais, type ContextoCustos } from "./motorCustos.js";
 import { calcularFinanciamento, type FinanciamentoInput, type PontoFinanciamento } from "./motorFinanciamento.js";
 import { calcularIndicadores, consolidarFluxoCaixa } from "./motorFluxoCaixa.js";
@@ -25,6 +25,8 @@ export interface SaidaMotorFinanceiro {
   indicadores: IndicadoresFluxo;
   /** entradas de cada mes corrigidas pelo indice de correcao, incluindo liberacoes de financiamento (sem correcao aplicada a elas -- nao sao saldo de venda) */
   entradasCorrigidas: { mes: number; valor: Decimal }[];
+  /** saidas de cada mes corrigidas pelo indice de correcao (achado F12), a partir de um mes-base fixo (1); inclui amortizacao de financiamento verbatim, sem correcao (mesmo tratamento das liberacoes em entradasCorrigidas) */
+  saidasCorrigidas: { mes: number; valor: Decimal }[];
   /** liberacao/amortizacao/saldo devedor do financiamento por mes -- vazio quando o cenario nao tem financiamento */
   financiamento: PontoFinanciamento[];
   /** alertas de risco computados a partir do resultado acima -- nunca muda fluxo/indicadores, so os interpreta */
@@ -99,6 +101,29 @@ export function executarMotorFinanceiro(entrada: EntradaMotorFinanceiro): SaidaM
     return { mes, valor: entradasCorrigidasPorMes.get(mes) ?? new Decimal(0) };
   });
 
+  // Correcao monetaria de custos (achado F12): mes-base fixo em 1 -- o
+  // orcamento de obra e fixado uma unica vez, no inicio do cronograma, ao
+  // contrario de recebimentos (um mes-base por venda). Sem indice
+  // cadastrado, fator=1 e "saidasCorrigidas" == "saidas" (comportamento
+  // identico ao motor antes desta fatia, mesmo padrao do achado F6).
+  const desembolsosCorrigidos = corrigirDesembolsos(desembolsos, 1, entrada.indiceCorrecao ?? []);
+  const saidasCorrigidasPorMes = new Map<number, Decimal>();
+  for (const d of desembolsosCorrigidos) {
+    const atual = saidasCorrigidasPorMes.get(d.mes) ?? new Decimal(0);
+    saidasCorrigidasPorMes.set(d.mes, atual.plus(d.valorCorrigido));
+  }
+  // amortizacao de financiamento nao passa por correcao monetaria (nao e
+  // custo orcado) -- somada verbatim, mesmo tratamento das liberacoes acima.
+  for (const f of financiamento) {
+    if (f.amortizacao.isZero()) continue;
+    const atual = saidasCorrigidasPorMes.get(f.mes) ?? new Decimal(0);
+    saidasCorrigidasPorMes.set(f.mes, atual.plus(f.amortizacao));
+  }
+  const saidasCorrigidas = Array.from({ length: entrada.horizonteMeses }, (_, i) => {
+    const mes = i + 1;
+    return { mes, valor: saidasCorrigidasPorMes.get(mes) ?? new Decimal(0) };
+  });
+
   const alertas = calcularAlertas({
     vendas: entrada.vendas,
     custos: entrada.custos,
@@ -108,5 +133,5 @@ export function executarMotorFinanceiro(entrada: EntradaMotorFinanceiro): SaidaM
     financiamento,
   });
 
-  return { recebimentos, fluxo, indicadores, entradasCorrigidas, financiamento, alertas };
+  return { recebimentos, fluxo, indicadores, entradasCorrigidas, saidasCorrigidas, financiamento, alertas };
 }

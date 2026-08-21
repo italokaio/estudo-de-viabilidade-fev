@@ -7,9 +7,9 @@ export function FluxoTable({ dados }: { dados: PontoFluxo[] }) {
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            {["Mês", "Entradas", "Corrigido", "Recebido", "Saídas", "Pago", "Acumulado"].map((h, i) => (
+            {["Mês", "Entradas", "Corrigido", "Recebido", "Saídas", "Corrigido", "Pago", "Acumulado"].map((h, i) => (
               <th
-                key={h}
+                key={i}
                 style={{
                   position: "sticky",
                   top: 0,
@@ -42,6 +42,9 @@ export function FluxoTable({ dados }: { dados: PontoFluxo[] }) {
                   {d.entradasRealizadas !== null ? formatBRL(d.entradasRealizadas) : <span style={{ color: "var(--ink-muted)" }}>—</span>}
                 </td>
                 <td style={cellStyle("right")}>{formatBRL(d.saidas)}</td>
+                <td style={{ ...cellStyle("right"), color: d.saidasCorrigidas !== d.saidas ? "var(--accent-text)" : "var(--ink-muted)" }}>
+                  {formatBRL(d.saidasCorrigidas)}
+                </td>
                 <td style={{ ...cellStyle("right"), color: "var(--status-critical-text)" }}>
                   {d.saidasRealizadas !== null ? formatBRL(d.saidasRealizadas) : <span style={{ color: "var(--ink-muted)" }}>—</span>}
                 </td>

@@ -1418,6 +1418,7 @@ export async function buildApp() {
     }
 
     const entradasCorrigidasPorMes = new Map(resultado.entradasCorrigidas.map((e) => [e.mes, e.valor]));
+    const saidasCorrigidasPorMes = new Map(resultado.saidasCorrigidas.map((s) => [s.mes, s.valor]));
 
     return {
       empreendimento: cenario.empreendimento.nome,
@@ -1432,6 +1433,7 @@ export async function buildApp() {
         entradasRealizadas: entradasRealizadasPorMes.get(f.mes)?.toFixed(2) ?? null,
         saidasRealizadas: saidasRealizadasPorMes.get(f.mes)?.toFixed(2) ?? null,
         entradasCorrigidas: (entradasCorrigidasPorMes.get(f.mes) ?? new Decimal(0)).toFixed(2),
+        saidasCorrigidas: (saidasCorrigidasPorMes.get(f.mes) ?? new Decimal(0)).toFixed(2),
       })),
       indicadores: {
         necessidadeMaximaCapital: resultado.indicadores.necessidadeMaximaCapital.toFixed(2),

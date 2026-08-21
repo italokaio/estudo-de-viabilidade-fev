@@ -1,5 +1,5 @@
 import { Decimal } from "decimal.js";
-import type { PontoIndiceCorrecao, RecebimentoGerado } from "./types.js";
+import type { DesembolsoMensal, PontoIndiceCorrecao, RecebimentoGerado } from "./types.js";
 
 /**
  * Correcao monetaria (achado F6, docs/DECISOES.md): uma segunda camada por
@@ -9,6 +9,10 @@ import type { PontoIndiceCorrecao, RecebimentoGerado } from "./types.js";
  * corrigido pelo fator acumulado entre o mes da venda e o mes de
  * competencia da parcela -- mesmo padrao do motor de custos, que tambem
  * nao sabe o nome "comissao" ou "RET".
+ *
+ * Estendido (achado F12) para tambem corrigir desembolsos de custo, com um
+ * mes-base fixo por cenario em vez de um mes-base por linha -- ver
+ * corrigirDesembolsos abaixo.
  */
 
 /**
@@ -41,5 +45,20 @@ export function corrigirRecebimentos(
     const mesOrigem = mesOrigemPorVenda.get(r.vendaId) ?? r.mesCompetencia;
     const fator = calcularFatorCorrecao(mesOrigem, r.mesCompetencia, indices);
     return { mesCompetencia: r.mesCompetencia, valorCorrigido: r.valorPrevisto.times(fator) };
+  });
+}
+
+/**
+ * Corrige cada desembolso de custo pelo fator acumulado entre um mes-base
+ * unico (achado F12, docs/DECISOES.md) e o mes em que o desembolso ocorre.
+ * Diferente de corrigirRecebimentos -- que usa o mes da VENDA que originou
+ * cada parcela, um por venda --, aqui o mes-base e sempre o mesmo para
+ * todo custo do cenario: o orcamento de obra e fixado uma unica vez, no
+ * inicio do cronograma (mes 1), nao a cada linha de custo.
+ */
+export function corrigirDesembolsos(desembolsos: DesembolsoMensal[], mesBase: number, indices: PontoIndiceCorrecao[]): { mes: number; valorCorrigido: Decimal }[] {
+  return desembolsos.map((d) => {
+    const fator = calcularFatorCorrecao(mesBase, d.mes, indices);
+    return { mes: d.mes, valorCorrigido: d.valor.times(fator) };
   });
 }

@@ -13,6 +13,7 @@ export interface PontoFluxo {
   entradasRealizadas: string | null;
   saidasRealizadas: string | null;
   entradasCorrigidas: string;
+  saidasCorrigidas: string;
 }
 
 export interface PontoFinanciamentoFluxo {

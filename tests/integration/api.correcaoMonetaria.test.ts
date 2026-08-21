@@ -10,6 +10,10 @@ import { resetDatabase } from "../helpers/resetDatabase.js";
  * serie de variacao mensal cadastrada por cenario, aplicada por cima do
  * valor nominal ja calculado pelo motor de recebimentos -- sem indice
  * cadastrado, o comportamento e identico ao motor antes desta fatia.
+ *
+ * O bloco final testa a extensao a custos (achado F12): o mesmo indice
+ * tambem corrige desembolsos de Custo, mas a partir de um mes-base fixo
+ * (1), nao do mes de cada linha -- ver src/core/motorCorrecao.ts.
  */
 describe("API — índice de correção monetária", () => {
   let app: Awaited<ReturnType<typeof buildApp>>;
@@ -173,5 +177,88 @@ describe("API — índice de correção monetária", () => {
     expect(res.statusCode).toBe(404);
 
     await rawApp.close();
+  });
+
+  /**
+   * Correção monetária de custos (achado F12, docs/DECISOES.md): estende o
+   * mesmo índice de correção — já usado para RecebimentoProjetado — a
+   * Custo, com um mês-base fixo (1) em vez de um mês-base por linha (o
+   * orçamento de obra é fixado uma única vez, no início do cronograma).
+   */
+  async function cadastrarCenarioComCustoFixoNoMes3() {
+    const emp = await app.inject({ method: "POST", url: "/api/empreendimentos", payload: { nome: "Correção Custo Teste" } });
+    const empreendimentoId = emp.json().id as string;
+
+    const cenarioRes = await app.inject({
+      method: "POST",
+      url: `/api/empreendimentos/${empreendimentoId}/cenarios`,
+      payload: { tipo: "base", nome: "Base", horizonteProjecaoMeses: 3 },
+    });
+    const cenarioId = cenarioRes.json().id as string;
+
+    const cat = await app.inject({ method: "POST", url: `/api/empreendimentos/${empreendimentoId}/categorias-custo`, payload: { nome: "Legalização", tipoIncidencia: "fixo" } });
+    await app.inject({
+      method: "POST",
+      url: `/api/cenarios/${cenarioId}/custos`,
+      payload: { categoriaId: cat.json().id, valorPrevisto: "100000", competenciaMes: 3 },
+    });
+
+    return { empreendimentoId, cenarioId };
+  }
+
+  it("sem índice cadastrado, saidasCorrigidas é idêntico a saidas", async () => {
+    const { cenarioId } = await cadastrarCenarioComCustoFixoNoMes3();
+    const fluxo = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
+    const mes3 = fluxo.json().fluxo[2];
+    expect(mes3.saidas).toBe("100000.00");
+    expect(mes3.saidasCorrigidas).toBe("100000.00");
+  });
+
+  it("corrige um custo pelo índice, sempre a partir do mês-base 1 (não do mês do custo)", async () => {
+    const { cenarioId } = await cadastrarCenarioComCustoFixoNoMes3();
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/indices-correcao`, payload: { mes: 2, percentual: "0.10" } });
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/indices-correcao`, payload: { mes: 3, percentual: "0.10" } });
+
+    const fluxo = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
+    const mes3 = fluxo.json().fluxo[2];
+    // custo lancado no mes 3, mas o mes-base e sempre 1: fator = 1.10 * 1.10 = 1.21
+    expect(mes3.saidas).toBe("100000.00");
+    expect(mes3.saidasCorrigidas).toBe("121000.00");
+  });
+
+  it("correção de entradas e de saídas são independentes uma da outra", async () => {
+    const { empreendimentoId, cenarioId } = await cadastrarCenarioComCustoFixoNoMes3();
+    const tip = await app.inject({
+      method: "POST",
+      url: `/api/empreendimentos/${empreendimentoId}/tipologias`,
+      payload: { nome: "Studio", precoUnitarioPadrao: "50000" },
+    });
+    const tipologiaId = tip.json().id as string;
+    await app.inject({ method: "POST", url: `/api/tipologias/${tipologiaId}/unidades`, payload: { quantidade: 1, precoVenda: "50000", prefixoNumero: "ST" } });
+    await app.inject({
+      method: "POST",
+      url: `/api/tipologias/${tipologiaId}/condicoes-pagamento`,
+      payload: { nome: "Chaves", modalidades: [{ nome: "Chaves", percentual: "1", tipoDistribuicao: "mes_fixo", mesFixo: 3 }] },
+    });
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/premissas-velocidade`, payload: { itens: [{ tipologiaId, mes: 1, unidadesPrevistas: "1" }] } });
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/gerar-vendas` });
+
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/indices-correcao`, payload: { mes: 3, percentual: "0.20" } });
+
+    const fluxo = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
+    const mes3 = fluxo.json().fluxo[2];
+    // entrada: venda no mes 1, recebimento no mes 3 -> fator 1.20 (so o mes 3 tem indice)
+    expect(mes3.entradasCorrigidas).toBe("60000.00");
+    // saida: custo com mes-base fixo 1 -> mesmo fator 1.20, mas sobre uma base diferente (100000)
+    expect(mes3.saidasCorrigidas).toBe("120000.00");
+  });
+
+  it("DELETE de um ponto de índice também reverte a correção de custos", async () => {
+    const { cenarioId } = await cadastrarCenarioComCustoFixoNoMes3();
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/indices-correcao`, payload: { mes: 3, percentual: "0.15" } });
+    await app.inject({ method: "DELETE", url: `/api/cenarios/${cenarioId}/indices-correcao/3` });
+
+    const fluxo = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
+    expect(fluxo.json().fluxo[2].saidasCorrigidas).toBe("100000.00");
   });
 });

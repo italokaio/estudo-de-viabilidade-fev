@@ -102,6 +102,16 @@
 
 **Status.** Aprovado e implementado (vigésima fatia). Testado em `tests/core/motorCustos.test.ts` (a estratégia de incidência isolada) e `tests/integration/api.estruturaComissao.test.ts` (efeito de ponta a ponta no fluxo de caixa, validação de escopo, exposição na API, preservação ao duplicar cenário).
 
+## F12 — Correção monetária de custos usa um mês-base fixo por cenário, não um mês-base por linha (achado da Fase 1)
+
+**Contexto.** A décima segunda fatia (achado F6) aplicou correção monetária só a `RecebimentoProjetado` — `Custo` ficou de fora, deliberadamente, como uma lacuna documentada. É uma lacuna real: um orçamento de obra de R$36 milhões, desembolsado ao longo de 36 meses sem nenhuma correção por INCC/CUB, subestima sistematicamente o capital necessário em qualquer cenário com inflação de insumos — exatamente o tipo de erro que a planilha original do Splendido já cometia (ver `docs/DIVERGENCIAS_PLANILHA.md`, achado D1).
+
+**Decisão.** Reaproveitar inteiramente `calcularFatorCorrecao()` (já genérico: `mesInicio`, `mesFim`, `indices`) e a mesma série `IndiceCorrecao` já cadastrada por cenário — nenhuma tabela nova, nenhum índice separado para custos. A única decisão de design real foi **qual mês-base usar**. Para `RecebimentoProjetado`, o mês-base é o mês da *venda* que originou aquela parcela — cada venda tem o seu próprio, porque cada contrato é assinado (e precificado) em um mês diferente. Para `Custo` não existe um equivalente: um orçamento de obra é fixado **uma única vez**, no início do cronograma — não a cada linha de custo, e as incidências percentuais (`pct_execucao`, `pct_vgv_vendido_no_mes`, `pct_recebido_mes_anterior`) nem têm um "mês de origem" individual, só uma série de desembolsos mensais. A decisão foi usar um mês-base **fixo e único por cenário: o mês 1** — aplicado a todo `Custo`, de toda incidência, sem exceção. Sem nenhum índice cadastrado, o fator é sempre 1 e o comportamento é idêntico ao motor antes desta fatia (mesma garantia aditiva do achado F6).
+
+**Decisão de implementação.** `corrigirDesembolsos()` (`src/core/motorCorrecao.ts`) é quase idêntica a `corrigirRecebimentos()`, só trocando "um `Map<vendaId, mesOrigem>`" por um `mesBase: number` único. `executarMotorFinanceiro()` soma o resultado em `saidasCorrigidas`, exposto em `GET /cenarios/:id/fluxo-caixa` e na tela ao lado de `entradasCorrigidas` — mesmo padrão aditivo, nunca substitui `fluxo`/`indicadores` nominais. Amortização de financiamento (achado F8) é somada a `saidasCorrigidas` **sem correção** — não é um custo orçado, é uma devolução de capital — mesmo tratamento que liberações de financiamento já recebiam em `entradasCorrigidas`.
+
+**Status.** Aprovado e implementado (vigésima primeira fatia). Testado em `tests/core/motorCorrecao.test.ts` (`corrigirDesembolsos` isolado) e `tests/integration/api.correcaoMonetaria.test.ts` (efeito de ponta a ponta, confirmando que a correção de entradas e de saídas são independentes uma da outra, e que remover o índice reverte ambas).
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |
