@@ -40,6 +40,7 @@ import {
   excluirTipologia,
   registrarDistrato,
   registrarPermuta,
+  registrarRenegociacaoVenda,
   type ModalidadeInput,
 } from "../../src/db/cadastro.js";
 import {
@@ -533,7 +534,10 @@ export async function buildApp() {
     if (!(await garantirAcesso(req, reply, tipologia.empreendimentoId))) return;
     const unidades = await prisma.unidade.findMany({
       where: { tipologiaId: req.params.id },
-      include: { permuta: true, vendas: { orderBy: { createdAt: "desc" }, take: 1, include: { distrato: true } } },
+      include: {
+        permuta: true,
+        vendas: { orderBy: { createdAt: "desc" }, take: 1, include: { distrato: true, renegociacoes: { orderBy: { createdAt: "asc" } } } },
+      },
       orderBy: [{ andar: "asc" }, { numero: "asc" }],
     });
     return unidades.map((u) => {
@@ -560,6 +564,12 @@ export async function buildApp() {
                     valorReembolsar: ultimaVenda.distrato.valorReembolsar,
                   }
                 : null,
+              renegociacoes: ultimaVenda.renegociacoes.map((r) => ({
+                id: r.id,
+                valorVendaAnterior: r.valorVendaAnterior,
+                novoValorVenda: r.novoValorVenda,
+                motivo: r.motivo,
+              })),
             }
           : null,
       };
@@ -683,6 +693,35 @@ export async function buildApp() {
     reply.code(204);
     return null;
   });
+
+  // Distrato parcial (achado F17, docs/DECISOES.md): reduz o valor de uma
+  // venda ativa em vez de cancela-la -- a unidade continua vendida. Ao
+  // contrario de /distrato, nao tem DELETE: uma renegociacao e um registro
+  // permanente, nao um estado que se desfaz (ver docstring de
+  // registrarRenegociacaoVenda em src/db/cadastro.ts).
+  app.post<{ Params: { id: string }; Body: { novoValorVenda?: string; motivo?: string } }>(
+    "/api/vendas/:id/renegociacoes",
+    async (req, reply) => {
+      const { novoValorVenda, motivo } = req.body ?? {};
+      if (!novoValorVenda || !novoValorVenda.trim() || Number.isNaN(Number(novoValorVenda))) {
+        reply.code(400);
+        return { erro: "novoValorVenda é obrigatório e deve ser numérico" };
+      }
+      const venda = await prisma.venda.findUnique({ where: { id: req.params.id } });
+      if (!venda) {
+        reply.code(404);
+        return { erro: "Venda não encontrada" };
+      }
+      if (!(await garantirAcesso(req, reply, venda.empreendimentoId))) return;
+      const resultado = await registrarRenegociacaoVenda({ vendaId: req.params.id, novoValorVenda: novoValorVenda.trim(), motivo });
+      if ("erro" in resultado) {
+        reply.code(400);
+        return { erro: resultado.erro };
+      }
+      reply.code(201);
+      return resultado.renegociacao;
+    },
+  );
 
   app.patch<{ Params: { id: string }; Body: { nome?: string; areaPrivativaPadrao?: string | null; precoUnitarioPadrao?: string | null } }>(
     "/api/tipologias/:id",

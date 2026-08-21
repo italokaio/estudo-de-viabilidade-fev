@@ -156,6 +156,20 @@
 
 **Status.** Aprovado e implementado (vigésima quinta fatia). Testado em `tests/core/motorFinanciamento.test.ts` (SAC com juros/principal decrescentes calculados à mão, Price com parcela constante e caso-limite de juros zero, compatibilidade retroativa de `tipoAmortizacao` omitido) e `tests/integration/api.financiamento.test.ts` (cadastro, validação de `numeroParcelas` obrigatório, preservação ao duplicar cenário).
 
+## F17 — Distrato parcial: reduzir `Venda.valorVenda` em vez de cancelar, sem nenhuma mudança no motor (achado da Fase 1)
+
+**Contexto.** O distrato (achado F7) só modelava cancelamento total: a venda inteira é desfeita, a unidade volta ao estoque. Na prática, é comum um comprador renegociar — reduzir o valor do que falta pagar para manter a unidade, em vez de perdê-la — sem que isso exija cancelar e revender.
+
+**Decisão.** Nova tabela `RenegociacaoVenda` (1:N com `Venda` — pode haver mais de uma renegociação ao longo do tempo), cadastro nominal histórico do valor anterior/novo e do motivo, no mesmo espírito de `Permuta`/`Distrato`. A ação em si é simplesmente **atualizar `Venda.valorVenda`** para o novo valor, mantendo `status="ativa"`. Como o motor sempre lê `valorVenda` diretamente do banco a cada recálculo (nunca de um valor cacheado ou derivado), o próximo `GET /fluxo-caixa` já regenera os `RecebimentoProjetado` futuros com o valor reduzido — nenhuma mudança em `src/core/` foi necessária, mesmo padrão do achado F7 (o motor nem sabe que "renegociação" existe, só lê o campo que já lia).
+
+**Decisão de escopo — sem "desfazer".** Diferente de `Distrato` e `Permuta` (que têm uma ação de desfazer explícita), uma renegociação não tem essa opção nesta fatia: é tratada como um registro permanente, não um estado temporário — para reverter, seria preciso renegociar de novo com o valor original, manualmente. Simplificação deliberada para não precisar decidir semântica de "desfazer a N-ésima de várias renegociações".
+
+**Validações.** O novo valor precisa ser (a) positivo, (b) menor que o valor atual (senão não é uma "redução" — um aumento se edita a venda diretamente, fora de escopo) e (c) maior ou igual ao total já efetivamente recebido (`RecebimentoProjetado.valorRealizado` somado) — reduzir abaixo do que o comprador já pagou implicaria reembolso, fora do escopo desta simplificação; nesse caso a orientação é usar um distrato total.
+
+**Bug latente encontrado e corrigido proativamente (mesmo padrão dos achados F10/F11/F13).** `excluirCenario` e `excluirEmpreendimento` não removiam `RenegociacaoVenda` antes de excluir a `Venda` correspondente — sem isso, excluir um cenário ou empreendimento com uma venda renegociada falharia por violação de chave estrangeira. Encontrado ao tentar verificar a fatia em navegador (o cenário de teste usado na verificação precisou ser limpo ao final, e a exclusão só funcionou depois da correção). Corrigido e coberto por dois testes de regressão dedicados.
+
+**Status.** Aprovado e implementado (vigésima sexta fatia). Testado em `tests/integration/api.renegociacaoVenda.test.ts` (registro, efeito no próximo recálculo do fluxo, validações de valor, rejeição para venda distratada, histórico de múltiplas renegociações, preservação de `valorRealizado`, e os dois testes de regressão da exclusão em cascata).
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |

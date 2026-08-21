@@ -42,6 +42,10 @@ export async function excluirEmpreendimento(id: string) {
   const vendaIds = (await prisma.venda.findMany({ where: { empreendimentoId: id }, select: { id: true } })).map((v) => v.id);
   await prisma.recebimentoProjetado.deleteMany({ where: { vendaId: { in: vendaIds } } });
   await prisma.distrato.deleteMany({ where: { vendaId: { in: vendaIds } } });
+  // Renegociacao de venda (achado F17) referencia Venda sem cascade -- mesmo
+  // padrao dos achados F10/F11/F13: sem isso, excluir um empreendimento com
+  // vendas renegociadas falharia por violacao de chave estrangeira.
+  await prisma.renegociacaoVenda.deleteMany({ where: { vendaId: { in: vendaIds } } });
   await prisma.venda.deleteMany({ where: { empreendimentoId: id } });
   await prisma.premissaVelocidadeVendas.deleteMany({ where: { empreendimentoId: id } });
   await prisma.modalidadePagamento.deleteMany({ where: { condicaoPagamento: { empreendimentoId: id } } });
@@ -97,6 +101,9 @@ export async function excluirCenario(id: string) {
 
   await prisma.recebimentoProjetado.deleteMany({ where: { vendaId: { in: vendaIds } } });
   await prisma.distrato.deleteMany({ where: { vendaId: { in: vendaIds } } });
+  // Renegociacao de venda (achado F17) referencia Venda sem cascade -- mesmo
+  // padrao dos achados F10/F11/F13.
+  await prisma.renegociacaoVenda.deleteMany({ where: { vendaId: { in: vendaIds } } });
   await prisma.venda.deleteMany({ where: { cenarioId: id } });
   if (unidadeIds.length > 0) {
     await prisma.unidade.updateMany({ where: { id: { in: unidadeIds } }, data: { status: "estoque" } });
@@ -490,6 +497,59 @@ export async function desfazerDistrato(vendaId: string): Promise<string | null> 
   await prisma.venda.update({ where: { id: vendaId }, data: { status: "ativa" } });
   await prisma.unidade.update({ where: { id: venda.unidadeId }, data: { status: "vendida" } });
   return null;
+}
+
+export interface RegistrarRenegociacaoInput {
+  vendaId: string;
+  novoValorVenda: string;
+  motivo?: string;
+}
+
+/**
+ * Distrato parcial (achado F17, docs/DECISOES.md): reduz Venda.valorVenda
+ * em vez de cancelar a venda inteira -- a unidade continua vendida. Como
+ * o motor sempre le valorVenda diretamente do banco (nunca de um valor
+ * cacheado), a proxima recalculo de fluxo de caixa ja regenera os
+ * RecebimentoProjetado futuros com o valor novo, sem nenhuma mudanca em
+ * src/core/ (mesmo padrao do achado F7: o motor nem sabe que isto existe).
+ * RecebimentoProjetado.valorRealizado (parcelas ja recebidas) nunca e
+ * tocado aqui -- preservado pelo mesmo mecanismo de upsert por chave do
+ * achado F4.
+ */
+export async function registrarRenegociacaoVenda(
+  input: RegistrarRenegociacaoInput,
+): Promise<{ erro: string } | { renegociacao: Awaited<ReturnType<typeof prisma.renegociacaoVenda.create>> }> {
+  const venda = await prisma.venda.findUnique({ where: { id: input.vendaId } });
+  if (!venda) return { erro: "Venda não encontrada" };
+  if (venda.status !== "ativa") return { erro: `Esta venda está com status "${venda.status}" — só é possível renegociar uma venda ativa` };
+
+  const novoValor = new Decimal(input.novoValorVenda);
+  const valorAtual = new Decimal(venda.valorVenda);
+  if (!novoValor.greaterThan(0)) return { erro: "O novo valor da venda deve ser maior que zero" };
+  if (novoValor.greaterThanOrEqualTo(valorAtual)) {
+    return { erro: "O novo valor precisa ser menor que o valor atual da venda — para aumentar o valor, edite a venda diretamente" };
+  }
+
+  const recebidos = await prisma.recebimentoProjetado.findMany({ where: { vendaId: venda.id, status: "recebido" } });
+  const valorRecebido = recebidos.reduce((acc, r) => acc.plus(new Decimal(r.valorRealizado ?? "0")), new Decimal(0));
+  if (novoValor.lessThan(valorRecebido)) {
+    return {
+      erro: `O comprador já recebeu (pagou) ${valorRecebido.toFixed(2)}, mais que o novo valor proposto — isso exigiria reembolso, use um distrato total em vez de uma renegociação`,
+    };
+  }
+
+  const renegociacao = await prisma.renegociacaoVenda.create({
+    data: {
+      empreendimentoId: venda.empreendimentoId,
+      vendaId: venda.id,
+      valorVendaAnterior: venda.valorVenda,
+      novoValorVenda: novoValor.toFixed(2),
+      motivo: input.motivo,
+    },
+  });
+  await prisma.venda.update({ where: { id: venda.id }, data: { valorVenda: novoValor.toFixed(2) } });
+
+  return { renegociacao };
 }
 
 export interface ModalidadeInput {

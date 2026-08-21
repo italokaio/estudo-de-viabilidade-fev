@@ -432,6 +432,23 @@ Item escolhido entre quatro candidatos levantados a partir de lacunas documentad
 
 **Não implementado nesta fatia:** recalcular a tabela quando uma liberação ocorre durante o período de amortização (decisão deliberada, ver achado F16), mais de um financiamento por cenário, carência dentro da própria tabela SAC/Price (parcelas só de juros antes de começar a amortizar o principal).
 
+## Fase 1 (código) — vigésima sexta fatia: distrato parcial (este repositório, concluída)
+
+Item escolhido entre os candidatos remanescentes levantados a partir de lacunas documentadas ao longo da Fase 1 — o usuário optou por seguir com a recomendação.
+
+**Decisão de escopo:** o distrato (achado F7) só modelava cancelamento total. Achado F17 (`docs/DECISOES.md`): distrato parcial é uma renegociação que **reduz** `Venda.valorVenda`, mantendo a venda ativa e a unidade vendida — não um novo mecanismo no motor, já que o motor sempre lê `valorVenda` diretamente do banco a cada recálculo. Sem "desfazer" nesta fatia (decisão deliberada): é um registro permanente, não um estado temporário.
+
+**Implementado:**
+- Schema — tabela nova `RenegociacaoVenda` (1:N com `Venda`, cadastro nominal do valor anterior/novo e motivo).
+- `src/db/cadastro.ts` — `registrarRenegociacaoVenda()`: valida novo valor positivo, menor que o atual, e maior ou igual ao total já recebido (`valorRealizado` somado) — abaixo disso exigiria reembolso, fora de escopo, a orientação é usar distrato total.
+- API — `POST /api/vendas/:id/renegociacoes` (sem DELETE, ver decisão de escopo); `GET /api/tipologias/:id/unidades` expõe o histórico de renegociações de cada venda.
+- Web — botão "Renegociar" ao lado de "Distratar" em cada unidade vendida, com formulário inline; a coluna de status mostra "Renegociada: R$X → R$Y" quando aplicável.
+- **Bug latente encontrado e corrigido proativamente** (mesmo padrão dos achados F10/F11/F13): `excluirCenario` e `excluirEmpreendimento` não removiam `RenegociacaoVenda` antes de excluir a `Venda` — encontrado ao tentar limpar o cenário de teste usado na própria verificação em navegador desta fatia.
+- 13 novos testes de API (`tests/integration/api.renegociacaoVenda.test.ts`): registro, efeito no próximo recálculo do fluxo de caixa, validações de valor, rejeição para venda distratada, histórico de múltiplas renegociações, preservação de `valorRealizado`, e dois testes de regressão para o bug de exclusão em cascata. Suíte total: 35 arquivos, 240 testes.
+- Verificado num navegador real (claro e escuro): gerou uma venda de teste, renegociou de R$100.000 para R$80.000 pela tela, e confirmou a linha "Renegociada: R$ 100.000,00 → R$ 80.000,00" corretamente exibida nos dois temas.
+
+**Não implementado nesta fatia:** desfazer uma renegociação (decisão deliberada, ver achado F17), renegociação que aumenta o valor da venda (fora do conceito de "distrato parcial" — seria só editar a venda), reembolso automatizado quando o novo valor é menor que o já recebido (a API rejeita esse caso e orienta usar distrato total).
+
 ## Próxima fase
 
-A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores), a décima sexta fatia de simulação de sensibilidade, a décima sétima de financiamento de produção, a décima oitava de alerta de risco, a décima nona de versão de cenário, a vigésima de estrutura de comissão, a vigésima primeira de correção monetária de custos, a vigésima segunda de split nominal de comissão, a vigésima terceira de segurança de sessão, a vigésima quarta de alertas de risco configuráveis e a vigésima quinta de amortização SAC/Price estão concluídas. Aguardando direção do usuário sobre o que vem a seguir.
+A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores), a décima sexta fatia de simulação de sensibilidade, a décima sétima de financiamento de produção, a décima oitava de alerta de risco, a décima nona de versão de cenário, a vigésima de estrutura de comissão, a vigésima primeira de correção monetária de custos, a vigésima segunda de split nominal de comissão, a vigésima terceira de segurança de sessão, a vigésima quarta de alertas de risco configuráveis, a vigésima quinta de amortização SAC/Price e a vigésima sexta de distrato parcial estão concluídas. Aguardando direção do usuário sobre o que vem a seguir.

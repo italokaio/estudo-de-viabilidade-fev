@@ -100,6 +100,7 @@ model Empreendimento {
   usuariosVinculados  EmpreendimentoUsuario[]
   indicesCorrecao     IndiceCorrecao[]
   distratos           Distrato[]
+  renegociacoesVenda  RenegociacaoVenda[]
   financiamentos      FinanciamentoProducao[]
 
   @@map("empreendimento")
@@ -282,8 +283,32 @@ model Venda {
   condicaoPagamento CondicaoPagamento      @relation(fields: [condicaoPagamentoId], references: [id])
   recebimentos      RecebimentoProjetado[]
   distrato          Distrato?
+  renegociacoes     RenegociacaoVenda[]
 
   @@map("venda")
+}
+
+/**
+ * Distrato parcial (achado F17, docs/DECISOES.md — "distrato parcial"):
+ * renegociacao que REDUZ o valor de uma venda ativa, mantendo a unidade
+ * vendida (ao contrario de Distrato, que cancela a venda inteira e devolve
+ * a unidade ao estoque). Registro nominal historico, 1:N com Venda (pode
+ * haver mais de uma renegociacao ao longo do tempo) -- nunca lido pelo
+ * motor: o motor sempre le Venda.valorVenda diretamente, ja atualizado.
+ */
+model RenegociacaoVenda {
+  id                 String   @id @default(cuid())
+  empreendimentoId   String
+  vendaId            String
+  valorVendaAnterior String // decimal-as-string, o valor antes desta renegociacao
+  novoValorVenda     String // decimal-as-string, o valor depois -- sempre menor que o anterior
+  motivo             String?
+  createdAt          DateTime @default(now())
+
+  empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
+  venda          Venda          @relation(fields: [vendaId], references: [id])
+
+  @@map("renegociacao_venda")
 }
 
 model RecebimentoProjetado {

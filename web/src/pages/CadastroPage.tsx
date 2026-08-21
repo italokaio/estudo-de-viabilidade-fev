@@ -42,6 +42,7 @@ import {
   gerarVendas,
   registrarDistrato,
   registrarPermuta,
+  registrarRenegociacao,
   type CategoriaCustoResumo,
   type CenarioDetalhe,
   type EmpreendimentoDetalhe,
@@ -1957,6 +1958,9 @@ function LinhaUnidadePermuta({
   const [distratando, setDistratando] = useState(false);
   const [percentualRetencao, setPercentualRetencao] = useState("0");
   const [motivo, setMotivo] = useState("");
+  const [renegociando, setRenegociando] = useState(false);
+  const [novoValorVenda, setNovoValorVenda] = useState("");
+  const [motivoRenegociacao, setMotivoRenegociacao] = useState("");
   const [salvando, setSalvando] = useState(false);
 
   function abrirRegistro() {
@@ -2027,6 +2031,23 @@ function LinhaUnidadePermuta({
     }
   }
 
+  async function renegociar(e: React.FormEvent) {
+    e.preventDefault();
+    if (!unidade.venda) return;
+    setSalvando(true);
+    try {
+      await registrarRenegociacao(unidade.venda.id, { novoValorVenda, motivo: motivoRenegociacao || undefined });
+      setRenegociando(false);
+      setNovoValorVenda("");
+      setMotivoRenegociacao("");
+      onRegistrado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   if (editando) {
     return (
       <tr>
@@ -2076,7 +2097,31 @@ function LinhaUnidadePermuta({
     );
   }
 
+  if (renegociando) {
+    return (
+      <tr>
+        <td colSpan={4} style={{ padding: "6px 0" }}>
+          <form onSubmit={renegociar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div style={{ width: 140 }}>
+              <TextField label="Novo valor da venda" value={novoValorVenda} onChange={(e) => setNovoValorVenda(e.target.value)} placeholder={unidade.venda?.valorVenda} required />
+            </div>
+            <div style={{ width: 200 }}>
+              <TextField label="Motivo" value={motivoRenegociacao} onChange={(e) => setMotivoRenegociacao(e.target.value)} placeholder="opcional" />
+            </div>
+            <Button type="submit" disabled={salvando || !novoValorVenda.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
+              {salvando ? "Salvando…" : "Confirmar renegociação"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setRenegociando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
+              Cancelar
+            </Button>
+          </form>
+        </td>
+      </tr>
+    );
+  }
+
   const distratoInfo = unidade.status === "estoque" && unidade.venda?.status === "distratada" ? unidade.venda.distrato : null;
+  const ultimaRenegociacao = unidade.venda?.renegociacoes.length ? unidade.venda.renegociacoes[unidade.venda.renegociacoes.length - 1] : null;
 
   return (
     <tr>
@@ -2084,7 +2129,8 @@ function LinhaUnidadePermuta({
       <td style={{ color: "var(--ink-secondary)" }}>{unidade.status}</td>
       <td style={{ color: "var(--ink-secondary)" }}>
         {unidade.permuta?.nomeContraparte ??
-          (distratoInfo ? `Reembolsar ${formatBRL(distratoInfo.valorReembolsar)} · retido ${formatBRL(distratoInfo.valorRetido)}` : "—")}
+          (distratoInfo ? `Reembolsar ${formatBRL(distratoInfo.valorReembolsar)} · retido ${formatBRL(distratoInfo.valorRetido)}` : null) ??
+          (ultimaRenegociacao ? `Renegociada: ${formatBRL(ultimaRenegociacao.valorVendaAnterior)} → ${formatBRL(ultimaRenegociacao.novoValorVenda)}` : "—")}
       </td>
       <td style={{ textAlign: "right" }}>
         {unidade.status === "estoque" && (
@@ -2103,9 +2149,14 @@ function LinhaUnidadePermuta({
           </>
         )}
         {unidade.status === "vendida" && unidade.venda?.status === "ativa" && (
-          <Button variant="secondary" onClick={() => setDistratando(true)} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
-            Distratar
-          </Button>
+          <>
+            <Button variant="secondary" onClick={() => setRenegociando(true)} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
+              Renegociar
+            </Button>
+            <Button variant="secondary" onClick={() => setDistratando(true)} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+              Distratar
+            </Button>
+          </>
         )}
         {distratoInfo && (
           <Button variant="secondary" onClick={desfazerDistratoAcao} style={{ padding: "4px 8px", fontSize: 11 }}>

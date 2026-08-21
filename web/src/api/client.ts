@@ -400,12 +400,20 @@ export interface DistratoResumo {
   valorReembolsar: string;
 }
 
+export interface RenegociacaoResumo {
+  id: string;
+  valorVendaAnterior: string;
+  novoValorVenda: string;
+  motivo: string | null;
+}
+
 export interface VendaResumo {
   id: string;
   status: string;
   mesOrigem: number;
   valorVenda: string;
   distrato: DistratoResumo | null;
+  renegociacoes: RenegociacaoResumo[];
 }
 
 export interface UnidadeResumo {
@@ -449,6 +457,10 @@ export function registrarDistrato(vendaId: string, input: { percentualRetencao?:
 
 export function desfazerDistrato(vendaId: string) {
   return del(`/api/vendas/${vendaId}/distrato`);
+}
+
+export function registrarRenegociacao(vendaId: string, input: { novoValorVenda: string; motivo?: string }) {
+  return postJson<RenegociacaoResumo>(`/api/vendas/${vendaId}/renegociacoes`, input);
 }
 
 export function atualizarCondicaoPagamento(id: string, input: { nome?: string; modalidades?: ModalidadeInput[] }) {
