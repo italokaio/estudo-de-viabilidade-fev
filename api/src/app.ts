@@ -51,6 +51,7 @@ import {
   excluirUsuario,
   listarEmpreendimentosDoUsuario,
   listarUsuarios,
+  redefinirSenha,
   temAcessoEmpreendimento,
   validarSessao,
   vincularUsuarioEmpreendimento,
@@ -191,6 +192,29 @@ export async function buildApp() {
     await excluirUsuario(req.params.id);
     reply.code(204);
     return null;
+  });
+
+  // Redefinicao de senha assistida por admin (achado F14, docs/DECISOES.md
+  // — "seguranca de sessao"): sem infraestrutura de email neste projeto,
+  // nao ha link de recuperacao autoatendido -- um admin define a nova
+  // senha diretamente e comunica ao usuario por fora do sistema.
+  app.patch<{ Params: { id: string }; Body: { senha?: string } }>("/api/usuarios/:id/senha", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem redefinir senha" };
+    }
+    const { senha } = req.body ?? {};
+    if (!senha || senha.length < 6) {
+      reply.code(400);
+      return { erro: "Senha deve ter ao menos 6 caracteres" };
+    }
+    const usuario = await prisma.usuario.findUnique({ where: { id: req.params.id } });
+    if (!usuario) {
+      reply.code(404);
+      return { erro: "Usuário não encontrado" };
+    }
+    await redefinirSenha(req.params.id, senha);
+    return { ok: true };
   });
 
   app.get<{ Params: { id: string } }>("/api/usuarios/:id/empreendimentos", async (req, reply) => {

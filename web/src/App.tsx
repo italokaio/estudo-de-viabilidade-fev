@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchUsuarioAtual, logout, type Usuario } from "./api/client.js";
+import { EVENTO_SESSAO_EXPIRADA, fetchUsuarioAtual, logout, type Usuario } from "./api/client.js";
 import { Sidebar, type Pagina } from "./components/Sidebar.js";
 import { CadastroPage } from "./pages/CadastroPage.js";
 import { FluxoCaixaPage } from "./pages/FluxoCaixaPage.js";
@@ -9,11 +9,26 @@ import { UsuariosPage } from "./pages/UsuariosPage.js";
 export default function App() {
   const [usuario, setUsuario] = useState<Usuario | null | undefined>(undefined);
   const [pagina, setPagina] = useState<Pagina>("fluxo");
+  const [sessaoExpirada, setSessaoExpirada] = useState(false);
 
   useEffect(() => {
     fetchUsuarioAtual()
       .then(setUsuario)
       .catch(() => setUsuario(null));
+  }, []);
+
+  // Achado F14 (docs/DECISOES.md — "segurança de sessão"): antes desta
+  // fatia, uma sessão expirada no meio do uso só aparecia como um erro
+  // genérico na tela que chamou a API, sem levar o usuário de volta ao
+  // login. apiFetch (src/api/client.ts) dispara este evento em qualquer
+  // 401 fora do fluxo de login/verificação inicial.
+  useEffect(() => {
+    function aoExpirar() {
+      setUsuario(null);
+      setSessaoExpirada(true);
+    }
+    window.addEventListener(EVENTO_SESSAO_EXPIRADA, aoExpirar);
+    return () => window.removeEventListener(EVENTO_SESSAO_EXPIRADA, aoExpirar);
   }, []);
 
   async function sair() {
@@ -27,7 +42,15 @@ export default function App() {
   }
 
   if (usuario === null) {
-    return <LoginPage onEntrar={setUsuario} />;
+    return (
+      <LoginPage
+        onEntrar={(u) => {
+          setSessaoExpirada(false);
+          setUsuario(u);
+        }}
+        avisoSessaoExpirada={sessaoExpirada}
+      />
+    );
   }
 
   return (

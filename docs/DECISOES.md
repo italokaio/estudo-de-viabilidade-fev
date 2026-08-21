@@ -124,6 +124,16 @@
 
 **Status.** Aprovado e implementado (vigésima segunda fatia). Testado em `tests/integration/api.destinatariosComissao.test.ts` (cadastro, validação de limite de 100%, edição, exclusão, exclusão em cascata do custo, preservação ao duplicar cenário). O bug de visibilidade da tabela de custos não tem teste automatizado (projeto não tem suíte de componentes web) — encontrado e verificado via navegador real.
 
+## F14 — Segurança de sessão: redefinição de senha assistida por admin, e um evento global para sessão expirada (achado da Fase 1)
+
+**Contexto.** Duas lacunas deixadas em aberto desde a nona fatia (autenticação): "recuperação de senha" e "sessão expirada mostrada como erro genérico em vez de redirecionar para o login". As duas têm a mesma raiz — a UI nunca soube diferenciar "esta chamada específica falhou" de "eu não estou mais autenticado".
+
+**Decisão 1 — recuperação de senha sem infraestrutura de email.** Este projeto não tem (e não tinha) nenhuma capacidade de enviar email — um fluxo de recuperação autoatendido por link enviado ao usuário exigiria inventar essa infraestrutura do zero, fora do escopo pedido. A alternativa honesta e imediatamente utilizável: **redefinição assistida por admin** — mesmo padrão já usado para criar/excluir usuário (`UsuariosPage` é admin-only desde a nona fatia). `PATCH /api/usuarios/:id/senha`, admin-only, define a senha diretamente; o admin comunica a nova senha ao usuário por fora do sistema (o mesmo "por fora" que já vale para a senha inicial, definida na criação do usuário). Redefinir a senha **sempre encerra todas as sessões ativas** daquele usuário — sem isso, um token já comprometido continuaria válido pelos 7 dias restantes mesmo depois da senha trocada.
+
+**Decisão 2 — sessão expirada como evento global, não erro local.** Antes desta fatia, cada chamada de API tratava um 401 como só mais um erro daquela chamada específica — resultado: um usuário cuja sessão expirou via `fetchFluxoCaixa()` via um banner vermelho dizendo "Não foi possível carregar os dados: Não autenticado", sem nenhuma indicação de que precisava logar de novo. A correção: toda chamada de API passa por um único ponto (`apiFetch`, `web/src/api/client.ts`), que reconhece um 401 (fora das duas exceções esperadas — `/api/auth/me` na verificação inicial e `/api/auth/login` com credenciais erradas) e dispara um evento global (`EVENTO_SESSAO_EXPIRADA`). `App.tsx` escuta esse evento, reseta o usuário logado (o que já troca a tela para `LoginPage`, sem nenhuma rota nova) e passa um aviso — "Sua sessão expirou. Entre novamente para continuar." — em vez de deixar a última tela visível com um erro sem contexto.
+
+**Status.** Aprovado e implementado (vigésima terceira fatia). Testado em `tests/integration/api.auth.test.ts` (redefinição funciona, senha antiga para de logar, redefinir encerra sessões ativas, 403 para usuário comum, validações de tamanho/existência). O evento global de sessão expirada não tem teste automatizado (sem suíte de componentes web) — verificado em navegador real, nos dois temas, reaproveitando `redefinirSenha` para invalidar a própria sessão em uso e confirmar que a próxima chamada pela UI redireciona corretamente ao login com o aviso.
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |

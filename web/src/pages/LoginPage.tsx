@@ -3,7 +3,7 @@ import { login, type Usuario } from "../api/client.js";
 import { Button } from "../components/Button.js";
 import { TextField } from "../components/TextField.js";
 
-export function LoginPage({ onEntrar }: { onEntrar: (usuario: Usuario) => void }) {
+export function LoginPage({ onEntrar, avisoSessaoExpirada }: { onEntrar: (usuario: Usuario) => void; avisoSessaoExpirada?: boolean }) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState<string | null>(null);
@@ -32,6 +32,12 @@ export function LoginPage({ onEntrar }: { onEntrar: (usuario: Usuario) => void }
           </svg>
           <span style={{ fontWeight: 800, fontSize: 16, color: "var(--ink-primary)" }}>Viabilidade</span>
         </div>
+
+        {avisoSessaoExpirada && (
+          <div style={{ fontSize: 12.5, color: "var(--status-warning-text)", background: "var(--status-warning-soft-bg)", borderRadius: 8, padding: "8px 10px", marginBottom: 14 }}>
+            Sua sessão expirou. Entre novamente para continuar.
+          </div>
+        )}
 
         <form onSubmit={submeter} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required />

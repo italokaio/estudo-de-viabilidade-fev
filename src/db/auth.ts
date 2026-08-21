@@ -39,6 +39,21 @@ export async function excluirUsuario(id: string) {
   await prisma.usuario.delete({ where: { id } });
 }
 
+/**
+ * Redefine a senha de um usuario (achado F14, docs/DECISOES.md —
+ * "seguranca de sessao"): sem infraestrutura de email neste projeto, a
+ * "recuperacao de senha" real e assistida por um admin, nao autoatendida
+ * por link enviado ao usuario -- mesmo padrao ja usado para criar/excluir
+ * usuario (UsuariosPage e admin-only). Todas as sessoes ativas do usuario
+ * sao encerradas -- redefinir senha sem invalidar sessoes existentes
+ * deixaria um token ja vazado continuar valido pelos proximos 7 dias.
+ */
+export async function redefinirSenha(usuarioId: string, novaSenha: string) {
+  const senhaHash = await bcrypt.hash(novaSenha, 12);
+  await prisma.usuario.update({ where: { id: usuarioId }, data: { senhaHash } });
+  await prisma.sessao.deleteMany({ where: { usuarioId } });
+}
+
 export interface AutenticarInput {
   email: string;
   senha: string;

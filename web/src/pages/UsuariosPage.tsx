@@ -6,6 +6,7 @@ import {
   fetchEmpreendimentos,
   fetchEmpreendimentosDoUsuario,
   fetchUsuarios,
+  redefinirSenhaUsuario,
   vincularEmpreendimento,
   type EmpreendimentoResumo,
   type EmpreendimentoVinculado,
@@ -116,6 +117,8 @@ function LinhaUsuario({
   onExcluir: () => void;
   onErro: (msg: string) => void;
 }) {
+  const [mostrarSenha, setMostrarSenha] = useState(false);
+
   return (
     <>
       <tr>
@@ -141,6 +144,9 @@ function LinhaUsuario({
               {expandido ? "Fechar" : "Acesso"}
             </Button>
           )}
+          <Button variant="secondary" onClick={() => setMostrarSenha((v) => !v)} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
+            {mostrarSenha ? "Fechar" : "Senha"}
+          </Button>
           {!ehVoceMesmo && (
             <Button variant="secondary" onClick={onExcluir} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
               Excluir
@@ -155,7 +161,67 @@ function LinhaUsuario({
           </td>
         </tr>
       )}
+      {mostrarSenha && (
+        <tr>
+          <td colSpan={4} style={{ paddingBottom: 12 }}>
+            <RedefinirSenhaForm usuarioId={usuario.id} onErro={onErro} />
+          </td>
+        </tr>
+      )}
     </>
+  );
+}
+
+/**
+ * Redefinicao de senha assistida por admin (achado F14, docs/DECISOES.md
+ * — "seguranca de sessao"): sem infraestrutura de email neste projeto, a
+ * recuperacao real e um admin definindo a nova senha e comunicando ao
+ * usuario por fora do sistema — encerra as sessoes ativas dele.
+ */
+function RedefinirSenhaForm({ usuarioId, onErro }: { usuarioId: string; onErro: (msg: string) => void }) {
+  const [senha, setSenha] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [sucesso, setSucesso] = useState(false);
+
+  async function submeter(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await redefinirSenhaUsuario(usuarioId, senha);
+      setSenha("");
+      setSucesso(true);
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  return (
+    <div style={{ background: "var(--surface-2)", borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontSize: 11.5, color: "var(--ink-muted)" }}>
+        Define uma nova senha para este usuário e encerra as sessões ativas dele — comunique a senha por fora do sistema.
+      </div>
+      {sucesso && <div style={{ fontSize: 12.5, color: "var(--status-good-text)" }}>Senha redefinida.</div>}
+      <form onSubmit={submeter} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <div style={{ width: 220 }}>
+          <TextField
+            label="Nova senha"
+            type="password"
+            value={senha}
+            onChange={(e) => {
+              setSenha(e.target.value);
+              setSucesso(false);
+            }}
+            placeholder="mínimo 6 caracteres"
+            required
+          />
+        </div>
+        <Button type="submit" disabled={salvando || senha.length < 6} style={{ padding: "6px 10px", fontSize: 12 }}>
+          {salvando ? "Salvando…" : "Redefinir"}
+        </Button>
+      </form>
+    </div>
   );
 }
 

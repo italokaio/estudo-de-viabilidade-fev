@@ -128,4 +128,72 @@ describe("API — autenticação e permissões", () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  /**
+   * Redefinicao de senha assistida por admin (achado F14, docs/DECISOES.md
+   * — "seguranca de sessao"): sem infraestrutura de email neste projeto, a
+   * recuperacao real e um admin definindo a nova senha diretamente.
+   */
+  it("admin redefine a senha de um usuário — a senha antiga para de funcionar e a nova passa a funcionar", async () => {
+    await criarUsuario({ email: "admin@local.test", nome: "Admin", senha: "senha123", papel: "admin" });
+    const usuario = await criarUsuario({ email: "usuario@local.test", nome: "Usuário", senha: "senhaAntiga", papel: "usuario" });
+    const loginAdmin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "admin@local.test", senha: "senha123" } });
+    const cookieAdmin = loginAdmin.headers["set-cookie"] as string;
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/usuarios/${usuario.id}/senha`,
+      headers: { cookie: cookieAdmin },
+      payload: { senha: "senhaNova123" },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const loginAntiga = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "usuario@local.test", senha: "senhaAntiga" } });
+    expect(loginAntiga.statusCode).toBe(401);
+
+    const loginNova = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "usuario@local.test", senha: "senhaNova123" } });
+    expect(loginNova.statusCode).toBe(200);
+  });
+
+  it("redefinir a senha encerra as sessões ativas do usuário", async () => {
+    await criarUsuario({ email: "admin@local.test", nome: "Admin", senha: "senha123", papel: "admin" });
+    const usuario = await criarUsuario({ email: "usuario@local.test", nome: "Usuário", senha: "senhaAntiga", papel: "usuario" });
+    const loginAdmin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "admin@local.test", senha: "senha123" } });
+    const cookieAdmin = loginAdmin.headers["set-cookie"] as string;
+    const loginUsuario = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "usuario@local.test", senha: "senhaAntiga" } });
+    const cookieUsuario = loginUsuario.headers["set-cookie"] as string;
+
+    await app.inject({ method: "PATCH", url: `/api/usuarios/${usuario.id}/senha`, headers: { cookie: cookieAdmin }, payload: { senha: "senhaNova123" } });
+
+    const res = await app.inject({ method: "GET", url: "/api/empreendimentos", headers: { cookie: cookieUsuario } });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("usuário comum recebe 403 ao tentar redefinir a senha de outro usuário", async () => {
+    const admin = await criarUsuario({ email: "admin@local.test", nome: "Admin", senha: "senha123", papel: "admin" });
+    await criarUsuario({ email: "usuario@local.test", nome: "Usuário", senha: "senha123", papel: "usuario" });
+    const loginUsuario = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "usuario@local.test", senha: "senha123" } });
+    const cookieUsuario = loginUsuario.headers["set-cookie"] as string;
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/usuarios/${admin.id}/senha`,
+      headers: { cookie: cookieUsuario },
+      payload: { senha: "outraSenha123" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("rejeita senha nova com menos de 6 caracteres, e 404 para usuário inexistente", async () => {
+    await criarUsuario({ email: "admin@local.test", nome: "Admin", senha: "senha123", papel: "admin" });
+    const usuario = await criarUsuario({ email: "usuario@local.test", nome: "Usuário", senha: "senha123", papel: "usuario" });
+    const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "admin@local.test", senha: "senha123" } });
+    const cookie = login.headers["set-cookie"] as string;
+
+    const curta = await app.inject({ method: "PATCH", url: `/api/usuarios/${usuario.id}/senha`, headers: { cookie }, payload: { senha: "123" } });
+    expect(curta.statusCode).toBe(400);
+
+    const inexistente = await app.inject({ method: "PATCH", url: "/api/usuarios/id-inexistente/senha", headers: { cookie }, payload: { senha: "senhaValida123" } });
+    expect(inexistente.statusCode).toBe(404);
+  });
 });

@@ -1,3 +1,29 @@
+/**
+ * Nome do evento global disparado quando qualquer chamada à API devolve
+ * 401 fora do fluxo de login/verificação inicial (achado F14,
+ * docs/DECISOES.md — "segurança de sessão"). Antes desta fatia, uma sessão
+ * expirada no meio do uso só aparecia como um erro genérico na tela — o
+ * usuário nunca era levado de volta ao login. App.tsx escuta este evento e
+ * reseta o usuário logado, o que troca a tela para LoginPage.
+ */
+export const EVENTO_SESSAO_EXPIRADA = "sessao-expirada";
+
+/**
+ * Substitui o fetch global em toda chamada à API -- ponto único onde um
+ * 401 é reconhecido como "sessão expirada" e não apenas "erro desta
+ * chamada". As duas exceções são esperadas fora de uma sessão ativa:
+ * /api/auth/me (verificação inicial, 401 aqui só significa "não logado
+ * ainda") e /api/auth/login (credenciais erradas, já tratado inline pela
+ * LoginPage).
+ */
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(url, init);
+  if (res.status === 401 && url !== "/api/auth/me" && url !== "/api/auth/login") {
+    window.dispatchEvent(new Event(EVENTO_SESSAO_EXPIRADA));
+  }
+  return res;
+}
+
 export interface EmpreendimentoResumo {
   id: string;
   nome: string;
@@ -48,13 +74,13 @@ export interface FluxoCaixaResposta {
 }
 
 export async function fetchEmpreendimentos(): Promise<EmpreendimentoResumo[]> {
-  const res = await fetch("/api/empreendimentos");
+  const res = await apiFetch("/api/empreendimentos");
   if (!res.ok) throw new Error(`Falha ao carregar empreendimentos (${res.status})`);
   return res.json();
 }
 
 export async function fetchFluxoCaixa(cenarioId: string): Promise<FluxoCaixaResposta> {
-  const res = await fetch(`/api/cenarios/${cenarioId}/fluxo-caixa`);
+  const res = await apiFetch(`/api/cenarios/${cenarioId}/fluxo-caixa`);
   if (!res.ok) throw new Error(`Falha ao carregar fluxo de caixa (${res.status})`);
   return res.json();
 }
@@ -69,7 +95,7 @@ export interface PontoSensibilidade {
 }
 
 export async function fetchSensibilidade(cenarioId: string, eixo: EixoSensibilidade): Promise<PontoSensibilidade[]> {
-  const res = await fetch(`/api/cenarios/${cenarioId}/sensibilidade?eixo=${eixo}`);
+  const res = await apiFetch(`/api/cenarios/${cenarioId}/sensibilidade?eixo=${eixo}`);
   if (!res.ok) throw new Error(`Falha ao calcular sensibilidade (${res.status})`);
   return res.json();
 }
@@ -189,7 +215,7 @@ export interface CenarioDetalhe {
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await apiFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) {
     const erro = await res.json().catch(() => ({ erro: `Falha (${res.status})` }));
     throw new Error(erro.erro ?? `Falha (${res.status})`);
@@ -198,7 +224,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 }
 
 async function patchJson<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await apiFetch(url, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) {
     const erro = await res.json().catch(() => ({ erro: `Falha (${res.status})` }));
     throw new Error(erro.erro ?? `Falha (${res.status})`);
@@ -207,7 +233,7 @@ async function patchJson<T>(url: string, body: unknown): Promise<T> {
 }
 
 async function del(url: string): Promise<void> {
-  const res = await fetch(url, { method: "DELETE" });
+  const res = await apiFetch(url, { method: "DELETE" });
   if (!res.ok) {
     const erro = await res.json().catch(() => ({ erro: `Falha (${res.status})` }));
     throw new Error(erro.erro ?? `Falha (${res.status})`);
@@ -215,7 +241,7 @@ async function del(url: string): Promise<void> {
 }
 
 export async function fetchEmpreendimentoDetalhe(id: string): Promise<EmpreendimentoDetalhe> {
-  const res = await fetch(`/api/empreendimentos/${id}`);
+  const res = await apiFetch(`/api/empreendimentos/${id}`);
   if (!res.ok) throw new Error(`Falha ao carregar empreendimento (${res.status})`);
   return res.json();
 }
@@ -261,7 +287,7 @@ export function criarCondicaoPagamento(tipologiaId: string, input: { nome: strin
 }
 
 export async function fetchCenarioDetalhe(id: string): Promise<CenarioDetalhe> {
-  const res = await fetch(`/api/cenarios/${id}`);
+  const res = await apiFetch(`/api/cenarios/${id}`);
   if (!res.ok) throw new Error(`Falha ao carregar cenário (${res.status})`);
   return res.json();
 }
@@ -303,7 +329,7 @@ export interface RecebimentoResumo {
 }
 
 export async function fetchRecebimentos(cenarioId: string): Promise<RecebimentoResumo[]> {
-  const res = await fetch(`/api/cenarios/${cenarioId}/recebimentos`);
+  const res = await apiFetch(`/api/cenarios/${cenarioId}/recebimentos`);
   if (!res.ok) throw new Error(`Falha ao carregar recebimentos (${res.status})`);
   return res.json();
 }
@@ -389,7 +415,7 @@ export interface UnidadeResumo {
 }
 
 export async function fetchUnidades(tipologiaId: string): Promise<UnidadeResumo[]> {
-  const res = await fetch(`/api/tipologias/${tipologiaId}/unidades`);
+  const res = await apiFetch(`/api/tipologias/${tipologiaId}/unidades`);
   if (!res.ok) throw new Error(`Falha ao carregar unidades (${res.status})`);
   return res.json();
 }
@@ -490,14 +516,14 @@ export interface Usuario {
 
 /** null quando não há sessão válida (não é um erro — é o estado esperado antes do login). */
 export async function fetchUsuarioAtual(): Promise<Usuario | null> {
-  const res = await fetch("/api/auth/me");
+  const res = await apiFetch("/api/auth/me");
   if (res.status === 401) return null;
   if (!res.ok) throw new Error(`Falha ao verificar sessão (${res.status})`);
   return res.json();
 }
 
 export async function login(email: string, senha: string): Promise<Usuario> {
-  const res = await fetch("/api/auth/login", {
+  const res = await apiFetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, senha }),
@@ -510,7 +536,7 @@ export async function login(email: string, senha: string): Promise<Usuario> {
 }
 
 export async function logout(): Promise<void> {
-  await fetch("/api/auth/logout", { method: "POST" });
+  await apiFetch("/api/auth/logout", { method: "POST" });
 }
 
 export interface UsuarioResumo extends Usuario {
@@ -518,7 +544,7 @@ export interface UsuarioResumo extends Usuario {
 }
 
 export async function fetchUsuarios(): Promise<UsuarioResumo[]> {
-  const res = await fetch("/api/usuarios");
+  const res = await apiFetch("/api/usuarios");
   if (!res.ok) throw new Error(`Falha ao carregar usuários (${res.status})`);
   return res.json();
 }
@@ -531,13 +557,17 @@ export function excluirUsuario(id: string) {
   return del(`/api/usuarios/${id}`);
 }
 
+export function redefinirSenhaUsuario(id: string, senha: string) {
+  return patchJson<{ ok: true }>(`/api/usuarios/${id}/senha`, { senha });
+}
+
 export interface EmpreendimentoVinculado {
   id: string;
   nome: string;
 }
 
 export async function fetchEmpreendimentosDoUsuario(usuarioId: string): Promise<EmpreendimentoVinculado[]> {
-  const res = await fetch(`/api/usuarios/${usuarioId}/empreendimentos`);
+  const res = await apiFetch(`/api/usuarios/${usuarioId}/empreendimentos`);
   if (!res.ok) throw new Error(`Falha ao carregar acesso (${res.status})`);
   return res.json();
 }
