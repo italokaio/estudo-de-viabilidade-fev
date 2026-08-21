@@ -979,6 +979,8 @@ export async function buildApp() {
             valorContratado: cenario.financiamento.valorContratado,
             taxaJurosMensal: cenario.financiamento.taxaJurosMensal,
             mesAmortizacao: cenario.financiamento.mesAmortizacao,
+            tipoAmortizacao: cenario.financiamento.tipoAmortizacao,
+            numeroParcelas: cenario.financiamento.numeroParcelas,
           }
         : null,
       totalVendasGeradas: cenario._count.vendas,
@@ -1297,39 +1299,53 @@ export async function buildApp() {
   // indice de correcao/sensibilidade, isto MUDA o fluxo de caixa de
   // verdade -- liberacoes e amortizacao entram na consolidacao real
   // (src/core/motorFinanceiro.ts). Upsert, um financiamento por cenario.
-  app.post<{ Params: { id: string }; Body: { valorContratado?: string; taxaJurosMensal?: string; mesAmortizacao?: number } }>(
-    "/api/cenarios/:id/financiamento",
-    async (req, reply) => {
-      const { valorContratado, taxaJurosMensal, mesAmortizacao } = req.body ?? {};
-      if (!valorContratado || !valorContratado.trim() || Number.isNaN(Number(valorContratado))) {
-        reply.code(400);
-        return { erro: "valorContratado é obrigatório e deve ser numérico" };
-      }
-      if (!taxaJurosMensal || !taxaJurosMensal.trim() || Number.isNaN(Number(taxaJurosMensal))) {
-        reply.code(400);
-        return { erro: "taxaJurosMensal é obrigatório e deve ser numérico" };
-      }
-      if (mesAmortizacao === undefined || !Number.isInteger(mesAmortizacao) || mesAmortizacao < 1) {
-        reply.code(400);
-        return { erro: "mesAmortizacao deve ser um número inteiro maior ou igual a 1" };
-      }
-      const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
-      if (!cenario) {
-        reply.code(404);
-        return { erro: "Cenário não encontrado" };
-      }
-      if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
-      const financiamento = await definirFinanciamento({
-        empreendimentoId: cenario.empreendimentoId,
-        cenarioId: cenario.id,
-        valorContratado: valorContratado.trim(),
-        taxaJurosMensal: taxaJurosMensal.trim(),
-        mesAmortizacao,
-      });
-      reply.code(200);
-      return financiamento;
-    },
-  );
+  app.post<{
+    Params: { id: string };
+    Body: { valorContratado?: string; taxaJurosMensal?: string; mesAmortizacao?: number; tipoAmortizacao?: string; numeroParcelas?: number };
+  }>("/api/cenarios/:id/financiamento", async (req, reply) => {
+    const { valorContratado, taxaJurosMensal, mesAmortizacao, numeroParcelas } = req.body ?? {};
+    const tipoAmortizacao = (req.body?.tipoAmortizacao as "unico" | "sac" | "price" | undefined) ?? "unico";
+    if (!valorContratado || !valorContratado.trim() || Number.isNaN(Number(valorContratado))) {
+      reply.code(400);
+      return { erro: "valorContratado é obrigatório e deve ser numérico" };
+    }
+    if (!taxaJurosMensal || !taxaJurosMensal.trim() || Number.isNaN(Number(taxaJurosMensal))) {
+      reply.code(400);
+      return { erro: "taxaJurosMensal é obrigatório e deve ser numérico" };
+    }
+    if (mesAmortizacao === undefined || !Number.isInteger(mesAmortizacao) || mesAmortizacao < 1) {
+      reply.code(400);
+      return { erro: "mesAmortizacao deve ser um número inteiro maior ou igual a 1" };
+    }
+    if (tipoAmortizacao !== "unico" && tipoAmortizacao !== "sac" && tipoAmortizacao !== "price") {
+      reply.code(400);
+      return { erro: "tipoAmortizacao deve ser 'unico', 'sac' ou 'price'" };
+    }
+    // Achado F16 (docs/DECISOES.md — "amortizacao SAC/Price"): a tabela so
+    // faz sentido com uma quantidade de parcelas definida; "unico" nunca
+    // precisa dela (o proprio nome ja diz: pagamento unico).
+    if (tipoAmortizacao !== "unico" && (numeroParcelas === undefined || !Number.isInteger(numeroParcelas) || numeroParcelas < 1)) {
+      reply.code(400);
+      return { erro: "numeroParcelas é obrigatório (inteiro ≥ 1) para tipoAmortizacao 'sac' ou 'price'" };
+    }
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+    const financiamento = await definirFinanciamento({
+      empreendimentoId: cenario.empreendimentoId,
+      cenarioId: cenario.id,
+      valorContratado: valorContratado.trim(),
+      taxaJurosMensal: taxaJurosMensal.trim(),
+      mesAmortizacao,
+      tipoAmortizacao,
+      numeroParcelas: tipoAmortizacao === "unico" ? null : numeroParcelas,
+    });
+    reply.code(200);
+    return financiamento;
+  });
 
   app.delete<{ Params: { id: string } }>("/api/cenarios/:id/financiamento", async (req, reply) => {
     if (req.usuario!.papel !== "admin") {

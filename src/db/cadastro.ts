@@ -173,6 +173,8 @@ export async function duplicarCenario(cenarioId: string, novoNome: string) {
         valorContratado: financiamento.valorContratado,
         taxaJurosMensal: financiamento.taxaJurosMensal,
         mesAmortizacao: financiamento.mesAmortizacao,
+        tipoAmortizacao: financiamento.tipoAmortizacao,
+        numeroParcelas: financiamento.numeroParcelas,
       },
     });
   }
@@ -855,6 +857,9 @@ export interface DefinirFinanciamentoInput {
   valorContratado: string;
   taxaJurosMensal: string;
   mesAmortizacao: number;
+  /** achado F16 — "unico" (padrão) preserva o comportamento original; "sac"/"price" exigem numeroParcelas */
+  tipoAmortizacao?: "unico" | "sac" | "price";
+  numeroParcelas?: number | null;
 }
 
 /** Cria ou atualiza o financiamento de producao de um cenario (achado F8, docs/DECISOES.md) -- upsert, um financiamento por cenario nesta fase. */

@@ -10,7 +10,7 @@ export function FinanciamentoFluxoPanel({ financiamento }: { financiamento: Pont
     <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", boxShadow: "var(--shadow-sm)" }}>
       <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-primary)", marginBottom: 4 }}>Financiamento de produção</div>
       <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginBottom: 14 }}>
-        Liberações seguem a curva do cronograma físico; a amortização paga o saldo devedor inteiro de uma vez, no mês configurado.
+        Liberações seguem a curva do cronograma físico; a amortização segue a tabela configurada (pagamento único, SAC ou Price).
       </div>
       <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
         <thead>

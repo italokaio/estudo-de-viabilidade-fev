@@ -192,10 +192,14 @@ export interface CustoResumo {
   destinatariosComissao: DestinatarioComissaoResumo[];
 }
 
+export type TipoAmortizacao = "unico" | "sac" | "price";
+
 export interface FinanciamentoResumo {
   valorContratado: string;
   taxaJurosMensal: string;
   mesAmortizacao: number;
+  tipoAmortizacao: TipoAmortizacao;
+  numeroParcelas: number | null;
 }
 
 export interface CenarioDetalhe {
@@ -498,7 +502,10 @@ export function excluirPontoIndiceCorrecao(cenarioId: string, mes: number) {
   return del(`/api/cenarios/${cenarioId}/indices-correcao/${mes}`);
 }
 
-export function definirFinanciamento(cenarioId: string, input: { valorContratado: string; taxaJurosMensal: string; mesAmortizacao: number }) {
+export function definirFinanciamento(
+  cenarioId: string,
+  input: { valorContratado: string; taxaJurosMensal: string; mesAmortizacao: number; tipoAmortizacao?: TipoAmortizacao; numeroParcelas?: number },
+) {
   return postJson<FinanciamentoResumo>(`/api/cenarios/${cenarioId}/financiamento`, input);
 }
 

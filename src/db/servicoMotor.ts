@@ -65,6 +65,8 @@ async function montarEntradaMotor(cenarioId: string, opcoes: { taxaDescontoMensa
         valorContratado: new Decimal(financiamentoDb.valorContratado),
         taxaJurosMensal: new Decimal(financiamentoDb.taxaJurosMensal),
         mesAmortizacao: financiamentoDb.mesAmortizacao,
+        tipoAmortizacao: financiamentoDb.tipoAmortizacao as "unico" | "sac" | "price",
+        numeroParcelas: financiamentoDb.numeroParcelas ?? undefined,
       }
     : undefined;
 

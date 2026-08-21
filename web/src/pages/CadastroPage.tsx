@@ -49,6 +49,7 @@ import {
   type FormaAquisicaoTerreno,
   type ModalidadeInput,
   type StatusValidacaoArea,
+  type TipoAmortizacao,
   type TipoDistribuicao,
   type TipoIncidenciaCusto,
   type TipoIncrementoAndar,
@@ -1121,6 +1122,8 @@ function FinanciamentoSecao({
   const [valorContratado, setValorContratado] = useState(financiamento?.valorContratado ?? "");
   const [taxaJurosMensal, setTaxaJurosMensal] = useState(financiamento?.taxaJurosMensal ?? "");
   const [mesAmortizacao, setMesAmortizacao] = useState(financiamento ? String(financiamento.mesAmortizacao) : "");
+  const [tipoAmortizacao, setTipoAmortizacao] = useState<TipoAmortizacao>(financiamento?.tipoAmortizacao ?? "unico");
+  const [numeroParcelas, setNumeroParcelas] = useState(financiamento?.numeroParcelas ? String(financiamento.numeroParcelas) : "");
   const [salvando, setSalvando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
 
@@ -1128,7 +1131,13 @@ function FinanciamentoSecao({
     e.preventDefault();
     setSalvando(true);
     try {
-      await definirFinanciamento(cenarioId, { valorContratado, taxaJurosMensal, mesAmortizacao: Number(mesAmortizacao) });
+      await definirFinanciamento(cenarioId, {
+        valorContratado,
+        taxaJurosMensal,
+        mesAmortizacao: Number(mesAmortizacao),
+        tipoAmortizacao,
+        numeroParcelas: tipoAmortizacao === "unico" ? undefined : Number(numeroParcelas),
+      });
       setEditando(false);
       onAtualizado();
     } catch (err: any) {
@@ -1161,8 +1170,32 @@ function FinanciamentoSecao({
           <TextField label="Juros mensal (0–1)" value={taxaJurosMensal} onChange={(e) => setTaxaJurosMensal(e.target.value)} placeholder="0.01" required />
         </div>
         <div style={{ width: 140 }}>
-          <TextField label="Mês de amortização" type="number" min={1} value={mesAmortizacao} onChange={(e) => setMesAmortizacao(e.target.value)} required />
+          <TextField
+            label={tipoAmortizacao === "unico" ? "Mês de amortização" : "1ª parcela no mês"}
+            type="number"
+            min={1}
+            value={mesAmortizacao}
+            onChange={(e) => setMesAmortizacao(e.target.value)}
+            required
+          />
         </div>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 160 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Tabela de amortização</span>
+          <select
+            value={tipoAmortizacao}
+            onChange={(e) => setTipoAmortizacao(e.target.value as TipoAmortizacao)}
+            style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+          >
+            <option value="unico">Pagamento único</option>
+            <option value="sac">SAC (amortização constante)</option>
+            <option value="price">Price (parcela constante)</option>
+          </select>
+        </label>
+        {tipoAmortizacao !== "unico" && (
+          <div style={{ width: 120 }}>
+            <TextField label="Nº de parcelas" type="number" min={1} value={numeroParcelas} onChange={(e) => setNumeroParcelas(e.target.value)} required />
+          </div>
+        )}
         <Button type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
           {salvando ? "Salvando…" : "Salvar"}
         </Button>
@@ -1178,7 +1211,10 @@ function FinanciamentoSecao({
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
       <div style={{ fontSize: 13, color: "var(--ink-secondary)" }}>
-        {formatBRL(financiamento.valorContratado)} contratados · {(Number(financiamento.taxaJurosMensal) * 100).toFixed(2)}% a.m. · amortização no mês {financiamento.mesAmortizacao}
+        {formatBRL(financiamento.valorContratado)} contratados · {(Number(financiamento.taxaJurosMensal) * 100).toFixed(2)}% a.m. ·{" "}
+        {financiamento.tipoAmortizacao === "unico"
+          ? `amortização no mês ${financiamento.mesAmortizacao}`
+          : `${financiamento.tipoAmortizacao === "sac" ? "SAC" : "Price"}, ${financiamento.numeroParcelas} parcelas a partir do mês ${financiamento.mesAmortizacao}`}
       </div>
       <div style={{ display: "flex", gap: 6 }}>
         <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>

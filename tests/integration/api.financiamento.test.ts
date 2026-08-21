@@ -156,4 +156,107 @@ describe("API — financiamento de produção", () => {
 
     await rawApp.close();
   });
+
+  /**
+   * Tabela de amortização SAC/Price (achado F16, docs/DECISOES.md):
+   * alternativas ao pagamento único, com parcelas ao longo de vários meses.
+   */
+  it("cadastra financiamento com amortização SAC e a série de fluxo mostra parcelas decrescentes", async () => {
+    const emp = await app.inject({ method: "POST", url: "/api/empreendimentos", payload: { nome: "SAC Teste" } });
+    const cenarioRes = await app.inject({
+      method: "POST",
+      url: `/api/empreendimentos/${emp.json().id}/cenarios`,
+      payload: { tipo: "base", nome: "Base", horizonteProjecaoMeses: 5 },
+    });
+    const cenarioId = cenarioRes.json().id as string;
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/cronograma`, payload: { pontos: [{ mes: 1, percentualExecucaoMensal: "1" }] } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/cenarios/${cenarioId}/financiamento`,
+      payload: { valorContratado: "120000", taxaJurosMensal: "0.01", mesAmortizacao: 2, tipoAmortizacao: "sac", numeroParcelas: 4 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().tipoAmortizacao).toBe("sac");
+    expect(res.json().numeroParcelas).toBe(4);
+
+    const fluxo = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
+    const financiamento = fluxo.json().financiamento;
+    // 4 parcelas de 30000 de principal cada (120000/4); parcela total decresce mes a mes
+    expect(Number(financiamento[1].amortizacao)).toBeGreaterThan(Number(financiamento[2].amortizacao));
+    expect(Number(financiamento[2].amortizacao)).toBeGreaterThan(Number(financiamento[3].amortizacao));
+    // ultima parcela (mes 5, indice 4) zera o saldo devedor
+    expect(financiamento[4].saldoDevedor).toBe("0.00");
+  });
+
+  it("cadastra financiamento com amortização Price e todas as parcelas têm o mesmo valor", async () => {
+    const emp = await app.inject({ method: "POST", url: "/api/empreendimentos", payload: { nome: "Price Teste" } });
+    const cenarioRes = await app.inject({
+      method: "POST",
+      url: `/api/empreendimentos/${emp.json().id}/cenarios`,
+      payload: { tipo: "base", nome: "Base", horizonteProjecaoMeses: 5 },
+    });
+    const cenarioId = cenarioRes.json().id as string;
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/cronograma`, payload: { pontos: [{ mes: 1, percentualExecucaoMensal: "1" }] } });
+
+    await app.inject({
+      method: "POST",
+      url: `/api/cenarios/${cenarioId}/financiamento`,
+      payload: { valorContratado: "120000", taxaJurosMensal: "0.01", mesAmortizacao: 2, tipoAmortizacao: "price", numeroParcelas: 4 },
+    });
+
+    const fluxo = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
+    const parcelas = fluxo.json().financiamento.slice(1, 5).map((f: any) => f.amortizacao);
+    expect(new Set(parcelas).size).toBe(1); // todas as parcelas identicas
+  });
+
+  it("rejeita SAC/Price sem numeroParcelas, e tipoAmortizacao inválido", async () => {
+    const { cenarioId } = await cadastrarCenarioComCustoECronograma();
+    const semParcelas = await app.inject({
+      method: "POST",
+      url: `/api/cenarios/${cenarioId}/financiamento`,
+      payload: { valorContratado: "100000", taxaJurosMensal: "0.01", mesAmortizacao: 4, tipoAmortizacao: "sac" },
+    });
+    expect(semParcelas.statusCode).toBe(400);
+
+    const tipoInvalido = await app.inject({
+      method: "POST",
+      url: `/api/cenarios/${cenarioId}/financiamento`,
+      payload: { valorContratado: "100000", taxaJurosMensal: "0.01", mesAmortizacao: 4, tipoAmortizacao: "bullet" },
+    });
+    expect(tipoInvalido.statusCode).toBe(400);
+  });
+
+  it("sem tipoAmortizacao, continua se comportando como pagamento único (compatibilidade retroativa)", async () => {
+    const { cenarioId } = await cadastrarCenarioComCustoECronograma();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/cenarios/${cenarioId}/financiamento`,
+      payload: { valorContratado: "100000", taxaJurosMensal: "0", mesAmortizacao: 4 },
+    });
+    expect(res.json().tipoAmortizacao).toBe("unico");
+    expect(res.json().numeroParcelas).toBeNull();
+  });
+
+  it("duplicar um cenário preserva a tabela de amortização configurada", async () => {
+    const emp = await app.inject({ method: "POST", url: "/api/empreendimentos", payload: { nome: "SAC Duplicar" } });
+    const cenarioRes = await app.inject({
+      method: "POST",
+      url: `/api/empreendimentos/${emp.json().id}/cenarios`,
+      payload: { tipo: "base", nome: "Base", horizonteProjecaoMeses: 5 },
+    });
+    const cenarioId = cenarioRes.json().id as string;
+    await app.inject({
+      method: "POST",
+      url: `/api/cenarios/${cenarioId}/financiamento`,
+      payload: { valorContratado: "120000", taxaJurosMensal: "0.01", mesAmortizacao: 2, tipoAmortizacao: "sac", numeroParcelas: 4 },
+    });
+
+    const dup = await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/duplicar`, payload: { nome: "Base v2" } });
+    const novoId = dup.json().id as string;
+
+    const detalhe = await app.inject({ method: "GET", url: `/api/cenarios/${novoId}` });
+    expect(detalhe.json().financiamento.tipoAmortizacao).toBe("sac");
+    expect(detalhe.json().financiamento.numeroParcelas).toBe(4);
+  });
 });

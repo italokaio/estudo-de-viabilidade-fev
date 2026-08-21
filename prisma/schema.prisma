@@ -451,8 +451,14 @@ model FinanciamentoProducao {
   empreendimentoId  String
   cenarioId         String   @unique
   valorContratado   String // decimal-as-string, teto do financiamento
-  taxaJurosMensal   String // decimal-as-string, 0..1 -- juros capitalizados mes a mes sobre o saldo devedor
-  mesAmortizacao    Int // mes em que o saldo devedor inteiro (principal liberado + juros acumulados) e pago de uma vez
+  taxaJurosMensal   String // decimal-as-string, 0..1 -- juros capitalizados mes a mes sobre o saldo devedor, ate a amortizacao comecar
+  mesAmortizacao    Int // mes em que a amortizacao comeca -- pagamento unico ("unico") ou primeira parcela (SAC/Price)
+  // Tabela de amortizacao (achado F16, docs/DECISOES.md): "unico" preserva o
+  // comportamento original (saldo devedor inteiro pago de uma vez, sem
+  // numeroParcelas); "sac"/"price" amortizam o saldo ao longo de
+  // numeroParcelas meses a partir de mesAmortizacao.
+  tipoAmortizacao   String   @default("unico") // unico | sac | price
+  numeroParcelas    Int? // obrigatorio quando tipoAmortizacao != "unico"
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

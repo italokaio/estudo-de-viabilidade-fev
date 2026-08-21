@@ -144,6 +144,18 @@
 
 **Status.** Aprovado e implementado (vigésima quarta fatia). Testado em `tests/integration/api.alertas.test.ts` (limite customizado suprime/antecipa o alerta em relação ao padrão, `null` explícito restaura os 30%, validação de valor negativo/inválido, preservação ao duplicar cenário).
 
+## F16 — Amortização SAC/Price fixa a tabela sobre o saldo acumulado até o início da amortização, não recalcula com liberações posteriores (achado da Fase 1)
+
+**Contexto.** O financiamento de produção (achado F8) só modelava pagamento único do saldo devedor inteiro no mês de amortização — o caso mais comum na prática (repasse bancário na entrega das unidades), mas não o único: financiamentos bancários de obra também são amortizados por tabelas SAC (amortização constante, parcela decrescente) ou Price (parcela constante, sistema francês).
+
+**Decisão.** Estendido `calcularFinanciamento()` (`src/core/motorFinanciamento.ts`) com `tipoAmortizacao` (`"unico"` | `"sac"` | `"price"`) e `numeroParcelas`. A tabela SAC/Price é **fixada uma única vez**, no primeiro mês de amortização, sobre o saldo devedor acumulado até ali — a mesma base que "unico" já usava como pagamento único. A partir daí, cada mês da tabela paga juros (calculados sobre o saldo remanescente daquele mês, nunca mais capitalizados) mais uma fatia do principal — constante no SAC, embutida numa parcela fixa no Price (fórmula de anuidade padrão).
+
+**Decisão de escopo — liberação durante o período de amortização.** O modelo assume que as liberações terminam antes da amortização começar (a prática real: o banco só faz o repasse quando a obra está pronta). Uma liberação que ocorra depois que a tabela já foi fixada soma ao saldo devedor **reportado**, mas não gera uma parcela extra nem recalcula a tabela — simplificação deliberada, documentada no código, para não precisar resolver "como renegociar uma tabela de parcelas fixas no meio do caminho", um problema de produto em aberto, não uma lacuna técnica.
+
+**Achado ao verificar em navegador.** A primeira tentativa de verificação usou um mês de amortização muito cedo em relação à curva de liberação do cronograma do Splendido (36 meses) — o saldo acumulado até aquele mês era quase zero, então a tabela SAC fixada ficou com parcelas de poucos reais, enquanto as liberações seguintes (a maior parte do valor contratado) só engordavam o saldo reportado sem nunca serem amortizadas. Não é um bug: é exatamente o comportamento documentado no parágrafo anterior, e o mesmo aconteceria com "unico" na mesma configuração (o pagamento único também só paga o que já foi liberado até aquele mês). A lição foi de configuração de teste, não de código — corrigida escolhendo um mês de amortização tardio o suficiente para a maior parte do valor já ter sido liberada, o que produziu uma tabela SAC com parcelas na casa das centenas de milhares, decrescendo corretamente e zerando o saldo devedor exatamente na última parcela.
+
+**Status.** Aprovado e implementado (vigésima quinta fatia). Testado em `tests/core/motorFinanciamento.test.ts` (SAC com juros/principal decrescentes calculados à mão, Price com parcela constante e caso-limite de juros zero, compatibilidade retroativa de `tipoAmortizacao` omitido) e `tests/integration/api.financiamento.test.ts` (cadastro, validação de `numeroParcelas` obrigatório, preservação ao duplicar cenário).
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |
