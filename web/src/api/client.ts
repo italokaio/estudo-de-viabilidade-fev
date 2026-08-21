@@ -111,6 +111,7 @@ export interface CenarioResumo {
   nome: string;
   tipo: string;
   horizonteProjecaoMeses: number;
+  derivadoDeNome: string | null;
 }
 
 export type TipoIncidenciaCusto = "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao";
@@ -345,6 +346,10 @@ export function atualizarCenario(id: string, input: { nome?: string; horizontePr
 
 export function excluirCenario(id: string) {
   return del(`/api/cenarios/${id}`);
+}
+
+export function duplicarCenario(id: string, nome: string) {
+  return postJson<CenarioResumo>(`/api/cenarios/${id}/duplicar`, { nome });
 }
 
 export interface DistratoResumo {

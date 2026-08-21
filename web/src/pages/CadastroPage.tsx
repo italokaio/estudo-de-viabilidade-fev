@@ -23,6 +23,7 @@ import {
   desfazerDistrato,
   desfazerPermuta,
   excluirCategoriaCusto,
+  duplicarCenario,
   excluirCenario,
   excluirCondicaoPagamento,
   excluirCronograma,
@@ -570,6 +571,23 @@ function CartaoCenario({
   const [horizonteEdicao, setHorizonteEdicao] = useState(String(cenarioResumo.horizonteProjecaoMeses));
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
+  const [duplicando, setDuplicando] = useState(false);
+  const [nomeDuplicacao, setNomeDuplicacao] = useState(`${cenarioResumo.nome} (cópia)`);
+  const [salvandoDuplicacao, setSalvandoDuplicacao] = useState(false);
+
+  async function salvarDuplicacao(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvandoDuplicacao(true);
+    try {
+      await duplicarCenario(cenarioResumo.id, nomeDuplicacao);
+      setDuplicando(false);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvandoDuplicacao(false);
+    }
+  }
 
   async function salvarEdicao(e: React.FormEvent) {
     e.preventDefault();
@@ -661,6 +679,27 @@ function CartaoCenario({
     );
   }
 
+  if (duplicando) {
+    return (
+      <div style={{ border: "1px solid var(--border-subtle)", borderRadius: 10, padding: "12px 14px", background: "var(--surface-2)" }}>
+        <div style={{ fontSize: 12, color: "var(--ink-muted)", marginBottom: 8 }}>
+          Cria um cenário novo com as mesmas premissas, custos, cronograma, índice de correção e financiamento — as vendas não são copiadas.
+        </div>
+        <form onSubmit={salvarDuplicacao} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <TextField label="Nome do novo cenário" value={nomeDuplicacao} onChange={(e) => setNomeDuplicacao(e.target.value)} required />
+          </div>
+          <Button type="submit" disabled={salvandoDuplicacao || !nomeDuplicacao.trim()}>
+            {salvandoDuplicacao ? "Duplicando…" : "Confirmar"}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => setDuplicando(false)}>
+            Cancelar
+          </Button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div style={{ border: "1px solid var(--border-subtle)", borderRadius: 10, padding: "12px 14px", background: "var(--surface-2)" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -670,6 +709,23 @@ function CartaoCenario({
             {cenarioResumo.tipo} · {cenarioResumo.horizonteProjecaoMeses} meses
             {detalhe && ` · ${detalhe.totalVendasGeradas} venda(s) gerada(s)`}
           </div>
+          {cenarioResumo.derivadoDeNome && (
+            <div
+              style={{
+                display: "inline-block",
+                marginTop: 6,
+                fontSize: 11,
+                fontWeight: 600,
+                color: "var(--ink-muted)",
+                background: "var(--surface)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: 6,
+                padding: "2px 8px",
+              }}
+            >
+              Derivado de: {cenarioResumo.derivadoDeNome}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Button variant="secondary" onClick={() => setExpandido((v) => !v)} style={{ padding: "6px 10px", fontSize: 12 }}>
@@ -677,6 +733,9 @@ function CartaoCenario({
           </Button>
           <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
             Editar
+          </Button>
+          <Button variant="secondary" onClick={() => setDuplicando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+            Duplicar
           </Button>
           <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
             {excluindo ? "Excluindo…" : "Excluir"}

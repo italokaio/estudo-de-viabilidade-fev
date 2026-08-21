@@ -25,6 +25,7 @@ import {
   definirTerreno,
   desfazerDistrato,
   desfazerPermuta,
+  duplicarCenario,
   excluirCategoriaCusto,
   excluirCenario,
   excluirCondicaoPagamento,
@@ -272,7 +273,7 @@ export async function buildApp() {
           },
           orderBy: { createdAt: "asc" },
         },
-        cenarios: { orderBy: { createdAt: "asc" } },
+        cenarios: { include: { derivadoDe: { select: { nome: true } } }, orderBy: { createdAt: "asc" } },
         categoriasCusto: { orderBy: { nome: "asc" } },
         terreno: true,
       },
@@ -300,6 +301,7 @@ export async function buildApp() {
         nome: c.nome,
         tipo: c.tipo,
         horizonteProjecaoMeses: c.horizonteProjecaoMeses,
+        derivadoDeNome: c.derivadoDe?.nome ?? null,
       })),
       categoriasCusto: empreendimento.categoriasCusto.map((cc) => ({ id: cc.id, nome: cc.nome, tipoIncidencia: cc.tipoIncidencia })),
       tipologias: empreendimento.tipologias.map((t) => ({
@@ -984,6 +986,27 @@ export async function buildApp() {
     await excluirCenario(req.params.id);
     reply.code(204);
     return null;
+  });
+
+  // Duplicar cenario (achado F10, docs/DECISOES.md — "versao de cenario"):
+  // copia premissas/custos/cronograma/indice/financiamento para um cenario
+  // novo e independente. Deliberadamente nao copia Venda -- ver
+  // duplicarCenario em src/db/cadastro.ts para o raciocinio completo.
+  app.post<{ Params: { id: string }; Body: { nome?: string } }>("/api/cenarios/:id/duplicar", async (req, reply) => {
+    const { nome } = req.body ?? {};
+    if (!nome || !nome.trim()) {
+      reply.code(400);
+      return { erro: "Nome do novo cenário é obrigatório" };
+    }
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+    const novo = await duplicarCenario(req.params.id, nome.trim());
+    reply.code(201);
+    return novo;
   });
 
   app.post<{

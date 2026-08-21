@@ -80,6 +80,16 @@
 
 **Status.** Aprovado e implementado (décima oitava fatia). Testado em `tests/core/motorAlertas.test.ts` e `tests/integration/api.alertas.test.ts`.
 
+## F10 — Versão de cenário: duplicar nunca copia `Venda`, porque `Unidade.status` é global ao empreendimento (achado da Fase 1)
+
+**Contexto.** `Cenario.derivadoDeCenarioId` existe no schema desde a Fase 0 (self-relation `derivadoDe`/`derivados`), e `docs/ARQUITETURA.md` (Princípio I) já descrevia como aspiração que "criar um cenário derivado copia dados para novas linhas" — mas nenhuma rota ou função jamais populou esse campo. `criarCenario` sempre criou um cenário vazio; a coluna existia sem nenhum código que a usasse.
+
+**Decisão.** A pergunta central para implementar `duplicarCenario()` foi: o que copiar? A resposta óbvia — tudo — esbarra num fato arquitetural já usado (mas nunca documentado como achado até agora) pela cascata de `excluirCenario`: `Unidade.status` é um campo **global ao empreendimento**, compartilhado por todos os seus cenários, não um campo por cenário. Se `duplicarCenario` copiasse `Venda`, os dois cenários passariam a reivindicar simultaneamente a mesma unidade como "vendida" — e qualquer chamada subsequente a `excluirCenario`, `registrarDistrato`, `desfazerDistrato` ou `registrarPermuta` feita a partir de um dos cenários acabaria liberando ou travando a unidade incorretamente para o outro. A decisão foi excluir `Venda` (e por extensão `RecebimentoProjetado`/`Distrato`) da cópia — o cenário duplicado nasce sem vendas, livre para gerar as suas próprias a partir do estoque disponível no momento (`gerarVendasDePremissaVelocidade`, inalterado). Tudo o que é premissa/parâmetro puro é copiado normalmente: `PremissaVelocidadeVendas`, `Custo` (sem `valorRealizado`/`status` — o clone sempre começa "previsto"), `CronogramaFisicoFinanceiro`, `IndiceCorrecao` e `FinanciamentoProducao`.
+
+**Bug latente encontrado e corrigido de forma proativa.** Como `derivadoDeCenarioId` nunca tinha sido populado antes desta fatia, ninguém tinha notado que `excluirCenario` não desfazia essa referência antes do `delete` — sem `onDelete` explícito no schema, o Prisma/SQLite usa RESTRICT por padrão, então excluir um cenário que tem duplicatas apontando para ele via `derivadoDeCenarioId` teria falhado por violação de chave estrangeira assim que a feature entrasse em uso real. Corrigido zerando `derivadoDeCenarioId` de todas as duplicatas antes do `delete` — elas continuam existindo normalmente, só perdem o vínculo histórico com o original.
+
+**Status.** Aprovado e implementado (décima nona fatia). Testado em `tests/integration/api.versaoCenario.test.ts`, incluindo um teste de regressão dedicado para o bug do `derivadoDeCenarioId`.
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |

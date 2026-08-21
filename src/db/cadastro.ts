@@ -104,7 +104,95 @@ export async function excluirCenario(id: string) {
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { cenarioId: id } });
   await prisma.indiceCorrecao.deleteMany({ where: { cenarioId: id } });
   await prisma.financiamentoProducao.deleteMany({ where: { cenarioId: id } });
+  // Um cenario duplicado (achado F10, docs/DECISOES.md) referencia o
+  // original via derivadoDeCenarioId, sem cascade -- sem isso, excluir um
+  // cenario que tem duplicatas falharia por violacao de chave estrangeira.
+  // As duplicatas simplesmente perdem o vinculo historico, continuam
+  // existindo normalmente.
+  await prisma.cenario.updateMany({ where: { derivadoDeCenarioId: id }, data: { derivadoDeCenarioId: null } });
   await prisma.cenario.delete({ where: { id } });
+}
+
+/**
+ * Duplica um cenario (achado F10, docs/DECISOES.md — "versao de cenario"):
+ * copia premissas de velocidade, custos, cronograma, indice de correcao e
+ * financiamento para um cenario novo, independente, com
+ * derivadoDeCenarioId apontando para o original. Deliberadamente NAO
+ * copia Venda: Unidade.status e compartilhado entre todos os cenarios do
+ * mesmo empreendimento (ver excluirCenario), entao duplicar vendas
+ * colocaria duas Venda em cenarios diferentes referenciando a mesma
+ * unidade "vendida" ao mesmo tempo -- uma classe inteira de bug evitada
+ * simplesmente nao copiando. O cenario duplicado pode gerar suas
+ * proprias vendas a partir das premissas de velocidade clonadas, sujeito
+ * ao estoque disponivel no momento (que pode ja estar parcialmente
+ * consumido pelo cenario original).
+ */
+export async function duplicarCenario(cenarioId: string, novoNome: string) {
+  const original = await prisma.cenario.findUniqueOrThrow({ where: { id: cenarioId } });
+
+  const novo = await prisma.cenario.create({
+    data: {
+      empreendimentoId: original.empreendimentoId,
+      tipo: original.tipo,
+      nome: novoNome,
+      horizonteProjecaoMeses: original.horizonteProjecaoMeses,
+      derivadoDeCenarioId: original.id,
+    },
+  });
+
+  const premissas = await prisma.premissaVelocidadeVendas.findMany({ where: { cenarioId } });
+  if (premissas.length > 0) {
+    await prisma.premissaVelocidadeVendas.createMany({
+      data: premissas.map((p) => ({ empreendimentoId: p.empreendimentoId, cenarioId: novo.id, tipologiaId: p.tipologiaId, mes: p.mes, unidadesPrevistas: p.unidadesPrevistas })),
+    });
+  }
+
+  const cronograma = await prisma.cronogramaFisicoFinanceiro.findMany({ where: { cenarioId } });
+  if (cronograma.length > 0) {
+    await prisma.cronogramaFisicoFinanceiro.createMany({
+      data: cronograma.map((p) => ({ empreendimentoId: p.empreendimentoId, cenarioId: novo.id, mes: p.mes, percentualExecucaoMensal: p.percentualExecucaoMensal })),
+    });
+  }
+
+  const indices = await prisma.indiceCorrecao.findMany({ where: { cenarioId } });
+  if (indices.length > 0) {
+    await prisma.indiceCorrecao.createMany({
+      data: indices.map((i) => ({ empreendimentoId: i.empreendimentoId, cenarioId: novo.id, mes: i.mes, percentual: i.percentual })),
+    });
+  }
+
+  const financiamento = await prisma.financiamentoProducao.findUnique({ where: { cenarioId } });
+  if (financiamento) {
+    await prisma.financiamentoProducao.create({
+      data: {
+        empreendimentoId: financiamento.empreendimentoId,
+        cenarioId: novo.id,
+        valorContratado: financiamento.valorContratado,
+        taxaJurosMensal: financiamento.taxaJurosMensal,
+        mesAmortizacao: financiamento.mesAmortizacao,
+      },
+    });
+  }
+
+  // valorRealizado/status NAO copiados -- o custo duplicado comeca "previsto", mesmo se o original ja tinha sido marcado como realizado.
+  const custos = await prisma.custo.findMany({ where: { cenarioId } });
+  if (custos.length > 0) {
+    await prisma.custo.createMany({
+      data: custos.map((c) => ({
+        empreendimentoId: c.empreendimentoId,
+        cenarioId: novo.id,
+        categoriaId: c.categoriaId,
+        valorPrevisto: c.valorPrevisto,
+        percentual: c.percentual,
+        competenciaMes: c.competenciaMes,
+        vencimentoMes: c.vencimentoMes,
+        recorrencia: c.recorrencia,
+        participaFluxoCaixa: c.participaFluxoCaixa,
+      })),
+    });
+  }
+
+  return novo;
 }
 
 export interface CriarTerrenoInput {
