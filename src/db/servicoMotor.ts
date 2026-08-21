@@ -18,12 +18,13 @@ async function montarEntradaMotor(cenarioId: string, opcoes: { taxaDescontoMensa
 
   const vendasDb = await prisma.venda.findMany({
     where: { cenarioId, status: "ativa" },
-    include: { condicaoPagamento: { include: { modalidades: true } } },
+    include: { condicaoPagamento: { include: { modalidades: true } }, unidade: { select: { tipologiaId: true } } },
   });
 
   const vendas: VendaInput[] = vendasDb.map((v) => ({
     id: v.id,
     unidadeId: v.unidadeId,
+    tipologiaId: v.unidade.tipologiaId,
     mesOrigem: v.mesOrigem,
     valorVenda: new Decimal(v.valorVenda),
     condicaoPagamento: mapCondicao(v.condicaoPagamento),
@@ -43,6 +44,7 @@ async function montarEntradaMotor(cenarioId: string, opcoes: { taxaDescontoMensa
     competenciaMes: c.competenciaMes ?? undefined,
     recorrencia: c.recorrencia as "unico" | "mensal",
     participaFluxoCaixa: c.participaFluxoCaixa,
+    tipologiaId: c.tipologiaId ?? undefined,
   }));
 
   const cronogramaDb = await prisma.cronogramaFisicoFinanceiro.findMany({

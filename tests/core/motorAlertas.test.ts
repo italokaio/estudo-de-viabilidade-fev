@@ -30,7 +30,7 @@ describe("motor de alertas de risco", () => {
 
   it("necessidade máxima acima do limite (30% do VGV) gera alerta crítico", () => {
     const condicao: CondicaoPagamento = { id: "c1", nome: "À vista", modalidades: [] };
-    const vendas: VendaInput[] = [{ id: "v1", unidadeId: "u1", mesOrigem: 1, valorVenda: new Decimal("100000"), condicaoPagamento: condicao }];
+    const vendas: VendaInput[] = [{ id: "v1", unidadeId: "u1", tipologiaId: "t1", mesOrigem: 1, valorVenda: new Decimal("100000"), condicaoPagamento: condicao }];
     const entrada: EntradaAlertas = {
       ...entradaVazia(),
       vendas,
@@ -43,7 +43,7 @@ describe("motor de alertas de risco", () => {
 
   it("necessidade máxima abaixo do limite não gera alerta", () => {
     const condicao: CondicaoPagamento = { id: "c1", nome: "À vista", modalidades: [] };
-    const vendas: VendaInput[] = [{ id: "v1", unidadeId: "u1", mesOrigem: 1, valorVenda: new Decimal("100000"), condicaoPagamento: condicao }];
+    const vendas: VendaInput[] = [{ id: "v1", unidadeId: "u1", tipologiaId: "t1", mesOrigem: 1, valorVenda: new Decimal("100000"), condicaoPagamento: condicao }];
     const entrada: EntradaAlertas = {
       ...entradaVazia(),
       vendas,
@@ -54,7 +54,7 @@ describe("motor de alertas de risco", () => {
 
   it("respeita um limite customizado passado explicitamente", () => {
     const condicao: CondicaoPagamento = { id: "c1", nome: "À vista", modalidades: [] };
-    const vendas: VendaInput[] = [{ id: "v1", unidadeId: "u1", mesOrigem: 1, valorVenda: new Decimal("100000"), condicaoPagamento: condicao }];
+    const vendas: VendaInput[] = [{ id: "v1", unidadeId: "u1", tipologiaId: "t1", mesOrigem: 1, valorVenda: new Decimal("100000"), condicaoPagamento: condicao }];
     const entrada: EntradaAlertas = {
       ...entradaVazia(),
       vendas,

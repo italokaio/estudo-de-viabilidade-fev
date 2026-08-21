@@ -900,7 +900,7 @@ export async function buildApp() {
           },
         },
         premissasVelocidade: { include: { tipologia: { select: { nome: true } } }, orderBy: { mes: "asc" } },
-        custos: { include: { categoria: true }, orderBy: { createdAt: "asc" } },
+        custos: { include: { categoria: true, tipologia: { select: { nome: true } } }, orderBy: { createdAt: "asc" } },
         cronograma: { orderBy: { mes: "asc" } },
         indicesCorrecao: { orderBy: { mes: "asc" } },
         financiamento: true,
@@ -931,6 +931,8 @@ export async function buildApp() {
         id: c.id,
         categoriaNome: c.categoria.nome,
         tipoIncidencia: c.categoria.tipoIncidencia,
+        tipologiaId: c.tipologiaId,
+        tipologiaNome: c.tipologia?.nome ?? null,
         valorPrevisto: c.valorPrevisto,
         percentual: c.percentual,
         competenciaMes: c.competenciaMes,
@@ -1011,9 +1013,9 @@ export async function buildApp() {
 
   app.post<{
     Params: { id: string };
-    Body: { categoriaId?: string; valorPrevisto?: string; percentual?: string; competenciaMes?: number; recorrencia?: string };
+    Body: { categoriaId?: string; tipologiaId?: string; valorPrevisto?: string; percentual?: string; competenciaMes?: number; recorrencia?: string };
   }>("/api/cenarios/:id/custos", async (req, reply) => {
-    const { categoriaId, valorPrevisto, percentual, competenciaMes, recorrencia } = req.body ?? {};
+    const { categoriaId, tipologiaId, valorPrevisto, percentual, competenciaMes, recorrencia } = req.body ?? {};
     if (!categoriaId) {
       reply.code(400);
       return { erro: "Categoria de custo é obrigatória" };
@@ -1042,10 +1044,26 @@ export async function buildApp() {
       reply.code(400);
       return { erro: "Mês de competência é obrigatório para custo fixo" };
     }
+    // Escopo por tipologia (achado F11, docs/DECISOES.md — "estrutura de
+    // comissao") so faz sentido para pct_vgv_vendido_no_mes -- nas outras
+    // incidencias (fixo, pct_execucao, pct_recebido_mes_anterior) nao ha
+    // como um valor/percentual "incidir sobre uma tipologia".
+    if (tipologiaId && categoria.tipoIncidencia !== "pct_vgv_vendido_no_mes") {
+      reply.code(400);
+      return { erro: "Escopo por tipologia só é aplicável a custos de incidência sobre VGV vendido" };
+    }
+    if (tipologiaId) {
+      const tipologia = await prisma.tipologia.findUnique({ where: { id: tipologiaId } });
+      if (!tipologia) {
+        reply.code(404);
+        return { erro: "Tipologia não encontrada" };
+      }
+    }
     const custo = await criarCusto({
       empreendimentoId: cenario.empreendimentoId,
       cenarioId: cenario.id,
       categoriaId,
+      tipologiaId: tipologiaId || undefined,
       valorPrevisto: incidenciaPorValor ? valorPrevisto : undefined,
       percentual: incidenciaPorValor ? undefined : percentual,
       competenciaMes: categoria.tipoIncidencia === "fixo" ? competenciaMes : undefined,

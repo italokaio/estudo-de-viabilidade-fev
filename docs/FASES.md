@@ -331,6 +331,25 @@ Terceiro e penúltimo item da lista original "fica para depois" da Fundação do
 
 **Não implementado nesta fatia:** comparação lado a lado entre um cenário e o(s) derivado(s) dele (só o badge "Derivado de" no cartão), duplicação em cascata de múltiplos níveis de derivação exibida na árvore completa (só o vínculo direto pai→filho), promover um cenário duplicado a "oficial" substituindo o original.
 
+## Fase 1 (código) — vigésima fatia: estrutura de comissão (este repositório, concluída)
+
+Último item da lista original "fica para depois" da Fundação do ERP (`FinanciamentoProducao`, `AlertaRisco`, `SimulacaoSensibilidade`, `VersaoCenario`, `EstruturaComissao`) — a lista está esgotada com esta fatia.
+
+**Decisão de escopo:** comissão já era representável desde a Fase 0 sem tabela nova — uma categoria de custo com `tipoIncidencia="pct_vgv_vendido_no_mes"` já escala com o VGV vendido a cada mês. A lacuna real era mais estreita: esse percentual é único para o cenário inteiro, sem forma de variar por tipologia (ex.: comissão de 8% em loja, 5% em apartamento). A solução (achado F11, `docs/DECISOES.md`) foi um campo novo `Custo.tipologiaId` (opcional), não uma tabela `EstruturaComissao` — sem preenchê-lo, nada muda; preenchido, o custo passa a incidir só sobre as vendas daquela tipologia. Só aceito para `tipoIncidencia="pct_vgv_vendido_no_mes"` — as outras incidências não têm uma leitura natural de "por tipologia" e a API rejeita a combinação (400) em vez de ignorá-la silenciosamente.
+
+**Implementado:**
+- Schema — `Custo.tipologiaId String?`, FK para `Tipologia` (nullable, sem `onDelete` — mesmo padrão do resto do schema).
+- `src/core/types.ts` — `VendaInput.tipologiaId` (novo, obrigatório) e `CustoInput.tipologiaId` (novo, opcional).
+- `src/core/motorCustos.ts` — o caso `pct_vgv_vendido_no_mes` filtra `ctx.vendas` por `tipologiaId` antes de somar o VGV vendido no mês, quando o custo tem um `tipologiaId` definido.
+- `src/db/servicoMotor.ts` — `montarEntradaMotor()` passou a incluir `unidade.tipologiaId` na consulta de vendas e `tipologiaId` na de custos.
+- `src/db/cadastro.ts` — `duplicarCenario` (achado F10) ajustado para copiar `Custo.tipologiaId` também — sem isso, duplicar um cenário perderia silenciosamente o escopo por tipologia de qualquer custo de comissão.
+- API — `POST /api/cenarios/:id/custos` aceita `tipologiaId` (400 se combinado com uma incidência diferente de `pct_vgv_vendido_no_mes`, 404 se a tipologia não existe); `GET /api/cenarios/:id` expõe `tipologiaId`/`tipologiaNome` em cada custo.
+- Web — seletor "Tipologia (opcional)" no formulário de novo custo, visível só quando a categoria selecionada é de incidência `pct_vgv_vendido_no_mes`; nova coluna "Tipologia" na tabela de custos do cenário, mostrando "Todas" ou o nome da tipologia.
+- 7 novos testes: 1 unitário (`tests/core/motorCustos.test.ts` — a estratégia de incidência isolada, com e sem escopo) e 6 de API (`tests/integration/api.estruturaComissao.test.ts` — efeito de ponta a ponta no fluxo de caixa comparando com/sem escopo, exposição via `GET /api/cenarios/:id`, validação 400/404, preservação do escopo ao duplicar um cenário). Suíte total: 34 arquivos, 191 testes.
+- Verificado num navegador real (claro e escuro) no cenário Splendido: confirmou que o campo "Tipologia (opcional)" fica ausente por padrão (categoria "Obra", incidência por execução física) e aparece só ao selecionar uma categoria de incidência sobre VGV vendido; criou um custo de comissão escopado à tipologia "Loja" e confirmou que a tabela de custos mostra corretamente "Loja" nessa linha e "Todas" nas demais.
+
+**Não implementado nesta fatia:** faixas de comissão progressivas por volume vendido, split nominal entre corretor/imobiliária/gerência (cadastro nominal de destinatário, no espírito de `Permuta`/`Distrato` — ficou fora por não ter sido pedido explicitamente), comissão paga na curva de recebimento em vez de no mês da venda.
+
 ## Próxima fase
 
-A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores), a décima sexta fatia de simulação de sensibilidade, a décima sétima de financiamento de produção, a décima oitava de alerta de risco e a décima nona de versão de cenário estão concluídas. A lista original "fica para depois" da Fundação do ERP está esgotada — resta apenas `EstruturaComissao`, que nunca chegou a ser escolhida como próximo item entre os candidatos apresentados ao usuário. Aguardando direção do usuário sobre o que vem a seguir.
+A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores), a décima sexta fatia de simulação de sensibilidade, a décima sétima de financiamento de produção, a décima oitava de alerta de risco, a décima nona de versão de cenário e a vigésima de estrutura de comissão estão concluídas. A lista original "fica para depois" da Fundação do ERP está totalmente esgotada. Aguardando direção do usuário sobre o que vem a seguir.

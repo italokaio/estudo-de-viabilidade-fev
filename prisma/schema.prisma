@@ -158,6 +158,7 @@ model Tipologia {
   unidades            Unidade[]
   condicoesPagamento  CondicaoPagamento[]
   premissasVelocidade PremissaVelocidadeVendas[]
+  custos              Custo[]
 
   @@map("tipologia")
 }
@@ -317,6 +318,13 @@ model Custo {
   empreendimentoId    String
   cenarioId           String
   categoriaId         String
+  // Escopo opcional por tipologia (achado F11, docs/DECISOES.md — "estrutura
+  // de comissao"): nulo = aplica a todas as vendas do cenario (comportamento
+  // original); preenchido = so incide sobre vendas daquela tipologia. So faz
+  // sentido quando a categoria tem tipoIncidencia="pct_vgv_vendido_no_mes"
+  // (validado na API, nao aqui) -- permite percentuais de comissao
+  // diferentes por tipologia sem nenhuma tabela nova.
+  tipologiaId         String?
   valorPrevisto       String? // decimal-as-string, absoluto (quando incidencia = fixo)
   percentual          String? // decimal-as-string, 0..1 (quando incidencia = percentual)
   competenciaMes      Int?
@@ -331,6 +339,7 @@ model Custo {
   empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
   cenario        Cenario        @relation(fields: [cenarioId], references: [id])
   categoria      CategoriaCusto @relation(fields: [categoriaId], references: [id])
+  tipologia      Tipologia?     @relation(fields: [tipologiaId], references: [id])
 
   @@map("custo")
 }

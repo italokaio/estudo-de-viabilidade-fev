@@ -30,6 +30,7 @@ function montarCenario(): EntradaMotorFinanceiro {
   const vendas: VendaInput[] = Array.from({ length: 15 }, (_, i) => ({
     id: `venda-${i + 1}`,
     unidadeId: `unidade-${i + 1}`,
+    tipologiaId: "tipologia-1",
     mesOrigem: (i % 8) + 1,
     valorVenda: new Decimal(300000 + i * 12345),
     condicaoPagamento: condicao,

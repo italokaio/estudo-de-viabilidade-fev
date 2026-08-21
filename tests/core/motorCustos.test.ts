@@ -42,9 +42,9 @@ describe("motor de custos — as 4 estrategias de incidencia", () => {
 
   it("pct_vgv_vendido_no_mes: incide sobre o total vendido em cada mes", () => {
     const vendas: VendaInput[] = [
-      { id: "v1", unidadeId: "u1", mesOrigem: 1, valorVenda: new Decimal("100000"), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } },
-      { id: "v2", unidadeId: "u2", mesOrigem: 1, valorVenda: new Decimal("50000"), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } },
-      { id: "v3", unidadeId: "u3", mesOrigem: 2, valorVenda: new Decimal("200000"), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } },
+      { id: "v1", unidadeId: "u1", tipologiaId: "t-apto", mesOrigem: 1, valorVenda: new Decimal("100000"), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } },
+      { id: "v2", unidadeId: "u2", tipologiaId: "t-apto", mesOrigem: 1, valorVenda: new Decimal("50000"), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } },
+      { id: "v3", unidadeId: "u3", tipologiaId: "t-loja", mesOrigem: 2, valorVenda: new Decimal("200000"), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } },
     ];
     const custo: CustoInput = {
       id: "c3",
@@ -58,6 +58,26 @@ describe("motor de custos — as 4 estrategias de incidencia", () => {
     const porMes = new Map(desembolsos.map((d) => [d.mes, d.valor.toString()]));
     expect(porMes.get(1)).toBe("7500"); // (100000+50000) * 5%
     expect(porMes.get(2)).toBe("10000"); // 200000 * 5%
+  });
+
+  it("pct_vgv_vendido_no_mes com tipologiaId: incide só sobre as vendas daquela tipologia (achado F11 — estrutura de comissao)", () => {
+    const vendas: VendaInput[] = [
+      { id: "v1", unidadeId: "u1", tipologiaId: "t-apto", mesOrigem: 1, valorVenda: new Decimal("100000"), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } },
+      { id: "v2", unidadeId: "u2", tipologiaId: "t-apto", mesOrigem: 1, valorVenda: new Decimal("50000"), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } },
+      { id: "v3", unidadeId: "u3", tipologiaId: "t-loja", mesOrigem: 1, valorVenda: new Decimal("200000"), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } },
+    ];
+    const comissaoLoja: CustoInput = {
+      id: "c-loja",
+      categoriaNome: "Comissao",
+      tipoIncidencia: "pct_vgv_vendido_no_mes",
+      percentual: new Decimal("0.08"),
+      recorrencia: "mensal",
+      participaFluxoCaixa: true,
+      tipologiaId: "t-loja",
+    };
+    const desembolsos = gerarDesembolsosMensais(comissaoLoja, { ...ctxBase, vendas });
+    // so a venda v3 (loja) entra na base -- v1/v2 (apto) sao ignoradas por este custo.
+    expect(desembolsos).toEqual([{ custoId: "c-loja", mes: 1, valor: new Decimal("16000") }]); // 200000 * 8%
   });
 
   it("pct_recebido_mes_anterior: incide sobre o total recebido no mes anterior", () => {

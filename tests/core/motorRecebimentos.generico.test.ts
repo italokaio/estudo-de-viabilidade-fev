@@ -69,6 +69,7 @@ describe("motor de recebimentos — genericidade (Vila Jacaranda, nao-Splendido)
     const venda: VendaInput = {
       id: "venda-jacaranda-1",
       unidadeId: "unidade-jacaranda-101",
+      tipologiaId: "t1",
       mesOrigem: 2,
       valorVenda: new Decimal("500000"),
       condicaoPagamento: condicao,
@@ -103,6 +104,7 @@ describe("motor de recebimentos — genericidade (Vila Jacaranda, nao-Splendido)
     const vendaTardia: VendaInput = {
       id: "venda-jacaranda-2",
       unidadeId: "unidade-jacaranda-202",
+      tipologiaId: "t1",
       mesOrigem: 11, // so resta 1 mes ate o horizonte de 12; periodicidade=4 nao cabe
       valorVenda: new Decimal("300000"),
       condicaoPagamento: condicao,
@@ -150,6 +152,7 @@ describe("motor de recebimentos — genericidade (Vila Jacaranda, nao-Splendido)
     const venda: VendaInput = {
       id: "venda-jacaranda-3",
       unidadeId: "unidade-jacaranda-303",
+      tipologiaId: "t1",
       mesOrigem: 1,
       valorVenda: new Decimal("300000"),
       condicaoPagamento: condicaoComTaxaClube,

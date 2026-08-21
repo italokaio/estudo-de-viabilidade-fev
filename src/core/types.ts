@@ -37,6 +37,7 @@ export interface CondicaoPagamento {
 export interface VendaInput {
   id: string;
   unidadeId: string;
+  tipologiaId: string;
   mesOrigem: number;
   valorVenda: Decimal;
   condicaoPagamento: CondicaoPagamento;
@@ -63,6 +64,13 @@ export interface CustoInput {
   competenciaMes?: number;
   recorrencia: "unico" | "mensal";
   participaFluxoCaixa: boolean;
+  /**
+   * Escopo opcional por tipologia (achado F11, docs/DECISOES.md — "estrutura
+   * de comissao"): so relevante para tipoIncidencia="pct_vgv_vendido_no_mes"
+   * — quando preenchido, o custo so incide sobre vendas daquela tipologia,
+   * em vez de todas as vendas do cenario.
+   */
+  tipologiaId?: string;
 }
 
 export interface PontoCronograma {

@@ -182,6 +182,7 @@ export async function duplicarCenario(cenarioId: string, novoNome: string) {
         empreendimentoId: c.empreendimentoId,
         cenarioId: novo.id,
         categoriaId: c.categoriaId,
+        tipologiaId: c.tipologiaId,
         valorPrevisto: c.valorPrevisto,
         percentual: c.percentual,
         competenciaMes: c.competenciaMes,
@@ -679,6 +680,8 @@ export interface CriarCustoInput {
   empreendimentoId: string;
   cenarioId: string;
   categoriaId: string;
+  /** Escopo opcional por tipologia (achado F11) — ver Custo.tipologiaId no schema. */
+  tipologiaId?: string;
   valorPrevisto?: string;
   percentual?: string;
   competenciaMes?: number;

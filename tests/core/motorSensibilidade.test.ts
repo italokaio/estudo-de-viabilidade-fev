@@ -14,6 +14,7 @@ describe("motor de sensibilidade", () => {
   const vendaBase: VendaInput = {
     id: "v1",
     unidadeId: "u1",
+    tipologiaId: "t1",
     mesOrigem: 1,
     valorVenda: new Decimal("100000"),
     condicaoPagamento: condicaoAVista,

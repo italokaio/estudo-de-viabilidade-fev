@@ -148,6 +148,8 @@ export interface CustoResumo {
   id: string;
   categoriaNome: string;
   tipoIncidencia: TipoIncidenciaCusto;
+  tipologiaId: string | null;
+  tipologiaNome: string | null;
   valorPrevisto: string | null;
   percentual: string | null;
   competenciaMes: number | null;
@@ -273,7 +275,7 @@ export function criarCategoriaCusto(empreendimentoId: string, input: { nome: str
 
 export function criarCusto(
   cenarioId: string,
-  input: { categoriaId: string; valorPrevisto?: string; percentual?: string; competenciaMes?: number; recorrencia?: "unico" | "mensal" },
+  input: { categoriaId: string; tipologiaId?: string; valorPrevisto?: string; percentual?: string; competenciaMes?: number; recorrencia?: "unico" | "mensal" },
 ) {
   return postJson<CustoResumo>(`/api/cenarios/${cenarioId}/custos`, input);
 }

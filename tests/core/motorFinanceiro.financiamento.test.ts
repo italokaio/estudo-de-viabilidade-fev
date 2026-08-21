@@ -37,7 +37,7 @@ describe("motor financeiro — financiamento de produção", () => {
   // amortizacao do financiamento e ainda sobrar -- sem essa receita, o
   // financiamento so adiaria o problema (emprestimo pago com capital
   // proprio nao reduz necessidade maxima, so muda o mes do pico).
-  const vendaFinal: VendaInput = { id: "v1", unidadeId: "u1", mesOrigem: 4, valorVenda: new Decimal("150000"), condicaoPagamento: condicaoAVista };
+  const vendaFinal: VendaInput = { id: "v1", unidadeId: "u1", tipologiaId: "t1", mesOrigem: 4, valorVenda: new Decimal("150000"), condicaoPagamento: condicaoAVista };
 
   function entradaBase(): EntradaMotorFinanceiro {
     return {

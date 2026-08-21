@@ -41,8 +41,13 @@ export function gerarDesembolsosMensais(custo: CustoInput, ctx: ContextoCustos):
 
     case "pct_vgv_vendido_no_mes": {
       const percentual = custo.percentual ?? new Decimal(0);
+      // Escopo opcional por tipologia (achado F11): sem tipologiaId, incide
+      // sobre todas as vendas do cenario (comportamento original); com
+      // tipologiaId, so sobre as vendas daquela tipologia -- permite
+      // percentuais de comissao diferentes por tipologia.
+      const vendasBase = custo.tipologiaId ? ctx.vendas.filter((v) => v.tipologiaId === custo.tipologiaId) : ctx.vendas;
       const totalPorMes = new Map<number, Decimal>();
-      for (const venda of ctx.vendas) {
+      for (const venda of vendasBase) {
         const atual = totalPorMes.get(venda.mesOrigem) ?? new Decimal(0);
         totalPorMes.set(venda.mesOrigem, atual.plus(venda.valorVenda));
       }

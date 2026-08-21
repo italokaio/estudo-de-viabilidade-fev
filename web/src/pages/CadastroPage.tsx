@@ -841,6 +841,7 @@ function CartaoCenario({
               cenarioId={cenarioResumo.id}
               custos={detalhe.custos}
               categoriasDisponiveis={detalhe.categoriasCustoDisponiveis}
+              tipologiasDisponiveis={detalhe.tipologiasDisponiveis}
               onAtualizado={recarregar}
               onErro={onErro}
             />
@@ -1180,16 +1181,19 @@ function CustosSecao({
   cenarioId,
   custos,
   categoriasDisponiveis,
+  tipologiasDisponiveis,
   onAtualizado,
   onErro,
 }: {
   cenarioId: string;
   custos: CenarioDetalhe["custos"];
   categoriasDisponiveis: CategoriaCustoResumo[];
+  tipologiasDisponiveis: { id: string; nome: string }[];
   onAtualizado: () => void;
   onErro: (msg: string) => void;
 }) {
   const [categoriaId, setCategoriaId] = useState(categoriasDisponiveis[0]?.id ?? "");
+  const [tipologiaId, setTipologiaId] = useState("");
   const [valorPrevisto, setValorPrevisto] = useState("");
   const [percentual, setPercentual] = useState("");
   const [competenciaMes, setCompetenciaMes] = useState("");
@@ -1198,6 +1202,10 @@ function CustosSecao({
 
   const categoriaSelecionada = categoriasDisponiveis.find((c) => c.id === categoriaId);
   const incidenciaPorValor = categoriaSelecionada?.tipoIncidencia === "fixo" || categoriaSelecionada?.tipoIncidencia === "pct_execucao";
+  // Escopo por tipologia (achado F11, docs/DECISOES.md — "estrutura de
+  // comissao") so faz sentido para pct_vgv_vendido_no_mes: permite um
+  // percentual de comissao diferente por tipologia (ex.: loja x apartamento).
+  const suportaTipologia = categoriaSelecionada?.tipoIncidencia === "pct_vgv_vendido_no_mes";
 
   async function submeter(e: React.FormEvent) {
     e.preventDefault();
@@ -1206,6 +1214,7 @@ function CustosSecao({
     try {
       await criarCusto(cenarioId, {
         categoriaId,
+        tipologiaId: suportaTipologia && tipologiaId ? tipologiaId : undefined,
         valorPrevisto: incidenciaPorValor ? valorPrevisto : undefined,
         percentual: incidenciaPorValor ? undefined : percentual,
         competenciaMes: categoriaSelecionada?.tipoIncidencia === "fixo" ? Number(competenciaMes) : undefined,
@@ -1214,6 +1223,7 @@ function CustosSecao({
       setValorPrevisto("");
       setPercentual("");
       setCompetenciaMes("");
+      setTipologiaId("");
       onAtualizado();
     } catch (e: any) {
       onErro(String(e.message ?? e));
@@ -1233,6 +1243,7 @@ function CustosSecao({
           <thead>
             <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
               <th style={{ fontWeight: 600, paddingBottom: 4 }}>Categoria</th>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Tipologia</th>
               <th style={{ fontWeight: 600, paddingBottom: 4 }}>Valor</th>
               <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
               <th></th>
@@ -1261,6 +1272,23 @@ function CustosSecao({
             ))}
           </select>
         </label>
+        {suportaTipologia && (
+          <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 170 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Tipologia (opcional)</span>
+            <select
+              value={tipologiaId}
+              onChange={(e) => setTipologiaId(e.target.value)}
+              style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+            >
+              <option value="">Todas</option>
+              {tipologiasDisponiveis.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {incidenciaPorValor ? (
           <div style={{ width: 140 }}>
             <TextField label="Valor previsto" value={valorPrevisto} onChange={(e) => setValorPrevisto(e.target.value)} placeholder="500000" required />
@@ -1350,7 +1378,7 @@ function LinhaCusto({
   if (editando) {
     return (
       <tr>
-        <td colSpan={4} style={{ padding: "6px 0" }}>
+        <td colSpan={5} style={{ padding: "6px 0" }}>
           <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", font: "var(--text-body)" }}>
             {incidenciaPorValor ? (
               <div style={{ width: 130 }}>
@@ -1394,6 +1422,7 @@ function LinhaCusto({
   return (
     <tr>
       <td style={{ padding: "2px 0" }}>{custo.categoriaNome}</td>
+      <td style={{ color: custo.tipologiaNome ? "var(--ink-primary)" : "var(--ink-muted)" }}>{custo.tipologiaNome ?? "Todas"}</td>
       <td>{custo.valorPrevisto ? formatBRL(custo.valorPrevisto) : `${(Number(custo.percentual) * 100).toFixed(1)}%`}</td>
       <td>{custo.competenciaMes ?? "—"}</td>
       <td style={{ textAlign: "right" }}>

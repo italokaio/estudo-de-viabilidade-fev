@@ -90,6 +90,18 @@
 
 **Status.** Aprovado e implementado (décima nona fatia). Testado em `tests/integration/api.versaoCenario.test.ts`, incluindo um teste de regressão dedicado para o bug do `derivadoDeCenarioId`.
 
+## F11 — Estrutura de comissão nunca precisou de tabela nova: um escopo opcional por tipologia sobre o mecanismo genérico existente (achado da Fase 1)
+
+**Contexto.** `EstruturaComissao` era o último item da lista original "fica para depois" da Fundação do ERP. Desde a Fase 0, comissão já era representável sem nenhuma tabela dedicada: uma categoria de custo com `tipoIncidencia="pct_vgv_vendido_no_mes"` já escala automaticamente com o total vendido em cada mês (`src/core/motorCustos.ts`), no mesmo espírito do comentário histórico do arquivo — "nenhuma das estratégias sabe o nome da rubrica que a usa". A lacuna real não era "comissão não existe", era mais específica: o percentual de comissão de um `Custo` é único para o cenário inteiro, sem forma de variar por produto (ex.: corretora cobra 8% em loja e 5% em apartamento — prática comum, não hipotética).
+
+**Decisão.** Em vez de uma tabela `EstruturaComissao` nova, `Custo` ganhou um campo opcional `tipologiaId` (nullable, FK para `Tipologia`). Sem preenchê-lo, o comportamento é idêntico ao de sempre — incide sobre todas as vendas do cenário. Preenchido, `gerarDesembolsosMensais()` filtra `ctx.vendas` por `tipologiaId` antes de somar o VGV vendido no mês, isolando a base de cálculo daquele custo a uma única tipologia. Isso permite cadastrar múltiplos custos da mesma categoria "Comissão de vendas", um por tipologia, cada um com seu próprio percentual — sem introduzir nenhum conceito novo no motor, só um filtro a mais sobre `VendaInput.tipologiaId` (campo novo, adicionado por `unidade.tipologiaId` na montagem da entrada em `src/db/servicoMotor.ts`).
+
+**Decisão de escopo — por que só `pct_vgv_vendido_no_mes`.** O escopo por tipologia só faz sentido semântico para incidência sobre VGV vendido — um custo `fixo` (valor absoluto) ou `pct_execucao` (curva de obra) não tem uma leitura natural de "incidir só sobre uma tipologia". A API rejeita (400) `tipologiaId` combinado com qualquer outra `tipoIncidencia`, em vez de aceitar e ignorar silenciosamente.
+
+**Achado ao implementar.** `duplicarCenario` (achado F10) já copiava `Custo` linha a linha — precisou de um ajuste de uma linha (`tipologiaId: c.tipologiaId`) para não perder o escopo do custo original ao duplicar um cenário. Sem esse ajuste, o clone teria voltado silenciosamente ao comportamento "incide sobre tudo", uma regressão sutil coberta agora por teste dedicado.
+
+**Status.** Aprovado e implementado (vigésima fatia). Testado em `tests/core/motorCustos.test.ts` (a estratégia de incidência isolada) e `tests/integration/api.estruturaComissao.test.ts` (efeito de ponta a ponta no fluxo de caixa, validação de escopo, exposição na API, preservação ao duplicar cenário).
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |
