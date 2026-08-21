@@ -16,6 +16,7 @@ export async function resetDatabase() {
   await prisma.cronogramaFisicoFinanceiro.deleteMany();
   await prisma.indiceCorrecao.deleteMany();
   await prisma.financiamentoProducao.deleteMany();
+  await prisma.destinatarioComissao.deleteMany();
   await prisma.custo.deleteMany();
   await prisma.categoriaCusto.deleteMany();
   await prisma.tipologia.deleteMany();

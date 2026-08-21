@@ -340,8 +340,27 @@ model Custo {
   cenario        Cenario        @relation(fields: [cenarioId], references: [id])
   categoria      CategoriaCusto @relation(fields: [categoriaId], references: [id])
   tipologia      Tipologia?     @relation(fields: [tipologiaId], references: [id])
+  destinatarios  DestinatarioComissao[]
 
   @@map("custo")
+}
+
+// Cadastro nominal de quem recebe a comissao de um Custo, e como ela se
+// divide (achado F13, docs/DECISOES.md) -- mesmo padrao de Permuta/Distrato:
+// registro historico/informativo, nunca lido pelo motor. Nao restrito a
+// custos de uma tipoIncidencia especifica (o motor nunca sabe o que e
+// "comissao" -- essa classificacao e do usuario, nao do sistema).
+model DestinatarioComissao {
+  id              String   @id @default(cuid())
+  custoId         String
+  nome            String
+  percentualSplit String // decimal-as-string, 0..1 -- fatia da comissao deste custo que este destinatario recebe
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  custo Custo @relation(fields: [custoId], references: [id])
+
+  @@map("destinatario_comissao")
 }
 
 model CronogramaFisicoFinanceiro {

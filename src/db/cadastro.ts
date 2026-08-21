@@ -175,10 +175,10 @@ export async function duplicarCenario(cenarioId: string, novoNome: string) {
   }
 
   // valorRealizado/status NAO copiados -- o custo duplicado comeca "previsto", mesmo se o original ja tinha sido marcado como realizado.
-  const custos = await prisma.custo.findMany({ where: { cenarioId } });
-  if (custos.length > 0) {
-    await prisma.custo.createMany({
-      data: custos.map((c) => ({
+  const custos = await prisma.custo.findMany({ where: { cenarioId }, include: { destinatarios: true } });
+  for (const c of custos) {
+    const novoCusto = await prisma.custo.create({
+      data: {
         empreendimentoId: c.empreendimentoId,
         cenarioId: novo.id,
         categoriaId: c.categoriaId,
@@ -189,8 +189,16 @@ export async function duplicarCenario(cenarioId: string, novoNome: string) {
         vencimentoMes: c.vencimentoMes,
         recorrencia: c.recorrencia,
         participaFluxoCaixa: c.participaFluxoCaixa,
-      })),
+      },
     });
+    // Destinatarios de comissao (achado F13) tambem sao copiados -- criados
+    // individualmente (nao createMany) porque cada custo precisa do id
+    // NOVO gerado acima, nao do original.
+    if (c.destinatarios.length > 0) {
+      await prisma.destinatarioComissao.createMany({
+        data: c.destinatarios.map((d) => ({ custoId: novoCusto.id, nome: d.nome, percentualSplit: d.percentualSplit })),
+      });
+    }
   }
 
   return novo;
@@ -703,13 +711,73 @@ export interface AtualizarCustoInput {
   recorrencia?: "unico" | "mensal";
 }
 
-/** Custo nao tem nada que dependa dele — atualizar e excluir sao diretos. */
+/** Atualizar um custo e direto -- so excluir precisa levar em conta DestinatarioComissao (achado F13). */
 export async function atualizarCusto(id: string, input: AtualizarCustoInput) {
   return prisma.custo.update({ where: { id }, data: input });
 }
 
 export async function excluirCusto(id: string) {
+  // Sem onDelete cascade no schema -- excluir um custo que tem
+  // destinatarios de comissao cadastrados (achado F13) falharia por
+  // violacao de chave estrangeira sem isso, mesmo padrao do bug corrigido
+  // em excluirCenario para derivadoDeCenarioId (achado F10).
+  await prisma.destinatarioComissao.deleteMany({ where: { custoId: id } });
   await prisma.custo.delete({ where: { id } });
+}
+
+const TOLERANCIA_SPLIT = new Decimal("0.0005");
+
+/**
+ * Cria um destinatario nominal de comissao para um custo (achado F13,
+ * docs/DECISOES.md) -- cadastro nominal puro, nunca lido pelo motor, mesmo
+ * espirito de Permuta/Distrato. Nao restrito a uma tipoIncidencia
+ * especifica: "comissao" e uma classificacao do usuario, o sistema nunca
+ * sabe o nome de uma rubrica (ver src/core/motorCustos.ts).
+ */
+export async function criarDestinatarioComissao(
+  custoId: string,
+  nome: string,
+  percentualSplit: string,
+): Promise<{ erro: string } | { destinatario: Awaited<ReturnType<typeof prisma.destinatarioComissao.create>> }> {
+  const existentes = await prisma.destinatarioComissao.findMany({ where: { custoId } });
+  const somaAtual = existentes.reduce((acc, d) => acc.plus(new Decimal(d.percentualSplit)), new Decimal(0));
+  const novo = new Decimal(percentualSplit);
+  if (somaAtual.plus(novo).greaterThan(new Decimal(1).plus(TOLERANCIA_SPLIT))) {
+    return {
+      erro: `Este custo já tem ${somaAtual.times(100).toFixed(1)}% do split de comissão alocado — adicionar ${novo.times(100).toFixed(1)}% ultrapassaria 100%.`,
+    };
+  }
+  const destinatario = await prisma.destinatarioComissao.create({ data: { custoId, nome, percentualSplit } });
+  return { destinatario };
+}
+
+export interface AtualizarDestinatarioComissaoInput {
+  nome?: string;
+  percentualSplit?: string;
+}
+
+export async function atualizarDestinatarioComissao(
+  id: string,
+  input: AtualizarDestinatarioComissaoInput,
+): Promise<{ erro: string } | { destinatario: Awaited<ReturnType<typeof prisma.destinatarioComissao.update>> }> {
+  const atual = await prisma.destinatarioComissao.findUnique({ where: { id } });
+  if (!atual) return { erro: "Destinatário de comissão não encontrado" };
+  if (input.percentualSplit) {
+    const outros = await prisma.destinatarioComissao.findMany({ where: { custoId: atual.custoId, id: { not: id } } });
+    const somaOutros = outros.reduce((acc, d) => acc.plus(new Decimal(d.percentualSplit)), new Decimal(0));
+    const novo = new Decimal(input.percentualSplit);
+    if (somaOutros.plus(novo).greaterThan(new Decimal(1).plus(TOLERANCIA_SPLIT))) {
+      return {
+        erro: `Os demais destinatários já somam ${somaOutros.times(100).toFixed(1)}% — ${novo.times(100).toFixed(1)}% ultrapassaria 100%.`,
+      };
+    }
+  }
+  const destinatario = await prisma.destinatarioComissao.update({ where: { id }, data: input });
+  return { destinatario };
+}
+
+export async function excluirDestinatarioComissao(id: string) {
+  await prisma.destinatarioComissao.delete({ where: { id } });
 }
 
 export interface CriarCronogramaInput {

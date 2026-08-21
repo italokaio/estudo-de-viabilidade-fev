@@ -4,6 +4,7 @@ import {
   atualizarCenario,
   atualizarCondicaoPagamento,
   atualizarCusto,
+  atualizarDestinatarioComissao,
   atualizarEmpreendimento,
   atualizarTipologia,
   criarCategoriaCusto,
@@ -11,6 +12,7 @@ import {
   criarCondicaoPagamento,
   criarCronograma,
   criarCusto,
+  criarDestinatarioComissao,
   criarEmpreendimento,
   criarPremissasVelocidade,
   criarTipologia,
@@ -28,6 +30,7 @@ import {
   excluirCondicaoPagamento,
   excluirCronograma,
   excluirCusto,
+  excluirDestinatarioComissao,
   excluirEmpreendimento,
   excluirFinanciamento,
   excluirPontoIndiceCorrecao,
@@ -1232,10 +1235,6 @@ function CustosSecao({
     }
   }
 
-  if (categoriasDisponiveis.length === 0) {
-    return <div style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>Cadastre uma categoria de custo antes de lançar custos.</div>;
-  }
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {custos.length > 0 && (
@@ -1257,6 +1256,9 @@ function CustosSecao({
         </table>
       )}
 
+      {categoriasDisponiveis.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>Cadastre uma categoria de custo antes de lançar novos custos.</div>
+      ) : (
       <form onSubmit={submeter} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 190 }}>
           <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Categoria</span>
@@ -1320,6 +1322,7 @@ function CustosSecao({
           {salvando ? "Salvando…" : "Adicionar"}
         </Button>
       </form>
+      )}
     </div>
   );
 }
@@ -1340,8 +1343,37 @@ function LinhaCusto({
   const [recorrencia, setRecorrencia] = useState<"unico" | "mensal">((custo.recorrencia as "unico" | "mensal") ?? "unico");
   const [salvando, setSalvando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
+  const [mostrarSplit, setMostrarSplit] = useState(false);
+  const [nomeDestinatario, setNomeDestinatario] = useState("");
+  const [splitDestinatario, setSplitDestinatario] = useState("");
+  const [salvandoDestinatario, setSalvandoDestinatario] = useState(false);
 
   const incidenciaPorValor = custo.tipoIncidencia === "fixo" || custo.tipoIncidencia === "pct_execucao";
+
+  async function adicionarDestinatario(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvandoDestinatario(true);
+    try {
+      await criarDestinatarioComissao(custo.id, nomeDestinatario, splitDestinatario);
+      setNomeDestinatario("");
+      setSplitDestinatario("");
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvandoDestinatario(false);
+    }
+  }
+
+  async function removerDestinatario(id: string, nome: string) {
+    if (!window.confirm(`Remover "${nome}" do split desta comissão?`)) return;
+    try {
+      await excluirDestinatarioComissao(id);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    }
+  }
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
@@ -1420,20 +1452,65 @@ function LinhaCusto({
   }
 
   return (
-    <tr>
-      <td style={{ padding: "2px 0" }}>{custo.categoriaNome}</td>
-      <td style={{ color: custo.tipologiaNome ? "var(--ink-primary)" : "var(--ink-muted)" }}>{custo.tipologiaNome ?? "Todas"}</td>
-      <td>{custo.valorPrevisto ? formatBRL(custo.valorPrevisto) : `${(Number(custo.percentual) * 100).toFixed(1)}%`}</td>
-      <td>{custo.competenciaMes ?? "—"}</td>
-      <td style={{ textAlign: "right" }}>
-        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
-          Editar
-        </Button>{" "}
-        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
-          {excluindo ? "…" : "Excluir"}
-        </Button>
-      </td>
-    </tr>
+    <>
+      <tr>
+        <td style={{ padding: "2px 0" }}>{custo.categoriaNome}</td>
+        <td style={{ color: custo.tipologiaNome ? "var(--ink-primary)" : "var(--ink-muted)" }}>{custo.tipologiaNome ?? "Todas"}</td>
+        <td>{custo.valorPrevisto ? formatBRL(custo.valorPrevisto) : `${(Number(custo.percentual) * 100).toFixed(1)}%`}</td>
+        <td>{custo.competenciaMes ?? "—"}</td>
+        <td style={{ textAlign: "right" }}>
+          <Button variant="secondary" onClick={() => setMostrarSplit((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
+            Split{custo.destinatariosComissao.length > 0 ? ` (${custo.destinatariosComissao.length})` : ""}
+          </Button>{" "}
+          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
+            Editar
+          </Button>{" "}
+          <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+            {excluindo ? "…" : "Excluir"}
+          </Button>
+        </td>
+      </tr>
+      {mostrarSplit && (
+        <tr>
+          <td colSpan={5} style={{ padding: "6px 0 10px", font: "var(--text-body)" }}>
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border-subtle)", borderRadius: 8, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)" }}>
+                Split nominal — quem recebe esta comissão (não afeta o motor financeiro)
+              </div>
+              {custo.destinatariosComissao.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {custo.destinatariosComissao.map((d) => (
+                    <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+                      <span style={{ flex: 1 }}>{d.nome}</span>
+                      <span style={{ font: "var(--text-mono-body)", color: "var(--ink-muted)" }}>{(Number(d.percentualSplit) * 100).toFixed(1)}%</span>
+                      <button
+                        type="button"
+                        onClick={() => removerDestinatario(d.id, d.nome)}
+                        title="Remover"
+                        style={{ border: "none", background: "transparent", color: "var(--status-critical-text)", cursor: "pointer", fontSize: 13, padding: 0 }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <form onSubmit={adicionarDestinatario} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <TextField label="Nome" value={nomeDestinatario} onChange={(e) => setNomeDestinatario(e.target.value)} placeholder="Corretor, imobiliária…" required />
+                </div>
+                <div style={{ width: 100 }}>
+                  <TextField label="% (0–1)" value={splitDestinatario} onChange={(e) => setSplitDestinatario(e.target.value)} placeholder="0.5" required />
+                </div>
+                <Button type="submit" disabled={salvandoDestinatario} style={{ padding: "6px 10px", fontSize: 12 }}>
+                  {salvandoDestinatario ? "Salvando…" : "Adicionar"}
+                </Button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

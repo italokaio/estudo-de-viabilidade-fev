@@ -7,6 +7,7 @@ import {
   atualizarCenario,
   atualizarCondicaoPagamento,
   atualizarCusto,
+  atualizarDestinatarioComissao,
   atualizarEmpreendimento,
   atualizarPermuta,
   atualizarTipologia,
@@ -15,6 +16,7 @@ import {
   criarCondicaoPagamento,
   criarCronograma,
   criarCusto,
+  criarDestinatarioComissao,
   criarEmpreendimento,
   criarPremissaVelocidade,
   criarTipologia,
@@ -31,6 +33,7 @@ import {
   excluirCondicaoPagamento,
   excluirCronograma,
   excluirCusto,
+  excluirDestinatarioComissao,
   excluirEmpreendimento,
   excluirFinanciamento,
   excluirPontoIndiceCorrecao,
@@ -900,7 +903,10 @@ export async function buildApp() {
           },
         },
         premissasVelocidade: { include: { tipologia: { select: { nome: true } } }, orderBy: { mes: "asc" } },
-        custos: { include: { categoria: true, tipologia: { select: { nome: true } } }, orderBy: { createdAt: "asc" } },
+        custos: {
+          include: { categoria: true, tipologia: { select: { nome: true } }, destinatarios: { orderBy: { createdAt: "asc" } } },
+          orderBy: { createdAt: "asc" },
+        },
         cronograma: { orderBy: { mes: "asc" } },
         indicesCorrecao: { orderBy: { mes: "asc" } },
         financiamento: true,
@@ -939,6 +945,7 @@ export async function buildApp() {
         recorrencia: c.recorrencia,
         valorRealizado: c.valorRealizado,
         status: c.status,
+        destinatariosComissao: c.destinatarios.map((d) => ({ id: d.id, nome: d.nome, percentualSplit: d.percentualSplit })),
       })),
       cronograma: cenario.cronograma.map((p) => ({ mes: p.mes, percentualExecucaoMensal: p.percentualExecucaoMensal })),
       indicesCorrecao: cenario.indicesCorrecao.map((i) => ({ mes: i.mes, percentual: i.percentual })),
@@ -1084,6 +1091,76 @@ export async function buildApp() {
       return { erro: "Custo não encontrado" };
     }
     await excluirCusto(req.params.id);
+    reply.code(204);
+    return null;
+  });
+
+  // Destinatario de comissao (achado F13, docs/DECISOES.md — "split nominal
+  // de comissao"): cadastro nominal de quem recebe a comissao de um custo e
+  // como ela se divide. Nunca lido pelo motor, mesmo espirito de
+  // Permuta/Distrato -- so aparece na API/tela de cadastro.
+  app.post<{ Params: { custoId: string }; Body: { nome?: string; percentualSplit?: string } }>(
+    "/api/custos/:custoId/destinatarios-comissao",
+    async (req, reply) => {
+      const { nome, percentualSplit } = req.body ?? {};
+      if (!nome || !nome.trim()) {
+        reply.code(400);
+        return { erro: "Nome do destinatário é obrigatório" };
+      }
+      if (!percentualSplit || !percentualSplit.trim()) {
+        reply.code(400);
+        return { erro: "Percentual de split é obrigatório" };
+      }
+      const custo = await prisma.custo.findUnique({ where: { id: req.params.custoId } });
+      if (!custo) {
+        reply.code(404);
+        return { erro: "Custo não encontrado" };
+      }
+      if (!(await garantirAcesso(req, reply, custo.empreendimentoId))) return;
+      const resultado = await criarDestinatarioComissao(custo.id, nome.trim(), percentualSplit.trim());
+      if ("erro" in resultado) {
+        reply.code(400);
+        return resultado;
+      }
+      reply.code(201);
+      return resultado.destinatario;
+    },
+  );
+
+  app.patch<{ Params: { id: string }; Body: { nome?: string; percentualSplit?: string } }>(
+    "/api/destinatarios-comissao/:id",
+    async (req, reply) => {
+      const destinatario = await prisma.destinatarioComissao.findUnique({ where: { id: req.params.id }, include: { custo: true } });
+      if (!destinatario) {
+        reply.code(404);
+        return { erro: "Destinatário de comissão não encontrado" };
+      }
+      if (!(await garantirAcesso(req, reply, destinatario.custo.empreendimentoId))) return;
+      const { nome, percentualSplit } = req.body ?? {};
+      const resultado = await atualizarDestinatarioComissao(req.params.id, {
+        nome: nome?.trim() || undefined,
+        percentualSplit: percentualSplit?.trim() || undefined,
+      });
+      if ("erro" in resultado) {
+        reply.code(400);
+        return resultado;
+      }
+      return resultado.destinatario;
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>("/api/destinatarios-comissao/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const destinatario = await prisma.destinatarioComissao.findUnique({ where: { id: req.params.id }, include: { custo: true } });
+    if (!destinatario) {
+      reply.code(404);
+      return { erro: "Destinatário de comissão não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, destinatario.custo.empreendimentoId))) return;
+    await excluirDestinatarioComissao(req.params.id);
     reply.code(204);
     return null;
   });

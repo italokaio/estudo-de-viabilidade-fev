@@ -145,6 +145,12 @@ export interface EmpreendimentoDetalhe {
   categoriasCusto: CategoriaCustoResumo[];
 }
 
+export interface DestinatarioComissaoResumo {
+  id: string;
+  nome: string;
+  percentualSplit: string;
+}
+
 export interface CustoResumo {
   id: string;
   categoriaNome: string;
@@ -157,6 +163,7 @@ export interface CustoResumo {
   recorrencia: string;
   valorRealizado: string | null;
   status: string;
+  destinatariosComissao: DestinatarioComissaoResumo[];
 }
 
 export interface FinanciamentoResumo {
@@ -438,6 +445,18 @@ export function atualizarCusto(
 
 export function excluirCusto(id: string) {
   return del(`/api/custos/${id}`);
+}
+
+export function criarDestinatarioComissao(custoId: string, nome: string, percentualSplit: string) {
+  return postJson<DestinatarioComissaoResumo>(`/api/custos/${custoId}/destinatarios-comissao`, { nome, percentualSplit });
+}
+
+export function atualizarDestinatarioComissao(id: string, input: { nome?: string; percentualSplit?: string }) {
+  return patchJson<DestinatarioComissaoResumo>(`/api/destinatarios-comissao/${id}`, input);
+}
+
+export function excluirDestinatarioComissao(id: string) {
+  return del(`/api/destinatarios-comissao/${id}`);
 }
 
 export function excluirCronograma(cenarioId: string) {
