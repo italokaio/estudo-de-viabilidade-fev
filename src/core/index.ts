@@ -5,4 +5,5 @@ export * from "./motorCustos.js";
 export * from "./motorFluxoCaixa.js";
 export * from "./motorCorrecao.js";
 export * from "./motorFinanceiro.js";
+export * from "./motorSensibilidade.js";
 export * from "./precificacaoAndar.js";

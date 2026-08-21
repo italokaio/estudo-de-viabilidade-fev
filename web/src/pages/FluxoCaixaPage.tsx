@@ -5,6 +5,7 @@ import { FluxoChart } from "../components/FluxoChart.js";
 import { FluxoTable } from "../components/FluxoTable.js";
 import { KpiCard } from "../components/KpiCard.js";
 import { RealizadoPanel } from "../components/RealizadoPanel.js";
+import { SensibilidadePanel } from "../components/SensibilidadePanel.js";
 import { ThemeToggle } from "../components/ThemeToggle.js";
 import { formatBRL } from "../format.js";
 
@@ -98,6 +99,7 @@ export function FluxoCaixaPage() {
           </div>
 
           {cenarioId && <RealizadoPanel cenarioId={cenarioId} onAtualizado={recarregarFluxo} />}
+          {cenarioId && <SensibilidadePanel cenarioId={cenarioId} />}
         </>
       )}
     </div>

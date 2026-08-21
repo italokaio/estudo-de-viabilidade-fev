@@ -51,7 +51,8 @@ import {
 } from "../../src/db/auth.js";
 import { prisma } from "../../src/db/client.js";
 import { gerarVendasDePremissaVelocidade } from "../../src/db/gerarVendas.js";
-import { rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
+import { calcularSensibilidadeCenario, rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
+import type { EixoSensibilidade } from "../../src/core/motorSensibilidade.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -1336,6 +1337,52 @@ export async function buildApp() {
       },
     };
   });
+
+  const EIXOS_SENSIBILIDADE: EixoSensibilidade[] = ["custo", "vgv", "velocidadeVendas"];
+  const VARIACOES_PADRAO: Record<EixoSensibilidade, string[]> = {
+    custo: ["-0.2", "-0.1", "0", "0.1", "0.2"],
+    vgv: ["-0.2", "-0.1", "0", "0.1", "0.2"],
+    velocidadeVendas: ["0", "1", "2", "3", "6"],
+  };
+
+  // Simulacao de sensibilidade: reroda o motor (ja existente, sem nenhuma
+  // mudanca nele) com uma premissa perturbada, para cada variacao pedida.
+  // Nunca persiste nada -- diferente de /fluxo-caixa, que roda o motor E
+  // grava RecebimentoProjetado (achado F1), esta rota so le.
+  app.get<{ Params: { cenarioId: string }; Querystring: { eixo?: string; variacoes?: string } }>(
+    "/api/cenarios/:cenarioId/sensibilidade",
+    async (req, reply) => {
+      const { cenarioId } = req.params;
+      const eixo = req.query.eixo ?? "custo";
+      if (!EIXOS_SENSIBILIDADE.includes(eixo as EixoSensibilidade)) {
+        reply.code(400);
+        return { erro: `eixo deve ser um de: ${EIXOS_SENSIBILIDADE.join(", ")}` };
+      }
+      const cenario = await prisma.cenario.findUnique({ where: { id: cenarioId } });
+      if (!cenario) {
+        reply.code(404);
+        return { erro: "Cenário não encontrado" };
+      }
+      if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+
+      const variacoesStr = req.query.variacoes ? req.query.variacoes.split(",") : VARIACOES_PADRAO[eixo as EixoSensibilidade];
+      let variacoes: Decimal[];
+      try {
+        variacoes = variacoesStr.map((v) => new Decimal(v.trim()));
+      } catch {
+        reply.code(400);
+        return { erro: "variacoes deve ser uma lista de números separados por vírgula" };
+      }
+
+      const pontos = await calcularSensibilidadeCenario(cenarioId, eixo as EixoSensibilidade, variacoes, { taxaDescontoMensal: "0.005" });
+      return pontos.map((p) => ({
+        variacao: p.variacao.toString(),
+        vpl: p.vpl.toFixed(2),
+        necessidadeMaximaCapital: p.necessidadeMaximaCapital.toFixed(2),
+        mesPico: p.mesPico,
+      }));
+    },
+  );
 
   return app;
 }

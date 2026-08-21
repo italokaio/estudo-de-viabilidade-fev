@@ -41,6 +41,21 @@ export async function fetchFluxoCaixa(cenarioId: string): Promise<FluxoCaixaResp
   return res.json();
 }
 
+export type EixoSensibilidade = "custo" | "vgv" | "velocidadeVendas";
+
+export interface PontoSensibilidade {
+  variacao: string;
+  vpl: string;
+  necessidadeMaximaCapital: string;
+  mesPico: number | null;
+}
+
+export async function fetchSensibilidade(cenarioId: string, eixo: EixoSensibilidade): Promise<PontoSensibilidade[]> {
+  const res = await fetch(`/api/cenarios/${cenarioId}/sensibilidade?eixo=${eixo}`);
+  if (!res.ok) throw new Error(`Falha ao calcular sensibilidade (${res.status})`);
+  return res.json();
+}
+
 export type TipoDistribuicao = "unica_na_venda" | "nivelada" | "periodica" | "mes_fixo";
 
 export interface ModalidadeInput {

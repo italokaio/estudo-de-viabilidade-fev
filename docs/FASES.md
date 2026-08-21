@@ -259,6 +259,25 @@ Quarto e último item da lista de candidatos apresentada — um pacote de quatro
 
 **Não implementado nesta fatia:** histórico de estornos (um estorno simplesmente apaga o valor realizado anterior, sem guardar o que era), edição de modalidades de uma condição já em uso (bloqueio de integridade original da décima fatia continua valendo, agora só verificado através de um caminho de UI novo).
 
+## Fase 1 (código) — décima sexta fatia: simulação de sensibilidade (este repositório, concluída)
+
+Primeiro item de uma nova lista de candidatos, extraída da lista original "fica para depois" da Fundação do ERP (`FinanciamentoProducao`, `AlertaRisco`, `SimulacaoSensibilidade`, `VersaoCenario`, `EstruturaComissao`) — o usuário escolheu simulação de sensibilidade.
+
+**Decisão de escopo:** camada analítica pura por cima do motor já existente — reroda `executarMotorFinanceiro()` (sem nenhuma mudança nele) com uma premissa perturbada, para cada variação de uma faixa, e nunca persiste nada (nem o resultado da simulação, nem nenhum `RecebimentoProjetado` intermediário — diferente de `/fluxo-caixa`, que roda o motor E grava). Três eixos, cada um perturbando uma parte diferente da entrada do motor antes de rodar, sem tocar em `motorRecebimentos.ts`/`motorCustos.ts`/`motorFluxoCaixa.ts`:
+- `custo` — escala `valorPrevisto`/`percentual` de todo `Custo` pelo fator `(1+variação)`.
+- `vgv` — escala `valorVenda` de toda `Venda` pelo fator `(1+variação)`; como `motorCustos` lê `venda.valorVenda` para custos `pct_vgv_vendido_no_mes`, a comissão escala junto — efeito colateral correto, não um bug.
+- `velocidadeVendas` — desloca `mesOrigem` de toda `Venda` pela variação (em meses inteiros de atraso), nunca além do horizonte.
+
+**Implementado:**
+- `src/core/motorSensibilidade.ts` (novo) — `calcularSensibilidade(entradaBase, eixo, variacoes)`: para cada variação, perturba uma cópia da entrada e chama `executarMotorFinanceiro()`, devolvendo `{variacao, vpl, necessidadeMaximaCapital, mesPico}`.
+- `src/db/servicoMotor.ts` — a montagem de `EntradaMotorFinanceiro` a partir do banco (antes só interna a `rodarMotorParaCenario`) foi extraída para `montarEntradaMotor()`, reaproveitada tanto pelo recálculo normal quanto pela nova `calcularSensibilidadeCenario()`.
+- API — `GET /api/cenarios/:cenarioId/sensibilidade?eixo=custo&variacoes=-0.2,-0.1,0,0.1,0.2` (variações padrão por eixo quando omitidas).
+- Web — novo painel "Sensibilidade" na tela de Fluxo de Caixa (`SensibilidadePanel.tsx`), com um seletor de eixo e uma tabela variação × VPL × necessidade máxima × mês do pico, destacando a linha "0% (atual)"/"sem atraso (atual)" — que deve bater exatamente com os KPIs da tela, já que é a mesma entrada sem nenhuma perturbação.
+- 13 novos testes: 6 unitários (`tests/core/motorSensibilidade.test.ts`) e 7 de API (`tests/integration/api.sensibilidade.test.ts` — variações padrão, VGV aumenta VPL, não persiste nenhum `RecebimentoProjetado`, eixo inválido rejeitado, 404 sem vínculo). Suíte total: 26 arquivos, 144 testes.
+- Verificado num navegador real (claro e escuro) no cenário Splendido: a linha "0% (atual)"/"sem atraso (atual)" de cada um dos três eixos bateu exatamente com os KPIs da tela (VPL, necessidade máxima) em todos os casos — confirmando que a perturbação de variação zero é de fato um no-op. Aumentar o VGV ou reduzir o custo melhora o VPL e reduz a necessidade máxima monotonicamente através da faixa, e vice-versa; atrasar a velocidade de vendas piora ambos os indicadores de forma crescente com o atraso — todos os sinais economicamente esperados.
+
+**Não implementado nesta fatia:** eixo de variação sobre o índice de correção monetária ou sobre a taxa de desconto do VPL (só os três eixos acima), gráfico da sensibilidade (só tabela), comparação lado a lado de dois eixos simultâneos.
+
 ## Próxima fase
 
-A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, e a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores) estão concluídas. Aguardando direção do usuário sobre o que vem a seguir.
+A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores) e a décima sexta fatia de simulação de sensibilidade estão concluídas. Aguardando direção do usuário sobre o que vem a seguir.

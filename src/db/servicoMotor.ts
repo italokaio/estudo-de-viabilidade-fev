@@ -1,19 +1,18 @@
 import { Decimal } from "decimal.js";
-import { executarMotorFinanceiro, type SaidaMotorFinanceiro } from "../core/motorFinanceiro.js";
+import { executarMotorFinanceiro, type EntradaMotorFinanceiro, type SaidaMotorFinanceiro } from "../core/motorFinanceiro.js";
+import { calcularSensibilidade, type EixoSensibilidade, type PontoSensibilidade } from "../core/motorSensibilidade.js";
 import type { CondicaoPagamento, CustoInput, PontoCronograma, PontoIndiceCorrecao, TipoDistribuicao, TipoIncidenciaCusto, VendaInput } from "../core/types.js";
 import { prisma } from "./client.js";
 
 /**
  * Fronteira entre banco e motor puro: le Venda/Custo/CronogramaFisicoFinanceiro
- * do cenario, converte para os tipos de src/core (string -> Decimal), roda o
- * pipeline determinístico, e persiste apenas RecebimentoProjetado — nunca um
- * MovimentoCaixa (achado F1): o fluxo de caixa em si nao e gravado em
- * lugar nenhum, e sempre recalculado por quem chamar esta funcao.
+ * do cenario e converte para os tipos de src/core (string -> Decimal).
+ * Reaproveitada tanto pelo recalculo normal (rodarMotorParaCenario) quanto
+ * pela simulacao de sensibilidade (calcularSensibilidadeCenario) — as duas
+ * partem da mesma entrada real do cenario, so a sensibilidade perturba uma
+ * copia antes de rodar o motor.
  */
-export async function rodarMotorParaCenario(
-  cenarioId: string,
-  opcoes: { taxaDescontoMensal?: string } = {},
-): Promise<SaidaMotorFinanceiro> {
+async function montarEntradaMotor(cenarioId: string, opcoes: { taxaDescontoMensal?: string } = {}): Promise<EntradaMotorFinanceiro> {
   const cenario = await prisma.cenario.findUniqueOrThrow({ where: { id: cenarioId } });
 
   const vendasDb = await prisma.venda.findMany({
@@ -57,18 +56,46 @@ export async function rodarMotorParaCenario(
   const indicesDb = await prisma.indiceCorrecao.findMany({ where: { cenarioId }, orderBy: { mes: "asc" } });
   const indiceCorrecao: PontoIndiceCorrecao[] = indicesDb.map((i) => ({ mes: i.mes, percentual: new Decimal(i.percentual) }));
 
-  const resultado = executarMotorFinanceiro({
+  return {
     vendas,
     custos,
     cronograma,
     horizonteMeses: cenario.horizonteProjecaoMeses,
     taxaDescontoMensal: new Decimal(opcoes.taxaDescontoMensal ?? "0"),
     indiceCorrecao,
-  });
+  };
+}
 
+/**
+ * Roda o motor puro para um cenario e persiste apenas RecebimentoProjetado
+ * — nunca um MovimentoCaixa (achado F1): o fluxo de caixa em si nao e
+ * gravado em lugar nenhum, e sempre recalculado por quem chamar esta
+ * funcao.
+ */
+export async function rodarMotorParaCenario(
+  cenarioId: string,
+  opcoes: { taxaDescontoMensal?: string } = {},
+): Promise<SaidaMotorFinanceiro> {
+  const entrada = await montarEntradaMotor(cenarioId, opcoes);
+  const resultado = executarMotorFinanceiro(entrada);
   await persistirRecebimentos(cenarioId, resultado);
-
   return resultado;
+}
+
+/**
+ * Simulacao de sensibilidade: reaproveita a entrada real do cenario e
+ * perturba um eixo (custo/vgv/velocidade de vendas) para cada variacao
+ * pedida — nunca persiste nada (nem RecebimentoProjetado, nem qualquer
+ * outra coisa), ao contrario de rodarMotorParaCenario.
+ */
+export async function calcularSensibilidadeCenario(
+  cenarioId: string,
+  eixo: EixoSensibilidade,
+  variacoes: Decimal[],
+  opcoes: { taxaDescontoMensal?: string } = {},
+): Promise<PontoSensibilidade[]> {
+  const entrada = await montarEntradaMotor(cenarioId, opcoes);
+  return calcularSensibilidade(entrada, eixo, variacoes);
 }
 
 async function persistirRecebimentos(cenarioId: string, resultado: SaidaMotorFinanceiro) {
