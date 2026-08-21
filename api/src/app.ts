@@ -1405,6 +1405,7 @@ export async function buildApp() {
         amortizacao: f.amortizacao.toFixed(2),
         saldoDevedor: f.saldoDevedor.toFixed(2),
       })),
+      alertas: resultado.alertas,
     };
   });
 

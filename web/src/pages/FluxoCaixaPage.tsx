@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchEmpreendimentos, fetchFluxoCaixa, type EmpreendimentoResumo, type FluxoCaixaResposta } from "../api/client.js";
+import { AlertasPanel } from "../components/AlertasPanel.js";
 import { CenarioSwitcher } from "../components/CenarioSwitcher.js";
 import { FinanciamentoFluxoPanel } from "../components/FinanciamentoFluxoPanel.js";
 import { FluxoChart } from "../components/FluxoChart.js";
@@ -79,6 +80,8 @@ export function FluxoCaixaPage() {
             <KpiCard label="Recuperação" value={dados.indicadores.mesRecuperacao ? `Mês ${dados.indicadores.mesRecuperacao}` : "—"} tone="good" />
             <KpiCard label="VPL (0,5% a.m.)" value={formatBRL(dados.indicadores.vpl, { abbreviate: true })} />
           </div>
+
+          <AlertasPanel alertas={dados.alertas} />
 
           <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16, height: 420, flex: "none" }}>
             <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", display: "flex", flexDirection: "column", boxShadow: "var(--shadow-sm)", minHeight: 0 }}>

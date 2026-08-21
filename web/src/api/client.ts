@@ -22,6 +22,14 @@ export interface PontoFinanciamentoFluxo {
   saldoDevedor: string;
 }
 
+export type SeveridadeAlerta = "aviso" | "critico";
+
+export interface Alerta {
+  tipo: string;
+  severidade: SeveridadeAlerta;
+  mensagem: string;
+}
+
 export interface FluxoCaixaResposta {
   empreendimento: string;
   cenario: string;
@@ -35,6 +43,7 @@ export interface FluxoCaixaResposta {
     vpl: string;
   };
   financiamento: PontoFinanciamentoFluxo[];
+  alertas: Alerta[];
 }
 
 export async function fetchEmpreendimentos(): Promise<EmpreendimentoResumo[]> {

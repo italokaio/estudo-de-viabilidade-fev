@@ -296,6 +296,26 @@ Segundo item da lista de candidatos extraída da lista original "fica para depoi
 
 **Não implementado nesta fatia:** múltiplas tabelas de amortização (parcelas fixas, SAC/Price — só o pagamento único simplificado), mais de um financiamento por cenário, juros pagos mensalmente em vez de capitalizados.
 
+## Fase 1 (código) — décima oitava fatia: alerta de risco (este repositório, concluída)
+
+Terceiro e penúltimo item da lista original "fica para depois" da Fundação do ERP (só resta `VersaoCenario`) — o usuário escolheu alerta de risco.
+
+**Decisão de escopo:** camada de interpretação sobre o que o motor já calcula — indicadores, recebimentos, financiamento — sem rodar o motor de novo e sem mudar fluxo/indicadores (diferente de financiamento, achado F8; igual em espírito a correção monetária e sensibilidade, que também só leem por cima). Quatro regras, cada uma checando algo que já existia:
+- **Necessidade máxima alta em relação ao VGV** — acima de 30% (limite padrão) do total vendido no cenário.
+- **Sem recuperação** — o fluxo acumulado nunca volta a ficar positivo dentro do horizonte (`mesRecuperacao === null`, já calculado por `calcularIndicadores()` desde a Fase 0).
+- **Custo por execução física sem cronograma** — existe `Custo` com `tipoIncidencia="pct_execucao"`, mas nenhum `CronogramaFisicoFinanceiro` foi cadastrado; esse custo gera zero desembolso, silenciosamente, desde sempre — o alerta só torna essa armadilha visível.
+- **Amortização de financiamento não coberta por receita** — a soma dos recebimentos até o mês de amortização é menor que o valor amortizado naquele mês (achado F8: o financiamento só reduz necessidade de capital de verdade quando há venda depois para pagá-lo).
+
+**Implementado:**
+- `src/core/motorAlertas.ts` (novo) — `calcularAlertas(entrada, limite?)`: recebe as peças já computadas (vendas, custos, cronograma, recebimentos, indicadores, financiamento) em vez de `EntradaMotorFinanceiro`/`SaidaMotorFinanceiro` inteiros, para não criar um import circular com `motorFinanceiro.ts`. Devolve `{tipo, severidade, mensagem}[]`, mensagem já em português com os números reais embutidos.
+- `src/core/motorFinanceiro.ts` — `executarMotorFinanceiro()` chama `calcularAlertas()` ao final e retorna `alertas` como mais um campo de `SaidaMotorFinanceiro`, no mesmo padrão aditivo de `entradasCorrigidas`/`financiamento`.
+- API — `GET /api/cenarios/:cenarioId/fluxo-caixa` passou a incluir `alertas`.
+- Web — novo painel `AlertasPanel.tsx` na tela de Fluxo de Caixa, logo abaixo dos KPIs (o lugar mais visível da tela) — não renderiza nada quando não há alerta nenhum; cada linha usa cor de aviso (âmbar) ou crítico (vermelho) conforme a severidade.
+- 15 novos testes: 10 unitários (`tests/core/motorAlertas.test.ts` — cada regra isolada, cenário vazio sem nenhum alerta, limite customizável) e 5 de API (`tests/integration/api.alertas.test.ts`). Suíte total: 31 arquivos, 177 testes.
+- Verificado num navegador real (claro e escuro): o cenário Recanto das Aroeiras (sem vendas geradas ainda, só custos) mostrou corretamente "sem recuperação"; o cenário Splendido, depois de gerar vendas reais, mostrou "necessidade máxima equivale a 36% do VGV — acima do limite de 30%" com os números batendo exatamente com os KPIs da tela; um cenário de teste com financiamento e nenhuma venda mostrou os dois alertas de financiamento e recuperação simultaneamente, com os valores exatos do cálculo.
+
+**Não implementado nesta fatia:** limite de necessidade máxima configurável pela interface (fixo em 30% no código), alertas sobre correção monetária ou sensibilidade, histórico de alertas ao longo do tempo (sempre recalculado, nunca persistido).
+
 ## Próxima fase
 
-A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores), a décima sexta fatia de simulação de sensibilidade e a décima sétima de financiamento de produção estão concluídas. Aguardando direção do usuário sobre o que vem a seguir.
+A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores), a décima sexta fatia de simulação de sensibilidade, a décima sétima de financiamento de produção e a décima oitava de alerta de risco estão concluídas. Resta `VersaoCenario` da lista original da Fundação do ERP. Aguardando direção do usuário sobre o que vem a seguir.

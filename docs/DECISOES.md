@@ -70,6 +70,16 @@
 
 **Status.** Aprovado e implementado (décima sétima fatia). Testado em `tests/core/motorFinanciamento.test.ts`, `tests/core/motorFinanceiro.financiamento.test.ts` e `tests/integration/api.financiamento.test.ts`.
 
+## F9 — Alerta de risco reaproveita achados anteriores em vez de inventar regras novas (achado da Fase 1)
+
+**Contexto.** Depois de correção monetária (F6), distrato (F7) e financiamento de produção (F8), o motor já calcula ou expõe quase tudo que um alerta de risco precisaria interpretar — a lacuna nunca foi "o dado não existe", sempre foi "ninguém olhou para o dado e disse que aquilo é um problema".
+
+**Decisão.** Das quatro regras implementadas, duas vêm diretamente de comportamento já documentado como achado em fatias anteriores, agora só tornado visível: "custo `pct_execucao` sem cronograma gera zero desembolso, silenciosamente" (regra R7/R6, sempre foi assim, nunca alertado) e "financiamento só reduz necessidade de capital quando há receita depois" (achado F8, descoberto ao testar financiamento, agora virou regra formal de alerta). As outras duas (necessidade máxima acima de X% do VGV, sem recuperação dentro do horizonte) são limiares de bom senso sobre indicadores que já existem desde a Fase 0 (`calcularIndicadores()`).
+
+**Decisão de implementação.** `calcularAlertas()` (`src/core/motorAlertas.ts`) recebe as peças já computadas (vendas, custos, cronograma, recebimentos, indicadores, financiamento) em vez de `EntradaMotorFinanceiro`/`SaidaMotorFinanceiro` inteiros — evita um import circular, já que `motorFinanceiro.ts` precisa chamar `calcularAlertas()` para montar `SaidaMotorFinanceiro.alertas`, e `motorAlertas.ts` não pode importar de volta o arquivo que a importa.
+
+**Status.** Aprovado e implementado (décima oitava fatia). Testado em `tests/core/motorAlertas.test.ts` e `tests/integration/api.alertas.test.ts`.
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |

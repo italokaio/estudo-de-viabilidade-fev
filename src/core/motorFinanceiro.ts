@@ -1,4 +1,5 @@
 import { Decimal } from "decimal.js";
+import { calcularAlertas, type Alerta } from "./motorAlertas.js";
 import { corrigirRecebimentos } from "./motorCorrecao.js";
 import { gerarDesembolsosMensais, type ContextoCustos } from "./motorCustos.js";
 import { calcularFinanciamento, type FinanciamentoInput, type PontoFinanciamento } from "./motorFinanciamento.js";
@@ -26,6 +27,8 @@ export interface SaidaMotorFinanceiro {
   entradasCorrigidas: { mes: number; valor: Decimal }[];
   /** liberacao/amortizacao/saldo devedor do financiamento por mes -- vazio quando o cenario nao tem financiamento */
   financiamento: PontoFinanciamento[];
+  /** alertas de risco computados a partir do resultado acima -- nunca muda fluxo/indicadores, so os interpreta */
+  alertas: Alerta[];
 }
 
 /**
@@ -96,5 +99,14 @@ export function executarMotorFinanceiro(entrada: EntradaMotorFinanceiro): SaidaM
     return { mes, valor: entradasCorrigidasPorMes.get(mes) ?? new Decimal(0) };
   });
 
-  return { recebimentos, fluxo, indicadores, entradasCorrigidas, financiamento };
+  const alertas = calcularAlertas({
+    vendas: entrada.vendas,
+    custos: entrada.custos,
+    cronograma: entrada.cronograma,
+    recebimentos,
+    indicadores,
+    financiamento,
+  });
+
+  return { recebimentos, fluxo, indicadores, entradasCorrigidas, financiamento, alertas };
 }

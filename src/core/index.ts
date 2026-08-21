@@ -3,6 +3,7 @@ export * from "./validadorCondicaoPagamento.js";
 export * from "./motorRecebimentos.js";
 export * from "./motorCustos.js";
 export * from "./motorFluxoCaixa.js";
+export * from "./motorAlertas.js";
 export * from "./motorCorrecao.js";
 export * from "./motorFinanciamento.js";
 export * from "./motorFinanceiro.js";
