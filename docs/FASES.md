@@ -463,6 +463,19 @@ Item escolhido entre os candidatos remanescentes (gráfico de sensibilidade, com
 
 **Não implementado nesta fatia:** comparação em cascata de múltiplos níveis (decisão deliberada, mesmo escopo original do achado F10), gráfico visual da comparação (só tabela, mesmo padrão da sensibilidade), comparar cenários que não têm relação de derivação entre si (só a família direta).
 
+## Fase 1 (código) — vigésima oitava fatia: gráfico de sensibilidade (este repositório, concluída)
+
+Último item entre os candidatos remanescentes levantados ao longo da Fase 1 — o único que restava depois da comparação de cenários derivados.
+
+**Decisão de escopo:** a décima sexta fatia (simulação de sensibilidade) já expunha os pontos calculados pela API, só nunca tinham uma leitura visual — a tabela sozinha exige ler número por número para perceber a tendência. Achado F19 (`docs/DECISOES.md`): componente de visualização pura dos mesmos pontos, nenhuma rota nova, nenhuma mudança em `src/core/`, `src/db/` ou na API.
+
+**Implementado:**
+- Web — `SensibilidadeChart.tsx`, gráfico de linha em SVG puro (mesmo padrão sem biblioteca de `FluxoChart.tsx`), eixo x categórico por variação, linha de VPL, ponto base (0%) destacado, tooltip por hover mostrando VPL/necessidade máxima/mês do pico. `SensibilidadePanel.tsx` passou a exibir o gráfico ao lado da tabela existente, em duas colunas.
+- Nenhum teste automatizado novo — renderização pura de dados já cobertos por `tests/integration/api.sensibilidade.test.ts` (décima sexta fatia), sem lógica de cálculo própria nesta fatia. Suíte total inalterada: 35 arquivos, 245 testes.
+- Verificado num navegador real (claro e escuro) no cenário Splendido: o gráfico renderizou a linha de VPL corretamente decrescente ao longo da variação de custo total, com o ponto de 0% destacado e o valor batendo exatamente com a tabela ao lado e com o card de indicadores, nos dois temas.
+
+**Não implementado nesta fatia:** plotar os outros três indicadores (necessidade máxima, mês do pico, recuperação) no gráfico — decisão deliberada, ver achado F19; comparar visualmente mais de um eixo de sensibilidade ao mesmo tempo.
+
 ## Próxima fase
 
-A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores), a décima sexta fatia de simulação de sensibilidade, a décima sétima de financiamento de produção, a décima oitava de alerta de risco, a décima nona de versão de cenário, a vigésima de estrutura de comissão, a vigésima primeira de correção monetária de custos, a vigésima segunda de split nominal de comissão, a vigésima terceira de segurança de sessão, a vigésima quarta de alertas de risco configuráveis, a vigésima quinta de amortização SAC/Price, a vigésima sexta de distrato parcial e a vigésima sétima de comparação de cenários derivados estão concluídas. Resta o gráfico de sensibilidade entre os candidatos levantados. Aguardando direção do usuário sobre o que vem a seguir.
+A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores), a décima sexta fatia de simulação de sensibilidade, a décima sétima de financiamento de produção, a décima oitava de alerta de risco, a décima nona de versão de cenário, a vigésima de estrutura de comissão, a vigésima primeira de correção monetária de custos, a vigésima segunda de split nominal de comissão, a vigésima terceira de segurança de sessão, a vigésima quarta de alertas de risco configuráveis, a vigésima quinta de amortização SAC/Price, a vigésima sexta de distrato parcial, a vigésima sétima de comparação de cenários derivados e a vigésima oitava de gráfico de sensibilidade estão concluídas. Todos os candidatos levantados ao longo da Fase 1 foram implementados — aguardando nova direção do usuário sobre o que vem a seguir.

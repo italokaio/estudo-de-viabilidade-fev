@@ -178,6 +178,14 @@
 
 **Status.** Aprovado e implementado (vigésima sétima fatia). Testado em `tests/integration/api.versaoCenario.test.ts` (cenário sem relação só se vê a si mesmo; a partir do original o derivado aparece como "derivado"; a partir do derivado o original aparece como "original"; os indicadores refletem os dados de cada cenário especificamente — o derivado sem vendas copiadas tem VPL menor que o original).
 
+## F19 — Gráfico de sensibilidade: só visualização, sem mudança de motor ou de API (achado da Fase 1)
+
+**Contexto.** A décima sexta fatia (simulação de sensibilidade) já expunha `GET /api/cenarios/:id/sensibilidade`, consumido por `SensibilidadePanel` só como tabela — os pontos calculados (VPL, necessidade máxima, mês do pico por variação) nunca tinham uma leitura visual de tendência, mais direta que ler uma coluna de números para enxergar se o cenário é sensível ou robusto à premissa variada.
+
+**Decisão.** `SensibilidadeChart.tsx`, um componente novo de leitura pura dos mesmos pontos que a tabela já recebe — nenhuma rota nova, nenhum campo novo, nenhuma mudança em `src/core/` ou `src/db/`. Segue o mesmo padrão SVG-sem-biblioteca já estabelecido por `FluxoChart.tsx`: eixo x categórico (uma posição por variação, não uma escala temporal), linha de VPL, ponto base (variação zero) destacado em `var(--accent)`, tooltip por hover em cada ponto. Deliberadamente plota só o VPL, não os quatro indicadores da tabela — é a leitura de tendência mais direta ("esse cenário aguenta o custo subir 20%?"), a tabela ao lado continua sendo a fonte dos demais números exatos.
+
+**Status.** Aprovado e implementado (vigésima oitava fatia). Sem teste automatizado novo — é uma renderização pura de dados já testados (`tests/integration/api.sensibilidade.test.ts`, décima sexta fatia), sem nenhuma lógica de cálculo própria. Verificado num navegador real (claro e escuro) no cenário Splendido: o gráfico renderizou uma linha de VPL corretamente decrescente ao longo do eixo de custo total, com o ponto de 0% destacado e o valor batendo exatamente com a linha "0% (atual)" da tabela ao lado e com o VPL do card de indicadores.
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |
