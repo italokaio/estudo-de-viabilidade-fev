@@ -278,6 +278,24 @@ Primeiro item de uma nova lista de candidatos, extraída da lista original "fica
 
 **Não implementado nesta fatia:** eixo de variação sobre o índice de correção monetária ou sobre a taxa de desconto do VPL (só os três eixos acima), gráfico da sensibilidade (só tabela), comparação lado a lado de dois eixos simultâneos.
 
+## Fase 1 (código) — décima sétima fatia: financiamento de produção (este repositório, concluída)
+
+Segundo item da lista de candidatos extraída da lista original "fica para depois" da Fundação do ERP (`FinanciamentoProducao`, `AlertaRisco`, `SimulacaoSensibilidade` — já implementada, `VersaoCenario`, `EstruturaComissao`) — o usuário escolheu financiamento de produção.
+
+**Decisão de escopo:** diferente de correção monetária (F6) e sensibilidade — camadas de leitura por cima do motor, nunca somadas ao fluxo real —, financiamento **muda o fluxo de caixa de verdade** (achado F8, `docs/DECISOES.md`): liberações (atreladas à curva do cronograma físico-financeiro, mesma curva usada por custo `pct_execucao`) são uma entrada real; a amortização (o saldo devedor inteiro pago de uma vez, no mês configurado — sem modelar uma tabela de parcelas) é uma saída real. Juros capitalizam mês a mês sobre o saldo devedor, nunca pagos à parte durante a obra.
+
+**Implementado:**
+- Schema — tabela nova `FinanciamentoProducao` (`valorContratado`, `taxaJurosMensal`, `mesAmortizacao`), `@@unique([cenarioId])` — um financiamento por cenário nesta fase.
+- `src/core/motorFinanciamento.ts` (novo) — `calcularFinanciamento(financiamento, cronograma, horizonteMeses)`: liberação de cada mês = `valorContratado × percentualExecucaoMensal`; saldo devedor acumula juros antes de cada nova liberação; no `mesAmortizacao`, o saldo inteiro vira uma amortização e zera.
+- `src/core/motorFinanceiro.ts` — as liberações/amortizações são convertidas em objetos com a mesma forma de `RecebimentoGerado`/`DesembolsoMensal` (placeholders `"financiamento"`, nunca lidos pela consolidação) e somadas antes de `consolidarFluxoCaixa()` — sem mudar a assinatura dessa função nem arriscar seus testes existentes. Nunca voltam no campo `recebimentos` retornado (só `Venda` real é persistida).
+- `src/db/servicoMotor.ts` — `montarEntradaMotor()` passou a buscar o financiamento do cenário e incluir na entrada do motor.
+- API — `POST`/`DELETE /api/cenarios/:id/financiamento` (upsert); `GET /api/cenarios/:id` inclui `financiamento`; `GET /api/cenarios/:cenarioId/fluxo-caixa` inclui a série liberação/amortização/saldo devedor por mês.
+- Web — nova seção "Financiamento de produção" no detalhe do cenário (`CadastroPage.tsx`, upsert como Terreno); novo painel na tela de Fluxo de Caixa (`FinanciamentoFluxoPanel.tsx`) mostrando a série completa — só aparece quando o cenário tem financiamento.
+- 18 novos testes: 5 unitários do motor puro (`tests/core/motorFinanciamento.test.ts`), 5 de integração do pipeline completo (`tests/core/motorFinanceiro.financiamento.test.ts` — inclui o achado F8 sobre necessidade máxima) e 8 de API (`tests/integration/api.financiamento.test.ts`). Suíte total: 29 arquivos, 162 testes.
+- Verificado num navegador real (claro e escuro) no cenário Splendido (409 vendas geradas): cadastrou um financiamento de R$10 milhões a 1% a.m., conferiu que a liberação de cada mês bate exatamente com a curva do cronograma já cadastrado, e que a necessidade máxima de capital muda de verdade (não é só uma análise por cima) ao comparar antes/depois do cadastro.
+
+**Não implementado nesta fatia:** múltiplas tabelas de amortização (parcelas fixas, SAC/Price — só o pagamento único simplificado), mais de um financiamento por cenário, juros pagos mensalmente em vez de capitalizados.
+
 ## Próxima fase
 
-A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores) e a décima sexta fatia de simulação de sensibilidade estão concluídas. Aguardando direção do usuário sobre o que vem a seguir.
+A lista de cinco itens aprovada em bloco, a décima fatia de edição/exclusão completa, a décima primeira de permissão por empreendimento, a lista de quatro itens (correção monetária, distrato, terreno pela interface, polimento de lacunas menores), a décima sexta fatia de simulação de sensibilidade e a décima sétima de financiamento de produção estão concluídas. Aguardando direção do usuário sobre o que vem a seguir.

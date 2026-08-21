@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchEmpreendimentos, fetchFluxoCaixa, type EmpreendimentoResumo, type FluxoCaixaResposta } from "../api/client.js";
 import { CenarioSwitcher } from "../components/CenarioSwitcher.js";
+import { FinanciamentoFluxoPanel } from "../components/FinanciamentoFluxoPanel.js";
 import { FluxoChart } from "../components/FluxoChart.js";
 import { FluxoTable } from "../components/FluxoTable.js";
 import { KpiCard } from "../components/KpiCard.js";
@@ -99,6 +100,7 @@ export function FluxoCaixaPage() {
           </div>
 
           {cenarioId && <RealizadoPanel cenarioId={cenarioId} onAtualizado={recarregarFluxo} />}
+          <FinanciamentoFluxoPanel financiamento={dados.financiamento} />
           {cenarioId && <SensibilidadePanel cenarioId={cenarioId} />}
         </>
       )}

@@ -58,6 +58,18 @@
 
 **Status.** Aprovado e implementado (décima terceira fatia). Testado em `tests/integration/api.distrato.test.ts`.
 
+## F8 — Financiamento de produção muda o fluxo de caixa de verdade, ao contrário de correção monetária e sensibilidade (achado da Fase 1)
+
+**Contexto.** Correção monetária (F6) e simulação de sensibilidade são camadas de leitura por cima do motor: recomputam ou perturbam a entrada, mas o `fluxo`/`indicadores` "oficiais" de um cenário nunca mudam por causa delas. Financiamento de produção é estruturalmente diferente — um empréstimo bancário de obra reduz de verdade o capital próprio necessário durante a construção, então precisa entrar na consolidação real (`consolidarFluxoCaixa()`), não ficar ao lado dela.
+
+**Decisão.** Liberações seguem a mesma curva do cronograma físico-financeiro já usada por custos `pct_execucao` — o banco libera capital conforme a obra avança, nunca de uma vez. Juros capitalizam mês a mês sobre o saldo devedor (nunca pagos à parte durante a obra, prática comum em financiamento de produção). A amortização é um único pagamento do saldo devedor inteiro, no mês configurado — o caso mais comum na prática (repasse bancário na entrega das unidades), sem modelar uma tabela de parcelas.
+
+**Decisão de implementação.** Em vez de mudar a assinatura de `consolidarFluxoCaixa()` (arriscando os testes existentes de fluxo/custos/recebimentos), `executarMotorFinanceiro()` (`src/core/motorFinanceiro.ts`) converte as liberações/amortizações de `calcularFinanciamento()` em objetos com a mesma forma de `RecebimentoGerado`/`DesembolsoMensal` (`vendaId`/`custoId` = `"financiamento"`, nunca lidos pela consolidação — só `mes`/`valor` importam) e os concatena antes de chamar `consolidarFluxoCaixa()`. Esses objetos sintéticos nunca voltam no campo `recebimentos` retornado — `persistirRecebimentos()` só grava linhas de `Venda` real, então não há risco de uma FK inválida.
+
+**Achado ao testar.** Um financiamento só reduz a necessidade máxima de capital **durante a construção**, quando ainda não há receita de venda para pagá-lo de volta — se a amortização cai dentro do horizonte sem nenhuma venda cobrindo o valor, o empréstimo só desloca o pico de necessidade de capital do início (obra) para o mês da amortização (capital próprio paga o banco de volta), sem reduzir o total. Isso não é um bug: reflete a mecânica real de "repasse bancário" — o financiamento só compensa de verdade quando há receita de venda depois, para quitar o saldo devedor.
+
+**Status.** Aprovado e implementado (décima sétima fatia). Testado em `tests/core/motorFinanciamento.test.ts`, `tests/core/motorFinanceiro.financiamento.test.ts` e `tests/integration/api.financiamento.test.ts`.
+
 ## Simplificações adicionais decididas durante a implementação da Fase 0
 
 | Item | Decisão | Motivo |

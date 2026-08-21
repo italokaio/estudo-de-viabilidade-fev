@@ -50,6 +50,7 @@ export async function excluirEmpreendimento(id: string) {
   await prisma.unidade.deleteMany({ where: { empreendimentoId: id } });
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { empreendimentoId: id } });
   await prisma.indiceCorrecao.deleteMany({ where: { empreendimentoId: id } });
+  await prisma.financiamentoProducao.deleteMany({ where: { empreendimentoId: id } });
   await prisma.custo.deleteMany({ where: { empreendimentoId: id } });
   await prisma.categoriaCusto.deleteMany({ where: { empreendimentoId: id } });
   await prisma.tipologia.deleteMany({ where: { empreendimentoId: id } });
@@ -102,6 +103,7 @@ export async function excluirCenario(id: string) {
   await prisma.custo.deleteMany({ where: { cenarioId: id } });
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { cenarioId: id } });
   await prisma.indiceCorrecao.deleteMany({ where: { cenarioId: id } });
+  await prisma.financiamentoProducao.deleteMany({ where: { cenarioId: id } });
   await prisma.cenario.delete({ where: { id } });
 }
 
@@ -683,4 +685,27 @@ export async function definirPontoIndiceCorrecao(input: DefinirPontoIndiceCorrec
 /** Remove a variacao cadastrada para um mes -- aquele mes volta a nao corrigir (fator=1). */
 export async function excluirPontoIndiceCorrecao(cenarioId: string, mes: number) {
   await prisma.indiceCorrecao.deleteMany({ where: { cenarioId, mes } });
+}
+
+export interface DefinirFinanciamentoInput {
+  empreendimentoId: string;
+  cenarioId: string;
+  valorContratado: string;
+  taxaJurosMensal: string;
+  mesAmortizacao: number;
+}
+
+/** Cria ou atualiza o financiamento de producao de um cenario (achado F8, docs/DECISOES.md) -- upsert, um financiamento por cenario nesta fase. */
+export async function definirFinanciamento(input: DefinirFinanciamentoInput) {
+  const { cenarioId, ...dados } = input;
+  return prisma.financiamentoProducao.upsert({
+    where: { cenarioId },
+    update: dados,
+    create: { cenarioId, ...dados },
+  });
+}
+
+/** Remove o financiamento do cenario -- o cenario volta a nao ter financiamento (comportamento identico a antes desta fatia). */
+export async function excluirFinanciamento(cenarioId: string) {
+  await prisma.financiamentoProducao.deleteMany({ where: { cenarioId } });
 }

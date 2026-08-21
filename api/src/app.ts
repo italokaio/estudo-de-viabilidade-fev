@@ -20,6 +20,7 @@ import {
   criarTipologia,
   criarUnidadesEmLote,
   criarUnidadesPorAndar,
+  definirFinanciamento,
   definirPontoIndiceCorrecao,
   definirTerreno,
   desfazerDistrato,
@@ -30,6 +31,7 @@ import {
   excluirCronograma,
   excluirCusto,
   excluirEmpreendimento,
+  excluirFinanciamento,
   excluirPontoIndiceCorrecao,
   excluirTipologia,
   registrarDistrato,
@@ -899,6 +901,7 @@ export async function buildApp() {
         custos: { include: { categoria: true }, orderBy: { createdAt: "asc" } },
         cronograma: { orderBy: { mes: "asc" } },
         indicesCorrecao: { orderBy: { mes: "asc" } },
+        financiamento: true,
         _count: { select: { vendas: true } },
       },
     });
@@ -935,6 +938,13 @@ export async function buildApp() {
       })),
       cronograma: cenario.cronograma.map((p) => ({ mes: p.mes, percentualExecucaoMensal: p.percentualExecucaoMensal })),
       indicesCorrecao: cenario.indicesCorrecao.map((i) => ({ mes: i.mes, percentual: i.percentual })),
+      financiamento: cenario.financiamento
+        ? {
+            valorContratado: cenario.financiamento.valorContratado,
+            taxaJurosMensal: cenario.financiamento.taxaJurosMensal,
+            mesAmortizacao: cenario.financiamento.mesAmortizacao,
+          }
+        : null,
       totalVendasGeradas: cenario._count.vendas,
     };
   });
@@ -1122,6 +1132,60 @@ export async function buildApp() {
     }
     if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
     await excluirPontoIndiceCorrecao(cenario.id, Number(req.params.mes));
+    reply.code(204);
+    return null;
+  });
+
+  // Financiamento de producao (achado F8, docs/DECISOES.md): diferente de
+  // indice de correcao/sensibilidade, isto MUDA o fluxo de caixa de
+  // verdade -- liberacoes e amortizacao entram na consolidacao real
+  // (src/core/motorFinanceiro.ts). Upsert, um financiamento por cenario.
+  app.post<{ Params: { id: string }; Body: { valorContratado?: string; taxaJurosMensal?: string; mesAmortizacao?: number } }>(
+    "/api/cenarios/:id/financiamento",
+    async (req, reply) => {
+      const { valorContratado, taxaJurosMensal, mesAmortizacao } = req.body ?? {};
+      if (!valorContratado || !valorContratado.trim() || Number.isNaN(Number(valorContratado))) {
+        reply.code(400);
+        return { erro: "valorContratado é obrigatório e deve ser numérico" };
+      }
+      if (!taxaJurosMensal || !taxaJurosMensal.trim() || Number.isNaN(Number(taxaJurosMensal))) {
+        reply.code(400);
+        return { erro: "taxaJurosMensal é obrigatório e deve ser numérico" };
+      }
+      if (mesAmortizacao === undefined || !Number.isInteger(mesAmortizacao) || mesAmortizacao < 1) {
+        reply.code(400);
+        return { erro: "mesAmortizacao deve ser um número inteiro maior ou igual a 1" };
+      }
+      const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+      if (!cenario) {
+        reply.code(404);
+        return { erro: "Cenário não encontrado" };
+      }
+      if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+      const financiamento = await definirFinanciamento({
+        empreendimentoId: cenario.empreendimentoId,
+        cenarioId: cenario.id,
+        valorContratado: valorContratado.trim(),
+        taxaJurosMensal: taxaJurosMensal.trim(),
+        mesAmortizacao,
+      });
+      reply.code(200);
+      return financiamento;
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>("/api/cenarios/:id/financiamento", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+    await excluirFinanciamento(cenario.id);
     reply.code(204);
     return null;
   });
@@ -1335,6 +1399,12 @@ export async function buildApp() {
         saldoFinal: resultado.indicadores.saldoFinal.toFixed(2),
         vpl: resultado.indicadores.vpl.toFixed(2),
       },
+      financiamento: resultado.financiamento.map((f) => ({
+        mes: f.mes,
+        liberacao: f.liberacao.toFixed(2),
+        amortizacao: f.amortizacao.toFixed(2),
+        saldoDevedor: f.saldoDevedor.toFixed(2),
+      })),
     };
   });
 

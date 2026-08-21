@@ -1,4 +1,5 @@
 import { Decimal } from "decimal.js";
+import type { FinanciamentoInput } from "../core/motorFinanciamento.js";
 import { executarMotorFinanceiro, type EntradaMotorFinanceiro, type SaidaMotorFinanceiro } from "../core/motorFinanceiro.js";
 import { calcularSensibilidade, type EixoSensibilidade, type PontoSensibilidade } from "../core/motorSensibilidade.js";
 import type { CondicaoPagamento, CustoInput, PontoCronograma, PontoIndiceCorrecao, TipoDistribuicao, TipoIncidenciaCusto, VendaInput } from "../core/types.js";
@@ -56,6 +57,15 @@ async function montarEntradaMotor(cenarioId: string, opcoes: { taxaDescontoMensa
   const indicesDb = await prisma.indiceCorrecao.findMany({ where: { cenarioId }, orderBy: { mes: "asc" } });
   const indiceCorrecao: PontoIndiceCorrecao[] = indicesDb.map((i) => ({ mes: i.mes, percentual: new Decimal(i.percentual) }));
 
+  const financiamentoDb = await prisma.financiamentoProducao.findUnique({ where: { cenarioId } });
+  const financiamento: FinanciamentoInput | undefined = financiamentoDb
+    ? {
+        valorContratado: new Decimal(financiamentoDb.valorContratado),
+        taxaJurosMensal: new Decimal(financiamentoDb.taxaJurosMensal),
+        mesAmortizacao: financiamentoDb.mesAmortizacao,
+      }
+    : undefined;
+
   return {
     vendas,
     custos,
@@ -63,6 +73,7 @@ async function montarEntradaMotor(cenarioId: string, opcoes: { taxaDescontoMensa
     horizonteMeses: cenario.horizonteProjecaoMeses,
     taxaDescontoMensal: new Decimal(opcoes.taxaDescontoMensal ?? "0"),
     indiceCorrecao,
+    financiamento,
   };
 }
 

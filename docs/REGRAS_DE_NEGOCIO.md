@@ -18,6 +18,7 @@ Extraídas da engenharia reversa da planilha do Splendido, mas **nenhuma delas c
 | R12 | Toda entidade transacional pertence a exatamente um empreendimento e um cenário; a agregação de portfólio nunca altera os dados de origem. | `empreendimentoId` obrigatório em toda tabela transacional |
 | R13 | Toda grandeza com valor previsto e valor realizado armazena os dois separadamente — o realizado nunca sobrescreve o previsto. | `Custo.valorRealizado`, `RecebimentoProjetado.valorRealizado` |
 | R14 | O valor corrigido de um recebimento é o valor previsto multiplicado pelo fator acumulado de `(1 + variação do índice)` de cada mês entre o mês da venda (exclusive) e o mês de competência do recebimento (inclusive); sem índice cadastrado para um mês, a variação daquele mês é zero. | `motorCorrecao.calcularFatorCorrecao()`, `motorCorrecao.corrigirRecebimentos()` |
+| R15 | A liberação de um financiamento de produção em um mês é o valor contratado multiplicado pelo percentual de execução do cronograma físico naquele mês; juros capitalizam sobre o saldo devedor antes de cada nova liberação; a amortização é o saldo devedor inteiro, pago de uma vez, no mês configurado. | `motorFinanciamento.calcularFinanciamento()` |
 
 ## As 4 estratégias de distribuição de uma modalidade de pagamento (`TipoDistribuicao`)
 

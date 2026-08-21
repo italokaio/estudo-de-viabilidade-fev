@@ -100,6 +100,7 @@ model Empreendimento {
   usuariosVinculados  EmpreendimentoUsuario[]
   indicesCorrecao     IndiceCorrecao[]
   distratos           Distrato[]
+  financiamentos      FinanciamentoProducao[]
 
   @@map("empreendimento")
 }
@@ -123,6 +124,7 @@ model Cenario {
   custos              Custo[]
   cronograma          CronogramaFisicoFinanceiro[]
   indicesCorrecao     IndiceCorrecao[]
+  financiamento       FinanciamentoProducao?
 
   @@map("cenario")
 }
@@ -398,4 +400,31 @@ model Distrato {
   venda          Venda          @relation(fields: [vendaId], references: [id])
 
   @@map("distrato")
+}
+
+/**
+ * Financiamento bancario de producao (achado F8, docs/DECISOES.md): ao
+ * contrario de correcao monetaria e sensibilidade (camadas de leitura por
+ * cima do motor, nunca persistidas), financiamento MUDA o fluxo de caixa
+ * de verdade -- liberacoes (atreladas a curva do cronograma fisico) sao
+ * uma entrada real, e a amortizacao (paga de uma vez, no mes configurado)
+ * e uma saida real, ambas somadas ao fluxo consolidado antes de
+ * calcularIndicadores(). Um financiamento por cenario (1:1) nesta fase --
+ * sem isso, o cenario simplesmente nao tem financiamento, exatamente como
+ * hoje.
+ */
+model FinanciamentoProducao {
+  id                String   @id @default(cuid())
+  empreendimentoId  String
+  cenarioId         String   @unique
+  valorContratado   String // decimal-as-string, teto do financiamento
+  taxaJurosMensal   String // decimal-as-string, 0..1 -- juros capitalizados mes a mes sobre o saldo devedor
+  mesAmortizacao    Int // mes em que o saldo devedor inteiro (principal liberado + juros acumulados) e pago de uma vez
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
+  cenario        Cenario        @relation(fields: [cenarioId], references: [id])
+
+  @@map("financiamento_producao")
 }

@@ -15,6 +15,13 @@ export interface PontoFluxo {
   entradasCorrigidas: string;
 }
 
+export interface PontoFinanciamentoFluxo {
+  mes: number;
+  liberacao: string;
+  amortizacao: string;
+  saldoDevedor: string;
+}
+
 export interface FluxoCaixaResposta {
   empreendimento: string;
   cenario: string;
@@ -27,6 +34,7 @@ export interface FluxoCaixaResposta {
     saldoFinal: string;
     vpl: string;
   };
+  financiamento: PontoFinanciamentoFluxo[];
 }
 
 export async function fetchEmpreendimentos(): Promise<EmpreendimentoResumo[]> {
@@ -138,6 +146,12 @@ export interface CustoResumo {
   status: string;
 }
 
+export interface FinanciamentoResumo {
+  valorContratado: string;
+  taxaJurosMensal: string;
+  mesAmortizacao: number;
+}
+
 export interface CenarioDetalhe {
   id: string;
   nome: string;
@@ -150,6 +164,7 @@ export interface CenarioDetalhe {
   custos: CustoResumo[];
   cronograma: { mes: number; percentualExecucaoMensal: string }[];
   indicesCorrecao: { mes: number; percentual: string }[];
+  financiamento: FinanciamentoResumo | null;
   totalVendasGeradas: number;
 }
 
@@ -418,6 +433,14 @@ export function definirPontoIndiceCorrecao(cenarioId: string, input: { mes: numb
 
 export function excluirPontoIndiceCorrecao(cenarioId: string, mes: number) {
   return del(`/api/cenarios/${cenarioId}/indices-correcao/${mes}`);
+}
+
+export function definirFinanciamento(cenarioId: string, input: { valorContratado: string; taxaJurosMensal: string; mesAmortizacao: number }) {
+  return postJson<FinanciamentoResumo>(`/api/cenarios/${cenarioId}/financiamento`, input);
+}
+
+export function excluirFinanciamento(cenarioId: string) {
+  return del(`/api/cenarios/${cenarioId}/financiamento`);
 }
 
 export type Papel = "admin" | "usuario";

@@ -17,6 +17,7 @@ import {
   atualizarPermuta,
   criarUnidadesEmLote,
   criarUnidadesPorAndar,
+  definirFinanciamento,
   definirPontoIndiceCorrecao,
   definirTerreno,
   desfazerDistrato,
@@ -27,6 +28,7 @@ import {
   excluirCronograma,
   excluirCusto,
   excluirEmpreendimento,
+  excluirFinanciamento,
   excluirPontoIndiceCorrecao,
   excluirTipologia,
   fetchCenarioDetalhe,
@@ -767,6 +769,13 @@ function CartaoCenario({
 
           <div style={{ paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
             <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)", marginBottom: 8 }}>
+              Financiamento de produção
+            </div>
+            <FinanciamentoSecao cenarioId={cenarioResumo.id} financiamento={detalhe.financiamento} onAtualizado={recarregar} onErro={onErro} />
+          </div>
+
+          <div style={{ paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)", marginBottom: 8 }}>
               Custos
             </div>
             <CustosSecao
@@ -1018,6 +1027,92 @@ function IndiceCorrecaoSecao({
           {salvando ? "Salvando…" : "Definir"}
         </Button>
       </form>
+    </div>
+  );
+}
+
+function FinanciamentoSecao({
+  cenarioId,
+  financiamento,
+  onAtualizado,
+  onErro,
+}: {
+  cenarioId: string;
+  financiamento: CenarioDetalhe["financiamento"];
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [valorContratado, setValorContratado] = useState(financiamento?.valorContratado ?? "");
+  const [taxaJurosMensal, setTaxaJurosMensal] = useState(financiamento?.taxaJurosMensal ?? "");
+  const [mesAmortizacao, setMesAmortizacao] = useState(financiamento ? String(financiamento.mesAmortizacao) : "");
+  const [salvando, setSalvando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await definirFinanciamento(cenarioId, { valorContratado, taxaJurosMensal, mesAmortizacao: Number(mesAmortizacao) });
+      setEditando(false);
+      onAtualizado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function excluir() {
+    if (!window.confirm("Excluir o financiamento deste cenário?")) return;
+    setExcluindo(true);
+    try {
+      await excluirFinanciamento(cenarioId);
+      onAtualizado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setExcluindo(false);
+    }
+  }
+
+  if (editando || !financiamento) {
+    return (
+      <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div style={{ width: 140 }}>
+          <TextField label="Valor contratado" value={valorContratado} onChange={(e) => setValorContratado(e.target.value)} placeholder="1000000" required />
+        </div>
+        <div style={{ width: 130 }}>
+          <TextField label="Juros mensal (0–1)" value={taxaJurosMensal} onChange={(e) => setTaxaJurosMensal(e.target.value)} placeholder="0.01" required />
+        </div>
+        <div style={{ width: 140 }}>
+          <TextField label="Mês de amortização" type="number" min={1} value={mesAmortizacao} onChange={(e) => setMesAmortizacao(e.target.value)} required />
+        </div>
+        <Button type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+          {salvando ? "Salvando…" : "Salvar"}
+        </Button>
+        {financiamento && (
+          <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+            Cancelar
+          </Button>
+        )}
+      </form>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ fontSize: 13, color: "var(--ink-secondary)" }}>
+        {formatBRL(financiamento.valorContratado)} contratados · {(Number(financiamento.taxaJurosMensal) * 100).toFixed(2)}% a.m. · amortização no mês {financiamento.mesAmortizacao}
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+          Editar
+        </Button>
+        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+          {excluindo ? "Excluindo…" : "Excluir"}
+        </Button>
+      </div>
     </div>
   );
 }

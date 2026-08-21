@@ -1,6 +1,7 @@
 import { Decimal } from "decimal.js";
 import { corrigirRecebimentos } from "./motorCorrecao.js";
 import { gerarDesembolsosMensais, type ContextoCustos } from "./motorCustos.js";
+import { calcularFinanciamento, type FinanciamentoInput, type PontoFinanciamento } from "./motorFinanciamento.js";
 import { calcularIndicadores, consolidarFluxoCaixa } from "./motorFluxoCaixa.js";
 import { gerarRecebimentos } from "./motorRecebimentos.js";
 import type { CustoInput, FluxoMensal, IndicadoresFluxo, PontoCronograma, PontoIndiceCorrecao, RecebimentoGerado, VendaInput } from "./types.js";
@@ -13,14 +14,18 @@ export interface EntradaMotorFinanceiro {
   taxaDescontoMensal: Decimal;
   /** serie de indice de correcao monetaria do cenario (achado F6) -- vazio/omitido = sem correcao, comportamento identico ao motor antes desta fatia */
   indiceCorrecao?: PontoIndiceCorrecao[];
+  /** financiamento bancario de producao do cenario (achado F8) -- omitido = sem financiamento, comportamento identico ao motor antes desta fatia */
+  financiamento?: FinanciamentoInput;
 }
 
 export interface SaidaMotorFinanceiro {
   recebimentos: RecebimentoGerado[];
   fluxo: FluxoMensal[];
   indicadores: IndicadoresFluxo;
-  /** entradas de cada mes corrigidas pelo indice de correcao (identicas a fluxo[].entradas quando nenhum indice foi cadastrado) */
+  /** entradas de cada mes corrigidas pelo indice de correcao, incluindo liberacoes de financiamento (sem correcao aplicada a elas -- nao sao saldo de venda) */
   entradasCorrigidas: { mes: number; valor: Decimal }[];
+  /** liberacao/amortizacao/saldo devedor do financiamento por mes -- vazio quando o cenario nao tem financiamento */
+  financiamento: PontoFinanciamento[];
 }
 
 /**
@@ -53,7 +58,22 @@ export function executarMotorFinanceiro(entrada: EntradaMotorFinanceiro): SaidaM
     .filter((c) => c.participaFluxoCaixa)
     .flatMap((custo) => gerarDesembolsosMensais(custo, ctx));
 
-  const fluxo = consolidarFluxoCaixa(recebimentos, desembolsos, entrada.horizonteMeses);
+  // Financiamento (achado F8) muda o fluxo de caixa de verdade -- liberacao
+  // e amortizacao entram na mesma consolidacao usada para indicadores, ao
+  // contrario de correcao monetaria/sensibilidade (camadas de leitura por
+  // cima, nunca somadas ao fluxo real). vendaId/custoId "financiamento" sao
+  // placeholders nunca lidos por consolidarFluxoCaixa (so mes/valor
+  // importam) e nunca voltam no `recebimentos` retornado -- persistirRecebimentos
+  // (src/db/servicoMotor.ts) so grava recebimentos de Venda real.
+  const financiamento = entrada.financiamento ? calcularFinanciamento(entrada.financiamento, entrada.cronograma, entrada.horizonteMeses) : [];
+  const liberacoesComoRecebimentos: RecebimentoGerado[] = financiamento
+    .filter((f) => !f.liberacao.isZero())
+    .map((f) => ({ vendaId: "financiamento", modalidadeId: "financiamento", mesCompetencia: f.mes, valorPrevisto: f.liberacao }));
+  const amortizacoesComoDesembolsos = financiamento
+    .filter((f) => !f.amortizacao.isZero())
+    .map((f) => ({ custoId: "financiamento", mes: f.mes, valor: f.amortizacao }));
+
+  const fluxo = consolidarFluxoCaixa([...recebimentos, ...liberacoesComoRecebimentos], [...desembolsos, ...amortizacoesComoDesembolsos], entrada.horizonteMeses);
   const indicadores = calcularIndicadores(fluxo, entrada.taxaDescontoMensal);
 
   const mesOrigemPorVenda = new Map(entrada.vendas.map((v) => [v.id, v.mesOrigem]));
@@ -63,10 +83,18 @@ export function executarMotorFinanceiro(entrada: EntradaMotorFinanceiro): SaidaM
     const atual = entradasCorrigidasPorMes.get(c.mesCompetencia) ?? new Decimal(0);
     entradasCorrigidasPorMes.set(c.mesCompetencia, atual.plus(c.valorCorrigido));
   }
+  // liberacoes de financiamento nao passam por correcao monetaria (nao sao
+  // saldo devedor de venda) -- somadas verbatim, para que "Corrigido" ==
+  // "Entradas" quando nenhum indice foi cadastrado, com ou sem financiamento.
+  for (const f of financiamento) {
+    if (f.liberacao.isZero()) continue;
+    const atual = entradasCorrigidasPorMes.get(f.mes) ?? new Decimal(0);
+    entradasCorrigidasPorMes.set(f.mes, atual.plus(f.liberacao));
+  }
   const entradasCorrigidas = Array.from({ length: entrada.horizonteMeses }, (_, i) => {
     const mes = i + 1;
     return { mes, valor: entradasCorrigidasPorMes.get(mes) ?? new Decimal(0) };
   });
 
-  return { recebimentos, fluxo, indicadores, entradasCorrigidas };
+  return { recebimentos, fluxo, indicadores, entradasCorrigidas, financiamento };
 }
