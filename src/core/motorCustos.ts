@@ -1,11 +1,19 @@
 import { Decimal } from "decimal.js";
-import type { CustoInput, DesembolsoMensal, PontoCronograma, VendaInput } from "./types.js";
+import type { CustoInput, DesembolsoMensal, PontoCronograma, RecebimentoGerado, VendaInput } from "./types.js";
 
 export interface ContextoCustos {
   /** vendas do empreendimento/cenario, para incidencia pct_vgv_vendido_no_mes */
   vendas: VendaInput[];
   /** total recebido por mes (soma de RecebimentoProjetado.valorPrevisto), para pct_recebido_mes_anterior */
   recebidoPorMes: Map<number, Decimal>;
+  /**
+   * Recebimentos individuais, um por venda x modalidade x mes (achado F25,
+   * docs/DECISOES.md — "comissao paga na curva de recebimento"), para
+   * pct_recebido_no_mes -- diferente de recebidoPorMes (agregado, sem saber
+   * de qual venda veio cada parcela), aqui cada recebimento carrega seu
+   * vendaId, permitindo escopar por tipologia como pct_vgv_vendido_no_mes ja faz.
+   */
+  recebimentos: RecebimentoGerado[];
   /** curva de execucao fisica do cenario, para pct_execucao */
   cronograma: PontoCronograma[];
   horizonteMeses: number;
@@ -17,11 +25,13 @@ export interface ContextoCustos {
  * encargo — sobre valor vendido ou sobre valor recebido — e parametrizavel
  * por rubrica, nunca fixa no motor).
  *
- * Nenhuma das quatro estrategias abaixo sabe o nome da rubrica que a usa —
+ * Nenhuma das cinco estrategias abaixo sabe o nome da rubrica que a usa —
  * "comissao" e "RET" nao aparecem em lugar nenhum deste arquivo. O que a
- * um empreendimento chama de "comissao" e apenas um Custo com
- * tipoIncidencia="pct_vgv_vendido_no_mes"; um encargo do tipo "RET" e
- * apenas um Custo com tipoIncidencia="pct_recebido_mes_anterior".
+ * um empreendimento chama de "comissao no mes da venda" e apenas um Custo
+ * com tipoIncidencia="pct_vgv_vendido_no_mes"; "comissao na curva de
+ * recebimento" (achado F25) e tipoIncidencia="pct_recebido_no_mes"; um
+ * encargo do tipo "RET" e apenas um Custo com
+ * tipoIncidencia="pct_recebido_mes_anterior".
  */
 export function gerarDesembolsosMensais(custo: CustoInput, ctx: ContextoCustos): DesembolsoMensal[] {
   return gerarDesembolsosSemGrupo(custo, ctx).map((d) => ({ ...d, grupoIndiceCorrecao: custo.grupoIndiceCorrecao }));
@@ -58,6 +68,31 @@ function gerarDesembolsosSemGrupo(custo: CustoInput, ctx: ContextoCustos): Desem
       const desembolsos: DesembolsoMensal[] = [];
       for (const [mes, totalVendido] of totalPorMes) {
         desembolsos.push({ custoId: custo.id, mes, valor: totalVendido.times(percentual) });
+      }
+      return desembolsos;
+    }
+
+    case "pct_recebido_no_mes": {
+      // Comissao paga na curva de recebimento (achado F25, docs/DECISOES.md),
+      // em vez de tudo de uma vez no mes da venda (pct_vgv_vendido_no_mes):
+      // cada parcela realmente recebida gera sua fatia da comissao, no mesmo
+      // mes em que a parcela e projetada -- nao no mes seguinte
+      // (pct_recebido_mes_anterior e uma coisa diferente: um encargo tipo
+      // RET, sobre o CAIXA agregado do cenario inteiro, sem saber de qual
+      // venda veio).
+      const percentual = custo.percentual ?? new Decimal(0);
+      const vendaIdsBase = new Set(
+        (custo.tipologiaId ? ctx.vendas.filter((v) => v.tipologiaId === custo.tipologiaId) : ctx.vendas).map((v) => v.id),
+      );
+      const totalPorMes = new Map<number, Decimal>();
+      for (const r of ctx.recebimentos) {
+        if (!vendaIdsBase.has(r.vendaId)) continue;
+        const atual = totalPorMes.get(r.mesCompetencia) ?? new Decimal(0);
+        totalPorMes.set(r.mesCompetencia, atual.plus(r.valorPrevisto));
+      }
+      const desembolsos: DesembolsoMensal[] = [];
+      for (const [mes, totalRecebido] of totalPorMes) {
+        desembolsos.push({ custoId: custo.id, mes, valor: totalRecebido.times(percentual) });
       }
       return desembolsos;
     }

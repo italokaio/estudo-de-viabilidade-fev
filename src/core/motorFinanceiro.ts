@@ -59,6 +59,7 @@ export function executarMotorFinanceiro(entrada: EntradaMotorFinanceiro): SaidaM
   const ctx: ContextoCustos = {
     vendas: entrada.vendas,
     recebidoPorMes,
+    recebimentos,
     cronograma: entrada.cronograma,
     horizonteMeses: entrada.horizonteMeses,
   };

@@ -158,7 +158,7 @@ export interface CenarioResumo {
   derivadoDeNome: string | null;
 }
 
-export type TipoIncidenciaCusto = "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao";
+export type TipoIncidenciaCusto = "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao" | "pct_recebido_no_mes";
 
 export interface CategoriaCustoResumo {
   id: string;

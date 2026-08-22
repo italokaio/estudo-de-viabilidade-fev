@@ -1,7 +1,7 @@
 import { Decimal } from "decimal.js";
 import { calcularPrecoPorAndar, validarCondicaoPagamento, validarCronograma } from "../core/index.js";
 import type { RegraPrecificacaoAndar } from "../core/precificacaoAndar.js";
-import type { CondicaoPagamento as CondicaoPagamentoCore } from "../core/types.js";
+import type { CondicaoPagamento as CondicaoPagamentoCore, TipoIncidenciaCusto } from "../core/types.js";
 import { prisma } from "./client.js";
 
 /**
@@ -769,7 +769,7 @@ export async function criarPremissaVelocidade(inputs: CriarPremissaVelocidadeInp
 export interface CriarCategoriaCustoInput {
   empreendimentoId?: string;
   nome: string;
-  tipoIncidencia: "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao";
+  tipoIncidencia: TipoIncidenciaCusto;
 }
 
 export async function criarCategoriaCusto(input: CriarCategoriaCustoInput) {
@@ -778,7 +778,7 @@ export async function criarCategoriaCusto(input: CriarCategoriaCustoInput) {
 
 export interface AtualizarCategoriaCustoInput {
   nome?: string;
-  tipoIncidencia?: "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao";
+  tipoIncidencia?: TipoIncidenciaCusto;
 }
 
 /**

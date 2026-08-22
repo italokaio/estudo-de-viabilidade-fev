@@ -6,6 +6,7 @@ import type { CustoInput, VendaInput } from "../../src/core/types.js";
 const ctxBase: ContextoCustos = {
   vendas: [],
   recebidoPorMes: new Map(),
+  recebimentos: [],
   cronograma: [],
   horizonteMeses: 6,
 };
@@ -78,6 +79,51 @@ describe("motor de custos — as 4 estrategias de incidencia", () => {
     const desembolsos = gerarDesembolsosMensais(comissaoLoja, { ...ctxBase, vendas });
     // so a venda v3 (loja) entra na base -- v1/v2 (apto) sao ignoradas por este custo.
     expect(desembolsos).toEqual([{ custoId: "c-loja", mes: 1, valor: new Decimal("16000") }]); // 200000 * 8%
+  });
+
+  it("pct_recebido_no_mes: a comissao acompanha cada parcela recebida, no mesmo mes dela (achado F25 — comissao na curva de recebimento)", () => {
+    const vendas: VendaInput[] = [
+      { id: "v1", unidadeId: "u1", tipologiaId: "t-apto", mesOrigem: 1, valorVenda: new Decimal("200000"), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } },
+    ];
+    const recebimentos = [
+      { vendaId: "v1", modalidadeId: "m1", mesCompetencia: 1, valorPrevisto: new Decimal("80000") }, // 40% no mes 1
+      { vendaId: "v1", modalidadeId: "m2", mesCompetencia: 6, valorPrevisto: new Decimal("120000") }, // 60% no mes 6
+    ];
+    const custo: CustoInput = {
+      id: "c-curva",
+      categoriaNome: "Comissao",
+      tipoIncidencia: "pct_recebido_no_mes",
+      percentual: new Decimal("0.1"),
+      recorrencia: "mensal",
+      participaFluxoCaixa: true,
+    };
+    const desembolsos = gerarDesembolsosMensais(custo, { ...ctxBase, vendas, recebimentos });
+    const porMes = new Map(desembolsos.map((d) => [d.mes, d.valor.toString()]));
+    expect(porMes.get(1)).toBe("8000"); // 80000 * 10%
+    expect(porMes.get(6)).toBe("12000"); // 120000 * 10%
+  });
+
+  it("pct_recebido_no_mes com tipologiaId: incide só sobre recebimentos de vendas daquela tipologia", () => {
+    const vendas: VendaInput[] = [
+      { id: "v1", unidadeId: "u1", tipologiaId: "t-apto", mesOrigem: 1, valorVenda: new Decimal("200000"), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } },
+      { id: "v2", unidadeId: "u2", tipologiaId: "t-loja", mesOrigem: 1, valorVenda: new Decimal("50000"), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } },
+    ];
+    const recebimentos = [
+      { vendaId: "v1", modalidadeId: "m1", mesCompetencia: 1, valorPrevisto: new Decimal("200000") },
+      { vendaId: "v2", modalidadeId: "m2", mesCompetencia: 1, valorPrevisto: new Decimal("50000") },
+    ];
+    const custo: CustoInput = {
+      id: "c-curva-loja",
+      categoriaNome: "Comissao",
+      tipoIncidencia: "pct_recebido_no_mes",
+      percentual: new Decimal("0.1"),
+      recorrencia: "mensal",
+      participaFluxoCaixa: true,
+      tipologiaId: "t-loja",
+    };
+    const desembolsos = gerarDesembolsosMensais(custo, { ...ctxBase, vendas, recebimentos });
+    // so o recebimento de v2 (loja, 50000) entra na base -- v1 (apto) e ignorado por este custo escopado.
+    expect(desembolsos).toEqual([{ custoId: "c-curva-loja", mes: 1, valor: new Decimal("5000") }]); // 50000 * 10%
   });
 
   it("pct_recebido_mes_anterior: incide sobre o total recebido no mes anterior", () => {

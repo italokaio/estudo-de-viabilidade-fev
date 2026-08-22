@@ -10,7 +10,7 @@ Extraídas da engenharia reversa da planilha do Splendido, mas **nenhuma delas c
 | R4 | Uma modalidade periódica só gera evento se houver ao menos um ciclo completo restante, salvo `geraEventoParcial=true`. | `tipoDistribuicao = "periodica"` |
 | R5 | Modalidades calculadas sobre o valor total (não por coorte) são computadas sobre o valor desta venda e lançadas em mês(es) fixo(s) do calendário — por distributividade, isso produz resultado idêntico a agregar primeiro e depois aplicar o percentual, sem precisar de uma etapa de agregação separada. | `tipoDistribuicao = "mes_fixo"` |
 | R6 | A soma dos percentuais de execução mensal de um cronograma deve fechar em 100%. | `motorCustos.validarCronograma()` |
-| R7 | Um encargo pode incidir sobre valor vendido no mês ou valor recebido no mês anterior — a base é parametrizável por rubrica, nunca fixa no motor. | `CustoInput.tipoIncidencia` (4 estratégias, `motorCustos.gerarDesembolsosMensais()`) |
+| R7 | Um encargo pode incidir sobre valor vendido no mês, valor recebido no mês anterior, ou acompanhar a curva de recebimento de cada parcela — a base é parametrizável por rubrica, nunca fixa no motor. | `CustoInput.tipoIncidencia` (5 estratégias, `motorCustos.gerarDesembolsosMensais()`) |
 | R8 | O fluxo de caixa de um período é a soma de entradas menos saídas, apenas com os desembolsos já filtrados por `participaFluxoCaixa`. | `motorFinanceiro.executarMotorFinanceiro()` |
 | R9 | O saldo acumulado de um período = saldo acumulado anterior + fluxo do período; a necessidade máxima de capital é o menor valor do acumulado no horizonte, e o pico é o mês em que ocorre. | `motorFluxoCaixa.calcularIndicadores()` |
 | R10 | O mês de recuperação é o primeiro mês, após o pico, a partir do qual o acumulado permanece ≥ 0 até o fim do horizonte — não o primeiro cruzamento pontual. | `motorFluxoCaixa.calcularIndicadores()` |
@@ -29,13 +29,14 @@ Extraídas da engenharia reversa da planilha do Splendido, mas **nenhuma delas c
 | `periodica` | Intermediárias/reforços | Valor total ÷ ciclos completos restantes (R4); zero eventos se não houver ciclo completo, salvo configuração explícita |
 | `mes_fixo` | Chaves, financiamento bancário | Lançado em um mês fixo do calendário (ou N meses consecutivos a partir dele), independente de quando a venda ocorreu |
 
-## As 4 estratégias de incidência de um custo (`TipoIncidenciaCusto`)
+## As 5 estratégias de incidência de um custo (`TipoIncidenciaCusto`)
 
 | Tipo | Exemplo real (Splendido) | Regra |
 |---|---|---|
 | `fixo` | Terreno, legalização, publicidade | Valor absoluto, único ou recorrente mensal |
 | `pct_vgv_vendido_no_mes` | Comissão de vendas (5%) | % sobre o total vendido naquele mês |
+| `pct_recebido_no_mes` | Comissão paga na curva de recebimento (Fase 1, achado F25) | % sobre cada parcela recebida, no mesmo mês dela |
 | `pct_recebido_mes_anterior` | Encargo tipo RET (4%) | % sobre o total recebido no mês anterior |
 | `pct_execucao` | Obra | % do custo total, distribuído pela curva de cronograma físico |
 
-Nenhuma dessas quatro funções sabe o nome "comissão" ou "RET" — esses são apenas nomes de `CategoriaCusto` que um empreendimento escolhe.
+Nenhuma dessas cinco funções sabe o nome "comissão" ou "RET" — esses são apenas nomes de `CategoriaCusto` que um empreendimento escolhe.

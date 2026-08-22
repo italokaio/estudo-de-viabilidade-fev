@@ -50,7 +50,7 @@ export interface RecebimentoGerado {
   valorPrevisto: Decimal;
 }
 
-export type TipoIncidenciaCusto = "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao";
+export type TipoIncidenciaCusto = "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao" | "pct_recebido_no_mes";
 
 export interface CustoInput {
   id: string;
@@ -66,9 +66,10 @@ export interface CustoInput {
   participaFluxoCaixa: boolean;
   /**
    * Escopo opcional por tipologia (achado F11, docs/DECISOES.md — "estrutura
-   * de comissao"): so relevante para tipoIncidencia="pct_vgv_vendido_no_mes"
-   * — quando preenchido, o custo so incide sobre vendas daquela tipologia,
-   * em vez de todas as vendas do cenario.
+   * de comissao"): relevante para tipoIncidencia="pct_vgv_vendido_no_mes" ou
+   * "pct_recebido_no_mes" (achado F25) — quando preenchido, o custo so
+   * incide sobre vendas daquela tipologia, em vez de todas as vendas do
+   * cenario.
    */
   tipologiaId?: string;
   /**

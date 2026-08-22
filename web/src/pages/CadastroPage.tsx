@@ -1380,9 +1380,10 @@ function CustosSecao({
   const categoriaSelecionada = categoriasDisponiveis.find((c) => c.id === categoriaId);
   const incidenciaPorValor = categoriaSelecionada?.tipoIncidencia === "fixo" || categoriaSelecionada?.tipoIncidencia === "pct_execucao";
   // Escopo por tipologia (achado F11, docs/DECISOES.md — "estrutura de
-  // comissao") so faz sentido para pct_vgv_vendido_no_mes: permite um
-  // percentual de comissao diferente por tipologia (ex.: loja x apartamento).
-  const suportaTipologia = categoriaSelecionada?.tipoIncidencia === "pct_vgv_vendido_no_mes";
+  // comissao") so faz sentido para pct_vgv_vendido_no_mes ou
+  // pct_recebido_no_mes (achado F25): permite um percentual de comissao
+  // diferente por tipologia (ex.: loja x apartamento).
+  const suportaTipologia = categoriaSelecionada?.tipoIncidencia === "pct_vgv_vendido_no_mes" || categoriaSelecionada?.tipoIncidencia === "pct_recebido_no_mes";
 
   async function submeter(e: React.FormEvent) {
     e.preventDefault();
@@ -2427,6 +2428,7 @@ function GeracaoPorAndarForm({
 const ROTULO_INCIDENCIA: Record<TipoIncidenciaCusto, string> = {
   fixo: "Valor fixo",
   pct_vgv_vendido_no_mes: "% do vendido no mês",
+  pct_recebido_no_mes: "% do recebido, na curva de recebimento",
   pct_recebido_mes_anterior: "% do recebido no mês anterior",
   pct_execucao: "% da curva de execução (cronograma)",
 };

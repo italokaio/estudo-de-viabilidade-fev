@@ -64,6 +64,7 @@ import { prisma } from "../../src/db/client.js";
 import { gerarVendasDePremissaVelocidade } from "../../src/db/gerarVendas.js";
 import { calcularSensibilidadeCenario, rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
 import type { EixoSensibilidade } from "../../src/core/motorSensibilidade.js";
+import type { TipoIncidenciaCusto } from "../../src/core/types.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -895,7 +896,7 @@ export async function buildApp() {
     "/api/empreendimentos/:id/categorias-custo",
     async (req, reply) => {
       const { nome, tipoIncidencia } = req.body ?? {};
-      const tiposValidos = ["fixo", "pct_vgv_vendido_no_mes", "pct_recebido_mes_anterior", "pct_execucao"];
+      const tiposValidos = ["fixo", "pct_vgv_vendido_no_mes", "pct_recebido_mes_anterior", "pct_execucao", "pct_recebido_no_mes"];
       if (!nome || !nome.trim()) {
         reply.code(400);
         return { erro: "Nome da categoria de custo é obrigatório" };
@@ -913,7 +914,7 @@ export async function buildApp() {
       const categoria = await criarCategoriaCusto({
         empreendimentoId: req.params.id,
         nome: nome.trim(),
-        tipoIncidencia: tipoIncidencia as "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao",
+        tipoIncidencia: tipoIncidencia as TipoIncidenciaCusto,
       });
       reply.code(201);
       return categoria;
@@ -924,7 +925,7 @@ export async function buildApp() {
     "/api/categorias-custo/:id",
     async (req, reply) => {
       const { nome, tipoIncidencia } = req.body ?? {};
-      const tiposValidos = ["fixo", "pct_vgv_vendido_no_mes", "pct_recebido_mes_anterior", "pct_execucao"];
+      const tiposValidos = ["fixo", "pct_vgv_vendido_no_mes", "pct_recebido_mes_anterior", "pct_execucao", "pct_recebido_no_mes"];
       if (nome !== undefined && !nome.trim()) {
         reply.code(400);
         return { erro: "Nome da categoria de custo não pode ficar vazio" };
@@ -941,7 +942,7 @@ export async function buildApp() {
       if (!(await garantirAcesso(req, reply, categoria.empreendimentoId))) return;
       const resultado = await atualizarCategoriaCusto(req.params.id, {
         nome: nome?.trim(),
-        tipoIncidencia: tipoIncidencia as "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao" | undefined,
+        tipoIncidencia: tipoIncidencia as TipoIncidenciaCusto | undefined,
       });
       if ("erro" in resultado) {
         reply.code(400);
@@ -1264,12 +1265,14 @@ export async function buildApp() {
       return { erro: "Mês de competência é obrigatório para custo fixo" };
     }
     // Escopo por tipologia (achado F11, docs/DECISOES.md — "estrutura de
-    // comissao") so faz sentido para pct_vgv_vendido_no_mes -- nas outras
-    // incidencias (fixo, pct_execucao, pct_recebido_mes_anterior) nao ha
-    // como um valor/percentual "incidir sobre uma tipologia".
-    if (tipologiaId && categoria.tipoIncidencia !== "pct_vgv_vendido_no_mes") {
+    // comissao") so faz sentido para pct_vgv_vendido_no_mes ou
+    // pct_recebido_no_mes (achado F25) -- nas outras incidencias (fixo,
+    // pct_execucao, pct_recebido_mes_anterior) nao ha como um
+    // valor/percentual "incidir sobre uma tipologia".
+    const suportaTipologia = categoria.tipoIncidencia === "pct_vgv_vendido_no_mes" || categoria.tipoIncidencia === "pct_recebido_no_mes";
+    if (tipologiaId && !suportaTipologia) {
       reply.code(400);
-      return { erro: "Escopo por tipologia só é aplicável a custos de incidência sobre VGV vendido" };
+      return { erro: "Escopo por tipologia só é aplicável a custos de incidência sobre valor vendido ou recebido" };
     }
     if (tipologiaId) {
       const tipologia = await prisma.tipologia.findUnique({ where: { id: tipologiaId } });
