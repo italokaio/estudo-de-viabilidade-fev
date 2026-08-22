@@ -6,6 +6,7 @@ import { ComparacaoVersoesPanel } from "../components/ComparacaoVersoesPanel.js"
 import { FinanciamentoFluxoPanel } from "../components/FinanciamentoFluxoPanel.js";
 import { FluxoChart } from "../components/FluxoChart.js";
 import { FluxoTable } from "../components/FluxoTable.js";
+import { ImportarExtratoPanel } from "../components/ImportarExtratoPanel.js";
 import { KpiCard } from "../components/KpiCard.js";
 import { RealizadoPanel } from "../components/RealizadoPanel.js";
 import { SensibilidadePanel } from "../components/SensibilidadePanel.js";
@@ -18,6 +19,7 @@ export function FluxoCaixaPage() {
   const [dados, setDados] = useState<FluxoCaixaResposta | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
+  const [versaoFluxo, setVersaoFluxo] = useState(0);
 
   useEffect(() => {
     fetchEmpreendimentos()
@@ -35,6 +37,7 @@ export function FluxoCaixaPage() {
 
   function recarregarFluxo() {
     if (!cenarioId) return;
+    setVersaoFluxo((v) => v + 1);
     fetchFluxoCaixa(cenarioId)
       .then((d) => {
         setDados(d);
@@ -103,7 +106,8 @@ export function FluxoCaixaPage() {
             </div>
           </div>
 
-          {cenarioId && <RealizadoPanel cenarioId={cenarioId} onAtualizado={recarregarFluxo} />}
+          {cenarioId && <RealizadoPanel cenarioId={cenarioId} onAtualizado={recarregarFluxo} versaoAtualizacao={versaoFluxo} />}
+          {cenarioId && <ImportarExtratoPanel cenarioId={cenarioId} onAtualizado={recarregarFluxo} />}
           <FinanciamentoFluxoPanel financiamento={dados.financiamento} />
           {cenarioId && <ComparacaoVersoesPanel cenarioId={cenarioId} />}
           {cenarioId && <SensibilidadePanel cenarioId={cenarioId} />}

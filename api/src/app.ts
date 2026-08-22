@@ -63,8 +63,10 @@ import {
   vincularUsuarioEmpreendimento,
 } from "../../src/db/auth.js";
 import { prisma } from "../../src/db/client.js";
+import { confirmarConciliacao, montarCandidatosConciliacao, type ConfirmacaoConciliacao } from "../../src/db/conciliacao.js";
 import { gerarVendasDePremissaVelocidade } from "../../src/db/gerarVendas.js";
 import { calcularSensibilidadeCenario, rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
+import { parseExtratoCSV, sugerirConciliacao } from "../../src/core/conciliacaoExtrato.js";
 import type { EixoSensibilidade } from "../../src/core/motorSensibilidade.js";
 import type { TipoIncidenciaCusto } from "../../src/core/types.js";
 
@@ -1164,6 +1166,7 @@ export async function buildApp() {
       tipo: cenario.tipo,
       horizonteProjecaoMeses: cenario.horizonteProjecaoMeses,
       limiteNecessidadeMaximaCapital: cenario.limiteNecessidadeMaximaCapital,
+      dataMesUm: cenario.dataMesUm ? cenario.dataMesUm.toISOString().slice(0, 10) : null,
       empreendimento: { id: cenario.empreendimento.id, nome: cenario.empreendimento.nome },
       tipologiasDisponiveis: cenario.empreendimento.tipologias,
       categoriasCustoDisponiveis: cenario.empreendimento.categoriasCusto,
@@ -1204,27 +1207,89 @@ export async function buildApp() {
     };
   });
 
-  app.patch<{ Params: { id: string }; Body: { nome?: string; horizonteProjecaoMeses?: number; limiteNecessidadeMaximaCapital?: string | null } }>(
-    "/api/cenarios/:id",
+  app.patch<{
+    Params: { id: string };
+    Body: { nome?: string; horizonteProjecaoMeses?: number; limiteNecessidadeMaximaCapital?: string | null; dataMesUm?: string | null };
+  }>("/api/cenarios/:id", async (req, reply) => {
+    const { nome, horizonteProjecaoMeses, limiteNecessidadeMaximaCapital, dataMesUm } = req.body ?? {};
+    if (nome !== undefined && !nome.trim()) {
+      reply.code(400);
+      return { erro: "Nome do cenário não pode ficar vazio" };
+    }
+    if (horizonteProjecaoMeses !== undefined && (horizonteProjecaoMeses < 1 || !Number.isInteger(horizonteProjecaoMeses))) {
+      reply.code(400);
+      return { erro: "Horizonte de projeção deve ser um número inteiro de meses maior que zero" };
+    }
+    // Achado F15 (docs/DECISOES.md — "alertas de risco configuraveis"):
+    // null explicito volta a usar o padrao de 30% do motor; string vazia
+    // e tratada como o mesmo "voltar ao padrao", nao como erro.
+    if (limiteNecessidadeMaximaCapital !== undefined && limiteNecessidadeMaximaCapital !== null && limiteNecessidadeMaximaCapital.trim() !== "") {
+      const valor = Number(limiteNecessidadeMaximaCapital);
+      if (Number.isNaN(valor) || valor < 0) {
+        reply.code(400);
+        return { erro: "Limite de risco deve ser um percentual válido, maior ou igual a zero" };
+      }
+    }
+    // Ancora de calendario (achado F27, docs/DECISOES.md — "importacao em
+    // lote de extrato bancario"): null explicito remove a ancora.
+    if (dataMesUm !== undefined && dataMesUm !== null && Number.isNaN(Date.parse(dataMesUm))) {
+      reply.code(400);
+      return { erro: "dataMesUm deve ser uma data válida (AAAA-MM-DD)" };
+    }
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+    return atualizarCenario(req.params.id, {
+      nome: nome?.trim(),
+      horizonteProjecaoMeses,
+      limiteNecessidadeMaximaCapital: limiteNecessidadeMaximaCapital === undefined ? undefined : limiteNecessidadeMaximaCapital?.trim() || null,
+      dataMesUm: dataMesUm === undefined ? undefined : dataMesUm === null ? null : new Date(dataMesUm),
+    });
+  });
+
+  // Importacao em lote de extrato bancario (achado F27, docs/DECISOES.md):
+  // "sugerir e confirmar", nunca "marcar automatico" -- esta rota so le e
+  // devolve sugestoes, nunca escreve nada. CSV enviado como texto no corpo
+  // (nao multipart) -- o navegador ja le o arquivo local via FileReader.
+  app.post<{ Params: { id: string }; Body: { csv?: string } }>("/api/cenarios/:id/extrato/sugestoes", async (req, reply) => {
+    const { csv } = req.body ?? {};
+    if (!csv || !csv.trim()) {
+      reply.code(400);
+      return { erro: "Conteúdo do CSV é obrigatório" };
+    }
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+    let linhas;
+    try {
+      linhas = parseExtratoCSV(csv);
+    } catch (e: any) {
+      reply.code(400);
+      return { erro: String(e.message ?? e) };
+    }
+    const candidatos = await montarCandidatosConciliacao(cenario.id);
+    const sugestoes = sugerirConciliacao(linhas, candidatos, cenario.dataMesUm ?? undefined);
+    return {
+      sugestoes: sugestoes.map((s) => ({
+        linha: { data: s.linha.data, descricao: s.linha.descricao, valor: s.linha.valor.toFixed(2) },
+        candidatos: s.candidatos.map((c) => ({ tipo: c.tipo, id: c.id, descricao: c.descricao, valorPrevisto: c.valorPrevisto.toFixed(2), mes: c.mes })),
+      })),
+    };
+  });
+
+  app.post<{ Params: { id: string }; Body: { confirmacoes?: ConfirmacaoConciliacao[] } }>(
+    "/api/cenarios/:id/extrato/confirmar",
     async (req, reply) => {
-      const { nome, horizonteProjecaoMeses, limiteNecessidadeMaximaCapital } = req.body ?? {};
-      if (nome !== undefined && !nome.trim()) {
+      const { confirmacoes } = req.body ?? {};
+      if (!confirmacoes || confirmacoes.length === 0) {
         reply.code(400);
-        return { erro: "Nome do cenário não pode ficar vazio" };
-      }
-      if (horizonteProjecaoMeses !== undefined && (horizonteProjecaoMeses < 1 || !Number.isInteger(horizonteProjecaoMeses))) {
-        reply.code(400);
-        return { erro: "Horizonte de projeção deve ser um número inteiro de meses maior que zero" };
-      }
-      // Achado F15 (docs/DECISOES.md — "alertas de risco configuraveis"):
-      // null explicito volta a usar o padrao de 30% do motor; string vazia
-      // e tratada como o mesmo "voltar ao padrao", nao como erro.
-      if (limiteNecessidadeMaximaCapital !== undefined && limiteNecessidadeMaximaCapital !== null && limiteNecessidadeMaximaCapital.trim() !== "") {
-        const valor = Number(limiteNecessidadeMaximaCapital);
-        if (Number.isNaN(valor) || valor < 0) {
-          reply.code(400);
-          return { erro: "Limite de risco deve ser um percentual válido, maior ou igual a zero" };
-        }
+        return { erro: "Nenhuma confirmação enviada" };
       }
       const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
       if (!cenario) {
@@ -1232,11 +1297,12 @@ export async function buildApp() {
         return { erro: "Cenário não encontrado" };
       }
       if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
-      return atualizarCenario(req.params.id, {
-        nome: nome?.trim(),
-        horizonteProjecaoMeses,
-        limiteNecessidadeMaximaCapital: limiteNecessidadeMaximaCapital === undefined ? undefined : limiteNecessidadeMaximaCapital?.trim() || null,
-      });
+      const resultado = await confirmarConciliacao(cenario.id, confirmacoes);
+      if ("erro" in resultado) {
+        reply.code(400);
+        return resultado;
+      }
+      return resultado;
     },
   );
 

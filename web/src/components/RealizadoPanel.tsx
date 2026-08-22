@@ -17,7 +17,16 @@ import { formatBRL } from "../format.js";
 import { Button } from "./Button.js";
 import { TextField } from "./TextField.js";
 
-export function RealizadoPanel({ cenarioId, onAtualizado }: { cenarioId: string; onAtualizado: () => void }) {
+export function RealizadoPanel({
+  cenarioId,
+  onAtualizado,
+  versaoAtualizacao,
+}: {
+  cenarioId: string;
+  onAtualizado: () => void;
+  /** Incrementado por FluxoCaixaPage a cada recarregarFluxo — força este painel a rebuscar mesmo quando quem confirmou foi um componente irmão (ex.: ImportarExtratoPanel). */
+  versaoAtualizacao?: number;
+}) {
   const [recebimentos, setRecebimentos] = useState<RecebimentoResumo[]>([]);
   const [custos, setCustos] = useState<CustoResumo[]>([]);
   const [desembolsos, setDesembolsos] = useState<DesembolsoCustoResumo[]>([]);
@@ -37,7 +46,7 @@ export function RealizadoPanel({ cenarioId, onAtualizado }: { cenarioId: string;
 
   useEffect(() => {
     recarregar();
-  }, [cenarioId]);
+  }, [cenarioId, versaoAtualizacao]);
 
   function aoRegistrar() {
     recarregar();

@@ -228,6 +228,7 @@ export interface CenarioDetalhe {
   tipo: string;
   horizonteProjecaoMeses: number;
   limiteNecessidadeMaximaCapital: string | null;
+  dataMesUm: string | null;
   empreendimento: { id: string; nome: string };
   tipologiasDisponiveis: { id: string; nome: string }[];
   categoriasCustoDisponiveis: CategoriaCustoResumo[];
@@ -407,6 +408,30 @@ export function estornarDesembolsoCustoRealizado(id: string) {
   return patchJson<DesembolsoCustoResumo>(`/api/desembolsos-custos/${id}`, { estornar: true });
 }
 
+/** Importação em lote de extrato bancário (achado F27, docs/DECISOES.md) — "sugerir e confirmar", nunca marcar sozinho. */
+export type TipoCandidatoConciliacao = "recebimento" | "custo_fixo" | "desembolso_custo";
+
+export interface CandidatoConciliacaoResumo {
+  tipo: TipoCandidatoConciliacao;
+  id: string;
+  descricao: string;
+  valorPrevisto: string;
+  mes: number;
+}
+
+export interface SugestaoLinhaExtrato {
+  linha: { data: string | null; descricao: string; valor: string };
+  candidatos: CandidatoConciliacaoResumo[];
+}
+
+export function sugerirConciliacaoExtrato(cenarioId: string, csv: string) {
+  return postJson<{ sugestoes: SugestaoLinhaExtrato[] }>(`/api/cenarios/${cenarioId}/extrato/sugestoes`, { csv });
+}
+
+export function confirmarConciliacaoExtrato(cenarioId: string, confirmacoes: { tipo: TipoCandidatoConciliacao; id: string; valorRealizado: string }[]) {
+  return postJson<{ confirmados: number }>(`/api/cenarios/${cenarioId}/extrato/confirmar`, { confirmacoes });
+}
+
 export function atualizarEmpreendimento(id: string, input: { nome?: string; incorporador?: string | null; endereco?: string | null }) {
   return patchJson<{ id: string; nome: string }>(`/api/empreendimentos/${id}`, input);
 }
@@ -452,7 +477,10 @@ export function excluirTipologia(id: string) {
   return del(`/api/tipologias/${id}`);
 }
 
-export function atualizarCenario(id: string, input: { nome?: string; horizonteProjecaoMeses?: number; limiteNecessidadeMaximaCapital?: string | null }) {
+export function atualizarCenario(
+  id: string,
+  input: { nome?: string; horizonteProjecaoMeses?: number; limiteNecessidadeMaximaCapital?: string | null; dataMesUm?: string | null },
+) {
   return patchJson<CenarioResumo>(`/api/cenarios/${id}`, input);
 }
 

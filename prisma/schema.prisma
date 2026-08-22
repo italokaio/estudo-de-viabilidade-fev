@@ -129,6 +129,13 @@ model Cenario {
   // motor (LIMITE_NECESSIDADE_MAXIMA_SOBRE_VGV_PADRAO); preenchido, o
   // alerta "necessidade_maxima_alta" passa a disparar acima deste valor.
   limiteNecessidadeMaximaCapital String? // decimal-as-string, 0..1
+  // Ancora de calendario para a importacao de extrato bancario (achado
+  // F27, docs/DECISOES.md): o "mes" em todo o sistema sempre foi um
+  // inteiro relativo (mes 1, mes 2...), nunca uma data real -- nulo =
+  // cenario sem ancora, a conciliacao por extrato so casa por valor,
+  // sem sugerir por proximidade de data. Preenchido, `dataMesUm`
+  // e a data de calendario correspondente ao mes 1 deste cenario.
+  dataMesUm              DateTime?
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 

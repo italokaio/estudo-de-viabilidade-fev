@@ -87,6 +87,8 @@ export interface AtualizarCenarioInput {
   horizonteProjecaoMeses?: number;
   /** Limite de risco configurável (achado F15) — null explícito volta a usar o padrão de 30% do motor. */
   limiteNecessidadeMaximaCapital?: string | null;
+  /** Âncora de calendário para o mês 1 (achado F27) — null explícito remove a âncora. */
+  dataMesUm?: Date | null;
 }
 
 export async function atualizarCenario(id: string, input: AtualizarCenarioInput) {
