@@ -637,9 +637,13 @@ export function redefinirSenhaUsuario(id: string, senha: string) {
   return patchJson<{ ok: true }>(`/api/usuarios/${id}/senha`, { senha });
 }
 
+/** Papel de acesso do vínculo (achado F23, docs/DECISOES.md) — "edicao" é o padrão, mesmo acesso total de antes dessa fatia. */
+export type PapelVinculo = "edicao" | "leitura";
+
 export interface EmpreendimentoVinculado {
   id: string;
   nome: string;
+  papel: PapelVinculo;
 }
 
 export async function fetchEmpreendimentosDoUsuario(usuarioId: string): Promise<EmpreendimentoVinculado[]> {
@@ -648,9 +652,9 @@ export async function fetchEmpreendimentosDoUsuario(usuarioId: string): Promise<
   return res.json();
 }
 
-/** Vínculo em lote (achado F22, docs/DECISOES.md) — uma ou várias de uma vez. */
-export function vincularEmpreendimentos(usuarioId: string, empreendimentoIds: string[]) {
-  return postJson<EmpreendimentoVinculado[]>(`/api/usuarios/${usuarioId}/empreendimentos`, { empreendimentoIds });
+/** Vínculo em lote (achado F22) — uma ou várias de uma vez, todas com o mesmo papel (achado F23; "edicao" quando omitido). Reenviar um id já vinculado troca o papel dele. */
+export function vincularEmpreendimentos(usuarioId: string, empreendimentoIds: string[], papel?: PapelVinculo) {
+  return postJson<EmpreendimentoVinculado[]>(`/api/usuarios/${usuarioId}/empreendimentos`, { empreendimentoIds, papel });
 }
 
 export function desvincularEmpreendimento(usuarioId: string, empreendimentoId: string) {

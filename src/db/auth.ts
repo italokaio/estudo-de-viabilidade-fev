@@ -88,18 +88,25 @@ export async function encerrarSessao(token: string) {
   await prisma.sessao.deleteMany({ where: { token } });
 }
 
+export type PapelVinculo = "edicao" | "leitura";
+export type NivelAcesso = "admin" | PapelVinculo | null;
+
 /**
  * Permissão por empreendimento (achado F5, docs/DECISOES.md) — só tem
- * efeito para papel="usuario"; admin sempre devolve true, com ou sem
- * vínculo. Usada em toda rota que resolve um empreendimentoId a partir
- * de um id de entidade filha (ver api/src/app.ts).
+ * efeito para papel="usuario"; admin sempre tem acesso total, com ou sem
+ * vínculo. Estendido (achado F23 — "permissão por empreendimento com papel
+ * próprio") a devolver o nível de acesso, não só se existe ou não: "admin"
+ * (bypass total), "edicao"/"leitura" (o que o vínculo registra), ou null
+ * (sem vínculo — 404, mesmo tratamento de antes desta fatia). Usada em toda
+ * rota que resolve um empreendimentoId a partir de um id de entidade filha
+ * (ver garantirAcesso, api/src/app.ts).
  */
-export async function temAcessoEmpreendimento(usuario: { id: string; papel: string }, empreendimentoId: string): Promise<boolean> {
-  if (usuario.papel === "admin") return true;
+export async function nivelAcessoEmpreendimento(usuario: { id: string; papel: string }, empreendimentoId: string): Promise<NivelAcesso> {
+  if (usuario.papel === "admin") return "admin";
   const vinculo = await prisma.empreendimentoUsuario.findUnique({
     where: { usuarioId_empreendimentoId: { usuarioId: usuario.id, empreendimentoId } },
   });
-  return vinculo !== null;
+  return vinculo ? (vinculo.papel as PapelVinculo) : null;
 }
 
 /** IDs dos empreendimentos visíveis para o usuário — "todos" para admin (evita listar e comparar contra uma lista gigante). */
@@ -109,11 +116,12 @@ export async function empreendimentosPermitidos(usuario: { id: string; papel: st
   return vinculos.map((v) => v.empreendimentoId);
 }
 
-export async function vincularUsuarioEmpreendimento(usuarioId: string, empreendimentoId: string) {
+/** Cria o vínculo ou, se já existir, atualiza o papel (upsert — mesmo padrão de reenviar um índice de correção substitui o percentual). */
+export async function vincularUsuarioEmpreendimento(usuarioId: string, empreendimentoId: string, papel: PapelVinculo = "edicao") {
   return prisma.empreendimentoUsuario.upsert({
     where: { usuarioId_empreendimentoId: { usuarioId, empreendimentoId } },
-    update: {},
-    create: { usuarioId, empreendimentoId },
+    update: { papel },
+    create: { usuarioId, empreendimentoId, papel },
   });
 }
 
@@ -121,12 +129,12 @@ export async function desvincularUsuarioEmpreendimento(usuarioId: string, empree
   await prisma.empreendimentoUsuario.deleteMany({ where: { usuarioId, empreendimentoId } });
 }
 
-/** Empreendimentos vinculados a um usuário — para a tela de admin gerenciar acesso. */
+/** Empreendimentos vinculados a um usuário, com o papel de cada vínculo — para a tela de admin gerenciar acesso. */
 export async function listarEmpreendimentosDoUsuario(usuarioId: string) {
   const vinculos = await prisma.empreendimentoUsuario.findMany({
     where: { usuarioId },
     include: { empreendimento: { select: { id: true, nome: true } } },
     orderBy: { createdAt: "asc" },
   });
-  return vinculos.map((v) => v.empreendimento);
+  return vinculos.map((v) => ({ ...v.empreendimento, papel: v.papel as PapelVinculo }));
 }

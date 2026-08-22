@@ -257,4 +257,125 @@ describe("API — permissão por empreendimento", () => {
       expect(lista.json()).toHaveLength(0);
     });
   });
+
+  /**
+   * Papel de acesso por vínculo (achado F23, docs/DECISOES.md — "permissão
+   * por empreendimento com papel próprio"): dimensao independente do
+   * Usuario.papel global -- um vinculo "leitura" bloqueia qualquer metodo
+   * != GET no empreendimento, mesmo para um usuario que teria acesso total
+   * em outro empreendimento vinculado como "edicao".
+   */
+  describe("papel de acesso por vínculo (achado F23)", () => {
+    it("vínculo sem papel informado continua 'edicao' — acesso total, mesmo comportamento de antes desta fatia", async () => {
+      const cookieAdmin = await criarAdminLogado();
+      const criado = await app.inject({ method: "POST", url: "/api/empreendimentos", headers: { cookie: cookieAdmin }, payload: { nome: "Vila Sol" } });
+      const empreendimentoId = criado.json().id as string;
+      const usuarioComum = await criarUsuario({ email: "edicao@local.test", nome: "Usuário", senha: "senha123", papel: "usuario" });
+      await app.inject({
+        method: "POST",
+        url: `/api/usuarios/${usuarioComum.id}/empreendimentos`,
+        headers: { cookie: cookieAdmin },
+        payload: { empreendimentoId },
+      });
+
+      const cookieComum = await login("edicao@local.test", "senha123");
+      const criarTipologia = await app.inject({
+        method: "POST",
+        url: `/api/empreendimentos/${empreendimentoId}/tipologias`,
+        headers: { cookie: cookieComum },
+        payload: { nome: "Studio" },
+      });
+      expect(criarTipologia.statusCode).toBe(201);
+    });
+
+    it("vínculo 'leitura' permite GET mas bloqueia POST/PATCH/DELETE com 403", async () => {
+      const cookieAdmin = await criarAdminLogado();
+      const criado = await app.inject({ method: "POST", url: "/api/empreendimentos", headers: { cookie: cookieAdmin }, payload: { nome: "Vila Sol" } });
+      const empreendimentoId = criado.json().id as string;
+      const usuarioComum = await criarUsuario({ email: "leitura@local.test", nome: "Usuário", senha: "senha123", papel: "usuario" });
+      await app.inject({
+        method: "POST",
+        url: `/api/usuarios/${usuarioComum.id}/empreendimentos`,
+        headers: { cookie: cookieAdmin },
+        payload: { empreendimentoId, papel: "leitura" },
+      });
+
+      const cookieComum = await login("leitura@local.test", "senha123");
+      const leitura = await app.inject({ method: "GET", url: `/api/empreendimentos/${empreendimentoId}`, headers: { cookie: cookieComum } });
+      expect(leitura.statusCode).toBe(200);
+
+      const escrita = await app.inject({
+        method: "POST",
+        url: `/api/empreendimentos/${empreendimentoId}/tipologias`,
+        headers: { cookie: cookieComum },
+        payload: { nome: "Studio" },
+      });
+      expect(escrita.statusCode).toBe(403);
+    });
+
+    it("reenviar o mesmo empreendimentoId com papel diferente troca o papel do vínculo existente (upsert)", async () => {
+      const cookieAdmin = await criarAdminLogado();
+      const criado = await app.inject({ method: "POST", url: "/api/empreendimentos", headers: { cookie: cookieAdmin }, payload: { nome: "Vila Sol" } });
+      const empreendimentoId = criado.json().id as string;
+      const usuarioComum = await criarUsuario({ email: "troca@local.test", nome: "Usuário", senha: "senha123", papel: "usuario" });
+      await app.inject({
+        method: "POST",
+        url: `/api/usuarios/${usuarioComum.id}/empreendimentos`,
+        headers: { cookie: cookieAdmin },
+        payload: { empreendimentoId, papel: "leitura" },
+      });
+
+      const lista1 = await app.inject({ method: "GET", url: `/api/usuarios/${usuarioComum.id}/empreendimentos`, headers: { cookie: cookieAdmin } });
+      expect(lista1.json()).toHaveLength(1);
+      expect(lista1.json()[0].papel).toBe("leitura");
+
+      // reenvia o mesmo id com papel "edicao" -- upsert atualiza, nao duplica.
+      const trocar = await app.inject({
+        method: "POST",
+        url: `/api/usuarios/${usuarioComum.id}/empreendimentos`,
+        headers: { cookie: cookieAdmin },
+        payload: { empreendimentoId, papel: "edicao" },
+      });
+      expect(trocar.statusCode).toBe(201);
+      expect(trocar.json()).toHaveLength(1);
+      expect(trocar.json()[0].papel).toBe("edicao");
+
+      const cookieComum = await login("troca@local.test", "senha123");
+      const escrita = await app.inject({
+        method: "POST",
+        url: `/api/empreendimentos/${empreendimentoId}/tipologias`,
+        headers: { cookie: cookieComum },
+        payload: { nome: "Studio" },
+      });
+      expect(escrita.statusCode).toBe(201);
+    });
+
+    it("rejeita papel inválido", async () => {
+      const cookieAdmin = await criarAdminLogado();
+      const criado = await app.inject({ method: "POST", url: "/api/empreendimentos", headers: { cookie: cookieAdmin }, payload: { nome: "Vila Sol" } });
+      const usuarioComum = await criarUsuario({ email: "invalido@local.test", nome: "Usuário", senha: "senha123", papel: "usuario" });
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/usuarios/${usuarioComum.id}/empreendimentos`,
+        headers: { cookie: cookieAdmin },
+        payload: { empreendimentoId: criado.json().id, papel: "gerente" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("admin tem acesso total independente de qualquer vínculo 'leitura' registrado para outro usuário", async () => {
+      const cookieAdmin = await criarAdminLogado();
+      const criado = await app.inject({ method: "POST", url: "/api/empreendimentos", headers: { cookie: cookieAdmin }, payload: { nome: "Vila Sol" } });
+      const empreendimentoId = criado.json().id as string;
+
+      const criarTipologia = await app.inject({
+        method: "POST",
+        url: `/api/empreendimentos/${empreendimentoId}/tipologias`,
+        headers: { cookie: cookieAdmin },
+        payload: { nome: "Studio" },
+      });
+      expect(criarTipologia.statusCode).toBe(201);
+    });
+  });
 });

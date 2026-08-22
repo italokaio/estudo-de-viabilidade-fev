@@ -63,10 +63,21 @@ model Sessao {
  * POST /api/empreendimentos), senao a pessoa criava algo que nao conseguia
  * mais ver.
  */
+/**
+ * Vinculo de acesso usuario x empreendimento (achado F5). Estendido (achado
+ * F23, docs/DECISOES.md — "permissao por empreendimento com papel proprio")
+ * com `papel`: "edicao" (padrao, comportamento identico a antes desta
+ * fatia — acesso total dentro do empreendimento) ou "leitura" (bloqueia
+ * qualquer metodo != GET nas rotas escopadas a este empreendimento, ver
+ * garantirAcesso em api/src/app.ts). Dimensao independente do
+ * Usuario.papel global ("admin"/"usuario") -- um "usuario" pode ter edicao
+ * num empreendimento e leitura em outro.
+ */
 model EmpreendimentoUsuario {
   id               String   @id @default(cuid())
   empreendimentoId String
   usuarioId        String
+  papel            String   @default("edicao") // edicao | leitura
   createdAt        DateTime @default(now())
 
   empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])

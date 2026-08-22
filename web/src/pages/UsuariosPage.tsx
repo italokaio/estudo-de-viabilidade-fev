@@ -11,6 +11,7 @@ import {
   type EmpreendimentoResumo,
   type EmpreendimentoVinculado,
   type Papel,
+  type PapelVinculo,
   type Usuario,
   type UsuarioResumo,
 } from "../api/client.js";
@@ -229,8 +230,10 @@ function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErr
   const [vinculados, setVinculados] = useState<EmpreendimentoVinculado[]>([]);
   const [todos, setTodos] = useState<EmpreendimentoResumo[]>([]);
   const [novosIds, setNovosIds] = useState<string[]>([]);
+  const [novoPapel, setNovoPapel] = useState<PapelVinculo>("edicao");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [trocandoPapel, setTrocandoPapel] = useState<string | null>(null);
 
   function recarregar() {
     Promise.all([fetchEmpreendimentosDoUsuario(usuarioId), fetchEmpreendimentos()])
@@ -256,7 +259,7 @@ function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErr
     if (novosIds.length === 0) return;
     setSalvando(true);
     try {
-      await vincularEmpreendimentos(usuarioId, novosIds);
+      await vincularEmpreendimentos(usuarioId, novosIds, novoPapel);
       setNovosIds([]);
       recarregar();
     } catch (err: any) {
@@ -272,6 +275,22 @@ function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErr
       recarregar();
     } catch (err: any) {
       onErro(String(err.message ?? err));
+    }
+  }
+
+  // Papel por vínculo (achado F23, docs/DECISOES.md — "permissão por
+  // empreendimento com papel próprio"): alternar reenvia o mesmo id com o
+  // papel oposto -- vincularUsuarioEmpreendimento e um upsert, entao isso
+  // atualiza o vinculo existente em vez de criar um segundo.
+  async function alternarPapel(v: EmpreendimentoVinculado) {
+    setTrocandoPapel(v.id);
+    try {
+      await vincularEmpreendimentos(usuarioId, [v.id], v.papel === "edicao" ? "leitura" : "edicao");
+      recarregar();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setTrocandoPapel(null);
     }
   }
 
@@ -300,6 +319,26 @@ function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErr
               }}
             >
               {v.nome}
+              <button
+                type="button"
+                onClick={() => alternarPapel(v)}
+                disabled={trocandoPapel === v.id}
+                title={v.papel === "edicao" ? "Edição — clique para tornar somente leitura" : "Leitura — clique para permitir edição"}
+                style={{
+                  border: "none",
+                  background: v.papel === "leitura" ? "var(--status-warning-soft-bg)" : "transparent",
+                  color: v.papel === "leitura" ? "var(--status-warning-text)" : "var(--ink-muted)",
+                  cursor: "pointer",
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: ".02em",
+                  borderRadius: 999,
+                  padding: "2px 6px",
+                }}
+              >
+                {v.papel === "edicao" ? "edição" : "leitura"}
+              </button>
               <button
                 type="button"
                 onClick={() => remover(v.id)}
@@ -331,6 +370,17 @@ function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErr
                   {e.nome}
                 </option>
               ))}
+            </select>
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 120 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Papel</span>
+            <select
+              value={novoPapel}
+              onChange={(e) => setNovoPapel(e.target.value as PapelVinculo)}
+              style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+            >
+              <option value="edicao">Edição</option>
+              <option value="leitura">Leitura</option>
             </select>
           </label>
           <Button type="submit" disabled={salvando || novosIds.length === 0} style={{ padding: "6px 10px", fontSize: 12 }}>

@@ -53,7 +53,7 @@ import {
   listarEmpreendimentosDoUsuario,
   listarUsuarios,
   redefinirSenha,
-  temAcessoEmpreendimento,
+  nivelAcessoEmpreendimento,
   validarSessao,
   vincularUsuarioEmpreendimento,
 } from "../../src/db/auth.js";
@@ -80,12 +80,29 @@ const DURACAO_COOKIE_SEGUNDOS = 60 * 60 * 24 * 7;
  * empreendimentoId null é usado para recursos globais (ex.: categoria de
  * custo reutilizável entre empreendimentos) — sempre acessíveis.
  */
+/**
+ * Estendido (achado F23, docs/DECISOES.md — "permissão por empreendimento
+ * com papel próprio") para tambem bloquear escrita quando o vinculo do
+ * usuario com este empreendimento e "leitura": qualquer metodo != GET
+ * recebe 403. Deliberadamente lido de req.method em vez de um parametro
+ * extra em cada uma das ~40 chamadas existentes -- Fastify ja garante que
+ * o metodo da rota bate com o verbo HTTP real, entao isto cobre toda rota
+ * escopada por empreendimento sem precisar tocar em nenhuma delas.
+ */
 async function garantirAcesso(req: FastifyRequest, reply: FastifyReply, empreendimentoId: string | null): Promise<boolean> {
   if (empreendimentoId === null) return true;
-  if (await temAcessoEmpreendimento(req.usuario!, empreendimentoId)) return true;
-  reply.code(404);
-  reply.send({ erro: "Empreendimento não encontrado" });
-  return false;
+  const nivel = await nivelAcessoEmpreendimento(req.usuario!, empreendimentoId);
+  if (nivel === null) {
+    reply.code(404);
+    reply.send({ erro: "Empreendimento não encontrado" });
+    return false;
+  }
+  if (nivel === "leitura" && req.method !== "GET") {
+    reply.code(403);
+    reply.send({ erro: "Seu acesso a este empreendimento é somente leitura — peça a um administrador para conceder edição" });
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -230,18 +247,26 @@ export async function buildApp() {
   // lote"): `empreendimentoIds` (plural) vincula varios de uma vez;
   // `empreendimentoId` (singular) continua funcionando, para nao quebrar
   // nenhum chamador existente -- e tratado como uma lista de um elemento.
-  app.post<{ Params: { id: string }; Body: { empreendimentoId?: string; empreendimentoIds?: string[] } }>(
+  // `papel` (achado F23 — "permissao por empreendimento com papel proprio")
+  // e aplicado a todos os ids desta chamada; omitido = "edicao" (mesmo
+  // acesso total de antes desta fatia). Reenviar um id ja vinculado
+  // atualiza o papel em vez de falhar (upsert, ver vincularUsuarioEmpreendimento).
+  app.post<{ Params: { id: string }; Body: { empreendimentoId?: string; empreendimentoIds?: string[]; papel?: string } }>(
     "/api/usuarios/:id/empreendimentos",
     async (req, reply) => {
       if (req.usuario!.papel !== "admin") {
         reply.code(403);
         return { erro: "Apenas administradores podem gerenciar vínculos de acesso" };
       }
-      const { empreendimentoId, empreendimentoIds } = req.body ?? {};
+      const { empreendimentoId, empreendimentoIds, papel } = req.body ?? {};
       const ids = empreendimentoIds && empreendimentoIds.length > 0 ? empreendimentoIds : empreendimentoId ? [empreendimentoId] : [];
       if (ids.length === 0) {
         reply.code(400);
         return { erro: "empreendimentoId ou empreendimentoIds é obrigatório" };
+      }
+      if (papel !== undefined && papel !== "edicao" && papel !== "leitura") {
+        reply.code(400);
+        return { erro: "papel deve ser 'edicao' ou 'leitura'" };
       }
       const usuario = await prisma.usuario.findUnique({ where: { id: req.params.id } });
       if (!usuario) {
@@ -256,7 +281,7 @@ export async function buildApp() {
         return { erro: `Empreendimento(s) não encontrado(s): ${idsInexistentes.join(", ")}` };
       }
       for (const id of ids) {
-        await vincularUsuarioEmpreendimento(req.params.id, id);
+        await vincularUsuarioEmpreendimento(req.params.id, id, (papel as "edicao" | "leitura") ?? "edicao");
       }
       reply.code(201);
       return listarEmpreendimentosDoUsuario(req.params.id);

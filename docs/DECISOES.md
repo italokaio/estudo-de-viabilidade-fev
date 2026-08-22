@@ -223,6 +223,16 @@
 
 **Status.** Aprovado e implementado (trigésima primeira fatia). Testado em `tests/integration/api.permissaoPorEmpreendimento.test.ts` (vínculo de vários de uma vez, `empreendimentoId` singular continua funcionando, 400 sem nenhum dos dois campos, 404 com id inválido na lista sem vincular nenhum dos válidos). Verificado num navegador real (claro e escuro): criou um usuário de teste, selecionou dois empreendimentos de uma vez no `select multiple` e confirmou os dois aparecendo como chips após uma única ação "Adicionar (2)".
 
+## F23 — Permissão por empreendimento com papel próprio: `req.method` como discriminador, sem tocar nas ~40 chamadas de `garantirAcesso` (achado da Fase 1)
+
+**Contexto.** `EmpreendimentoUsuario` (achado F5, controle de acesso por empreendimento) sempre foi um vínculo binário — o usuário tem acesso total ao empreendimento, ou não vê nada dele. Não havia como conceder acesso só de consulta a alguém (ex.: um investidor que acompanha os números sem poder editar cadastro).
+
+**Decisão.** `EmpreendimentoUsuario` ganhou `papel` (`"edicao"` por omissão — comportamento idêntico a antes desta fatia — ou `"leitura"`). A dimensão é independente do `Usuario.papel` global (`admin`/`usuario`): um mesmo usuário pode ter edição num empreendimento e leitura em outro. `garantirAcesso()` (`api/src/app.ts`), o único ponto que já gateava todas as ~40 rotas escopadas por empreendimento, passou a ler `req.method` do próprio Fastify — se o vínculo é `"leitura"` e o método não é `GET`, devolve 403. Deliberadamente **sem tocar em nenhuma das ~40 chamadas existentes**: como toda rota de leitura já era `GET` e toda rota de escrita já era `POST`/`PATCH`/`DELETE` (convenção REST já seguida à risca neste código, verificado antes de confiar nisso), o método HTTP por si só já é um discriminador correto e suficiente — nenhum parâmetro novo precisou ser passado em cada call site.
+
+**Decisão de escopo — sem granularidade por rota específica.** O papel é por vínculo (usuário × empreendimento inteiro), não por recurso dentro dele — não existe "leitura em Custos, edição em Vendas". Simplificação deliberada: a necessidade real levantada foi "alguém só acompanha", não controle de acesso por módulo.
+
+**Status.** Aprovado e implementado (trigésima segunda fatia). Testado em `tests/integration/api.permissaoPorEmpreendimento.test.ts` (vínculo sem papel continua "edicao", "leitura" permite GET e bloqueia POST/PATCH/DELETE com 403, reenviar o mesmo vínculo com papel diferente troca o papel — upsert, achado F22 —, validação de papel inválido, admin nunca é afetado). Verificado num navegador real (claro e escuro): vinculou um usuário de teste como "Leitura" pela tela, confirmou via chamadas diretas à API (sessão do próprio usuário) que GET devolve 200 e POST devolve 403 com a mensagem correta, alternou o papel para "Edição" clicando no badge do vínculo, e confirmou o badge atualizado nos dois temas.
+
 ## Execução dos testes de integração em sequência, não em paralelo
 
 **Problema encontrado durante a Fase 0 (não estava previsto na especificação).** O Vitest roda arquivos de teste em paralelo por padrão; como os três arquivos de teste de integração compartilham o mesmo arquivo SQLite, um arquivo apagava dados que outro estava inserindo no mesmo instante, causando erros de chave estrangeira e timeouts intermitentes.
