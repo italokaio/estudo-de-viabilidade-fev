@@ -26,7 +26,9 @@ import {
   criarUnidadesPorAndar,
   definirFinanciamento,
   definirPontoIndiceCorrecao,
-  definirTerreno,
+  atualizarTerreno,
+  criarTerreno,
+  excluirTerreno,
   desfazerDistrato,
   desfazerPermuta,
   duplicarCenario,
@@ -344,7 +346,7 @@ export async function buildApp() {
         },
         cenarios: { include: { derivadoDe: { select: { nome: true } } }, orderBy: { createdAt: "asc" } },
         categoriasCusto: { orderBy: { nome: "asc" } },
-        terreno: true,
+        terrenos: { orderBy: { createdAt: "asc" } },
       },
     });
     if (!empreendimento) {
@@ -356,15 +358,15 @@ export async function buildApp() {
       nome: empreendimento.nome,
       incorporador: empreendimento.incorporador,
       endereco: empreendimento.endereco,
-      terreno: empreendimento.terreno
-        ? {
-            areaValor: empreendimento.terreno.areaValor,
-            areaUnidade: empreendimento.terreno.areaUnidade,
-            areaStatusValidacao: empreendimento.terreno.areaStatusValidacao,
-            areaObservacao: empreendimento.terreno.areaObservacao,
-            formaAquisicao: empreendimento.terreno.formaAquisicao,
-          }
-        : null,
+      terrenos: empreendimento.terrenos.map((t) => ({
+        id: t.id,
+        numeroMatricula: t.numeroMatricula,
+        areaValor: t.areaValor,
+        areaUnidade: t.areaUnidade,
+        areaStatusValidacao: t.areaStatusValidacao,
+        areaObservacao: t.areaObservacao,
+        formaAquisicao: t.formaAquisicao,
+      })),
       cenarios: empreendimento.cenarios.map((c) => ({
         id: c.id,
         nome: c.nome,
@@ -396,26 +398,69 @@ export async function buildApp() {
     };
   });
 
+  // Multiplas matriculas/areas por empreendimento (achado F26,
+  // docs/DECISOES.md): ate essa fatia era um upsert 1:1 -- agora cada
+  // chamada cria uma matricula nova; editar/excluir uma matricula
+  // especifica usa o proprio id dela.
   app.post<{
     Params: { id: string };
     Body: {
-      areaValor?: string | null;
+      numeroMatricula?: string;
+      areaValor?: string;
       areaUnidade?: string;
       areaStatusValidacao?: "pendente" | "validado" | "conflitante";
-      areaObservacao?: string | null;
-      formaAquisicao?: "compra" | "permuta" | "misto" | null;
+      areaObservacao?: string;
+      formaAquisicao?: "compra" | "permuta" | "misto";
     };
-  }>("/api/empreendimentos/:id/terreno", async (req, reply) => {
+  }>("/api/empreendimentos/:id/terrenos", async (req, reply) => {
     if (!(await garantirAcesso(req, reply, req.params.id))) return;
     const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
     if (!empreendimento) {
       reply.code(404);
       return { erro: "Empreendimento não encontrado" };
     }
-    const { areaValor, areaUnidade, areaStatusValidacao, areaObservacao, formaAquisicao } = req.body ?? {};
-    const terreno = await definirTerreno(req.params.id, { areaValor, areaUnidade, areaStatusValidacao, areaObservacao, formaAquisicao });
-    reply.code(200);
+    const { numeroMatricula, areaValor, areaUnidade, areaStatusValidacao, areaObservacao, formaAquisicao } = req.body ?? {};
+    const terreno = await criarTerreno({ empreendimentoId: req.params.id, numeroMatricula, areaValor, areaUnidade, areaStatusValidacao, areaObservacao, formaAquisicao });
+    reply.code(201);
     return terreno;
+  });
+
+  app.patch<{
+    Params: { id: string };
+    Body: {
+      numeroMatricula?: string | null;
+      areaValor?: string | null;
+      areaUnidade?: string;
+      areaStatusValidacao?: "pendente" | "validado" | "conflitante";
+      areaObservacao?: string | null;
+      formaAquisicao?: "compra" | "permuta" | "misto" | null;
+    };
+  }>("/api/terrenos/:id", async (req, reply) => {
+    const terreno = await prisma.terreno.findUnique({ where: { id: req.params.id } });
+    if (!terreno) {
+      reply.code(404);
+      return { erro: "Matrícula não encontrada" };
+    }
+    if (!(await garantirAcesso(req, reply, terreno.empreendimentoId))) return;
+    const { numeroMatricula, areaValor, areaUnidade, areaStatusValidacao, areaObservacao, formaAquisicao } = req.body ?? {};
+    const atualizado = await atualizarTerreno(req.params.id, { numeroMatricula, areaValor, areaUnidade, areaStatusValidacao, areaObservacao, formaAquisicao });
+    return atualizado;
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/terrenos/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const terreno = await prisma.terreno.findUnique({ where: { id: req.params.id } });
+    if (!terreno) {
+      reply.code(404);
+      return { erro: "Matrícula não encontrada" };
+    }
+    if (!(await garantirAcesso(req, reply, terreno.empreendimentoId))) return;
+    await excluirTerreno(req.params.id);
+    reply.code(204);
+    return null;
   });
 
   app.patch<{ Params: { id: string }; Body: { nome?: string; incorporador?: string | null; endereco?: string | null } }>(

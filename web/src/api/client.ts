@@ -170,6 +170,8 @@ export type StatusValidacaoArea = "pendente" | "validado" | "conflitante";
 export type FormaAquisicaoTerreno = "compra" | "permuta" | "misto";
 
 export interface TerrenoResumo {
+  id: string;
+  numeroMatricula: string | null;
   areaValor: string | null;
   areaUnidade: string;
   areaStatusValidacao: StatusValidacaoArea;
@@ -182,7 +184,7 @@ export interface EmpreendimentoDetalhe {
   nome: string;
   incorporador: string | null;
   endereco: string | null;
-  terreno: TerrenoResumo | null;
+  terrenos: TerrenoResumo[];
   cenarios: CenarioResumo[];
   tipologias: TipologiaResumo[];
   categoriasCusto: CategoriaCustoResumo[];
@@ -413,11 +415,30 @@ export function excluirEmpreendimento(id: string) {
   return del(`/api/empreendimentos/${id}`);
 }
 
-export function definirTerreno(
+/** Múltiplas matrículas/áreas por empreendimento (achado F26, docs/DECISOES.md) — cada chamada cria uma matrícula nova. */
+export function criarTerreno(
   empreendimentoId: string,
-  input: { areaValor?: string; areaUnidade?: string; areaStatusValidacao?: StatusValidacaoArea; areaObservacao?: string; formaAquisicao?: FormaAquisicaoTerreno },
+  input: { numeroMatricula?: string; areaValor?: string; areaUnidade?: string; areaStatusValidacao?: StatusValidacaoArea; areaObservacao?: string; formaAquisicao?: FormaAquisicaoTerreno },
 ) {
-  return postJson<TerrenoResumo>(`/api/empreendimentos/${empreendimentoId}/terreno`, input);
+  return postJson<TerrenoResumo>(`/api/empreendimentos/${empreendimentoId}/terrenos`, input);
+}
+
+export function atualizarTerreno(
+  id: string,
+  input: {
+    numeroMatricula?: string | null;
+    areaValor?: string | null;
+    areaUnidade?: string;
+    areaStatusValidacao?: StatusValidacaoArea;
+    areaObservacao?: string | null;
+    formaAquisicao?: FormaAquisicaoTerreno | null;
+  },
+) {
+  return patchJson<TerrenoResumo>(`/api/terrenos/${id}`, input);
+}
+
+export function excluirTerreno(id: string) {
+  return del(`/api/terrenos/${id}`);
 }
 
 export function atualizarTipologia(

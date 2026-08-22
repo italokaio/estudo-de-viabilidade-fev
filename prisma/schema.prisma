@@ -98,7 +98,7 @@ model Empreendimento {
   updatedAt             DateTime  @updatedAt
 
   cenarios            Cenario[]
-  terreno             Terreno?
+  terrenos            Terreno[]
   tipologias          Tipologia[]
   unidades            Unidade[]
   condicoesPagamento  CondicaoPagamento[]
@@ -146,9 +146,21 @@ model Cenario {
   @@map("cenario")
 }
 
+/**
+ * Uma matricula/registro de area que compoe o terreno de um empreendimento
+ * (achado F26, docs/DECISOES.md — "multiplas matriculas/areas por
+ * empreendimento"). Ate essa fatia era 1:1 com Empreendimento
+ * (empreendimentoId @unique); um empreendimento real muitas vezes reune
+ * mais de uma matricula (lotes contiguos comprados separadamente) -- isso
+ * fecha a lacuna deliberadamente deixada de fora na Fase 0, onde o
+ * `RegistroAreaTerreno` original da especificacao foi simplificado para
+ * `Terreno.areaObservacao` (texto livre). Continua nunca lido pelo motor
+ * financeiro, mesmo espirito de Permuta/Distrato -- so cadastro.
+ */
 model Terreno {
   id                  String   @id @default(cuid())
-  empreendimentoId    String   @unique
+  empreendimentoId    String
+  numeroMatricula     String? // identificador livre da matricula/registro (ex.: numero no cartorio)
   areaValor           String? // decimal-as-string; nulo = nao validado/conflitante
   areaUnidade         String   @default("m2")
   areaStatusValidacao String   @default("pendente") // pendente | validado | conflitante

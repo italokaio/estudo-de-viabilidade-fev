@@ -228,6 +228,7 @@ export async function duplicarCenario(cenarioId: string, novoNome: string) {
 
 export interface CriarTerrenoInput {
   empreendimentoId: string;
+  numeroMatricula?: string;
   areaValor?: string;
   areaUnidade?: string;
   areaStatusValidacao?: "pendente" | "validado" | "conflitante";
@@ -235,11 +236,13 @@ export interface CriarTerrenoInput {
   formaAquisicao?: "compra" | "permuta" | "misto";
 }
 
+/** Cria uma matricula/registro de area (achado F26, docs/DECISOES.md) — um empreendimento pode ter mais de uma. */
 export async function criarTerreno(input: CriarTerrenoInput) {
   return prisma.terreno.create({ data: { areaUnidade: "m2", areaStatusValidacao: "pendente", ...input } });
 }
 
-export interface DefinirTerrenoInput {
+export interface AtualizarTerrenoInput {
+  numeroMatricula?: string | null;
   areaValor?: string | null;
   areaUnidade?: string;
   areaStatusValidacao?: "pendente" | "validado" | "conflitante";
@@ -247,13 +250,12 @@ export interface DefinirTerrenoInput {
   formaAquisicao?: "compra" | "permuta" | "misto" | null;
 }
 
-/** Cria ou atualiza o terreno de um empreendimento pela interface — upsert, já que é 1:1 (no máximo um terreno por empreendimento). */
-export async function definirTerreno(empreendimentoId: string, input: DefinirTerrenoInput) {
-  return prisma.terreno.upsert({
-    where: { empreendimentoId },
-    update: input,
-    create: { empreendimentoId, areaUnidade: "m2", areaStatusValidacao: "pendente", ...input },
-  });
+export async function atualizarTerreno(id: string, input: AtualizarTerrenoInput) {
+  return prisma.terreno.update({ where: { id }, data: input });
+}
+
+export async function excluirTerreno(id: string) {
+  await prisma.terreno.delete({ where: { id } });
 }
 
 export interface CriarTipologiaInput {

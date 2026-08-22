@@ -16,13 +16,15 @@ import {
   criarDestinatarioComissao,
   criarEmpreendimento,
   criarPremissasVelocidade,
+  criarTerreno,
   criarTipologia,
   atualizarPermuta,
   criarUnidadesEmLote,
   criarUnidadesPorAndar,
   definirFinanciamento,
   definirPontoIndiceCorrecao,
-  definirTerreno,
+  atualizarTerreno,
+  excluirTerreno,
   desfazerDistrato,
   desfazerPermuta,
   excluirCategoriaCusto,
@@ -257,7 +259,7 @@ function DetalheEmpreendimento({
       <EmpreendimentoHeader detalhe={detalhe} onAtualizado={onAtualizado} onExcluido={onExcluido} onErro={onErro} />
 
       <Painel titulo="Terreno">
-        <TerrenoSecao empreendimentoId={detalhe.id} terreno={detalhe.terreno} onAtualizado={onAtualizado} onErro={onErro} />
+        <TerrenoSecao empreendimentoId={detalhe.id} terrenos={detalhe.terrenos} onAtualizado={onAtualizado} onErro={onErro} />
       </Painel>
 
       <Painel titulo="Tipologias">
@@ -312,35 +314,131 @@ const selectFieldStyle: React.CSSProperties = {
   padding: "8px 10px",
 };
 
+/**
+ * Múltiplas matrículas/áreas por empreendimento (achado F26, docs/DECISOES.md):
+ * até essa fatia era um único terreno por empreendimento (upsert); agora é
+ * uma lista, mesmo padrão de CustosSecao — cada matrícula tem seu próprio
+ * "Editar"/"Excluir", mais um formulário de "adicionar" abaixo da lista.
+ */
 function TerrenoSecao({
   empreendimentoId,
-  terreno,
+  terrenos,
   onAtualizado,
   onErro,
 }: {
   empreendimentoId: string;
-  terreno: EmpreendimentoDetalhe["terreno"];
+  terrenos: EmpreendimentoDetalhe["terrenos"];
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {terrenos.length === 0 ? (
+        <div style={{ fontSize: 13, color: "var(--ink-muted)" }}>Nenhuma matrícula cadastrada ainda.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {terrenos.map((t) => (
+            <LinhaTerreno key={t.id} terreno={t} onAtualizado={onAtualizado} onErro={onErro} />
+          ))}
+        </div>
+      )}
+      <NovoTerrenoForm empreendimentoId={empreendimentoId} onCriado={onAtualizado} onErro={onErro} />
+    </div>
+  );
+}
+
+function CamposTerreno({
+  numeroMatricula,
+  setNumeroMatricula,
+  areaValor,
+  setAreaValor,
+  areaUnidade,
+  setAreaUnidade,
+  areaStatusValidacao,
+  setAreaStatusValidacao,
+  formaAquisicao,
+  setFormaAquisicao,
+  areaObservacao,
+  setAreaObservacao,
+}: {
+  numeroMatricula: string;
+  setNumeroMatricula: (v: string) => void;
+  areaValor: string;
+  setAreaValor: (v: string) => void;
+  areaUnidade: string;
+  setAreaUnidade: (v: string) => void;
+  areaStatusValidacao: StatusValidacaoArea;
+  setAreaStatusValidacao: (v: StatusValidacaoArea) => void;
+  formaAquisicao: FormaAquisicaoTerreno | "";
+  setFormaAquisicao: (v: FormaAquisicaoTerreno | "") => void;
+  areaObservacao: string;
+  setAreaObservacao: (v: string) => void;
+}) {
+  return (
+    <>
+      <div style={{ width: 140 }}>
+        <TextField label="Matrícula" value={numeroMatricula} onChange={(e) => setNumeroMatricula(e.target.value)} placeholder="nº no cartório" />
+      </div>
+      <div style={{ width: 100 }}>
+        <TextField label="Área" value={areaValor} onChange={(e) => setAreaValor(e.target.value)} placeholder="5000" />
+      </div>
+      <div style={{ width: 70 }}>
+        <TextField label="Unidade" value={areaUnidade} onChange={(e) => setAreaUnidade(e.target.value)} placeholder="m2" />
+      </div>
+      <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Status</span>
+        <select value={areaStatusValidacao} onChange={(e) => setAreaStatusValidacao(e.target.value as StatusValidacaoArea)} style={selectFieldStyle}>
+          <option value="pendente">Pendente</option>
+          <option value="validado">Validado</option>
+          <option value="conflitante">Conflitante</option>
+        </select>
+      </label>
+      <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Aquisição</span>
+        <select value={formaAquisicao} onChange={(e) => setFormaAquisicao(e.target.value as FormaAquisicaoTerreno)} style={selectFieldStyle}>
+          <option value="">—</option>
+          <option value="compra">Compra</option>
+          <option value="permuta">Permuta</option>
+          <option value="misto">Misto</option>
+        </select>
+      </label>
+      <div style={{ width: 220 }}>
+        <TextField label="Observação" value={areaObservacao} onChange={(e) => setAreaObservacao(e.target.value)} placeholder="opcional" />
+      </div>
+    </>
+  );
+}
+
+function LinhaTerreno({
+  terreno,
+  onAtualizado,
+  onErro,
+}: {
+  terreno: EmpreendimentoDetalhe["terrenos"][number];
   onAtualizado: () => void;
   onErro: (msg: string) => void;
 }) {
   const [editando, setEditando] = useState(false);
-  const [areaValor, setAreaValor] = useState(terreno?.areaValor ?? "");
-  const [areaUnidade, setAreaUnidade] = useState(terreno?.areaUnidade ?? "m2");
-  const [areaStatusValidacao, setAreaStatusValidacao] = useState<StatusValidacaoArea>(terreno?.areaStatusValidacao ?? "pendente");
-  const [areaObservacao, setAreaObservacao] = useState(terreno?.areaObservacao ?? "");
-  const [formaAquisicao, setFormaAquisicao] = useState<FormaAquisicaoTerreno | "">(terreno?.formaAquisicao ?? "");
+  const [numeroMatricula, setNumeroMatricula] = useState(terreno.numeroMatricula ?? "");
+  const [areaValor, setAreaValor] = useState(terreno.areaValor ?? "");
+  const [areaUnidade, setAreaUnidade] = useState(terreno.areaUnidade);
+  const [areaStatusValidacao, setAreaStatusValidacao] = useState<StatusValidacaoArea>(terreno.areaStatusValidacao);
+  const [areaObservacao, setAreaObservacao] = useState(terreno.areaObservacao ?? "");
+  const [formaAquisicao, setFormaAquisicao] = useState<FormaAquisicaoTerreno | "">(terreno.formaAquisicao ?? "");
   const [salvando, setSalvando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
     setSalvando(true);
     try {
-      await definirTerreno(empreendimentoId, {
-        areaValor: areaValor || undefined,
+      await atualizarTerreno(terreno.id, {
+        numeroMatricula: numeroMatricula || null,
+        areaValor: areaValor || null,
         areaUnidade: areaUnidade || undefined,
         areaStatusValidacao,
-        areaObservacao: areaObservacao || undefined,
-        formaAquisicao: formaAquisicao || undefined,
+        areaObservacao: areaObservacao || null,
+        formaAquisicao: formaAquisicao || null,
       });
       setEditando(false);
       onAtualizado();
@@ -351,43 +449,45 @@ function TerrenoSecao({
     }
   }
 
-  if (editando || !terreno) {
+  async function excluir() {
+    if (!window.confirm(`Excluir a matrícula "${terreno.numeroMatricula || terreno.id}"?`)) return;
+    setExcluindo(true);
+    try {
+      await excluirTerreno(terreno.id);
+      onAtualizado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setExcluindo(false);
+    }
+  }
+
+  if (editando) {
     return (
-      <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <div style={{ width: 100 }}>
-          <TextField label="Área" value={areaValor} onChange={(e) => setAreaValor(e.target.value)} placeholder="5000" />
-        </div>
-        <div style={{ width: 70 }}>
-          <TextField label="Unidade" value={areaUnidade} onChange={(e) => setAreaUnidade(e.target.value)} placeholder="m2" />
-        </div>
-        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Status</span>
-          <select value={areaStatusValidacao} onChange={(e) => setAreaStatusValidacao(e.target.value as StatusValidacaoArea)} style={selectFieldStyle}>
-            <option value="pendente">Pendente</option>
-            <option value="validado">Validado</option>
-            <option value="conflitante">Conflitante</option>
-          </select>
-        </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Aquisição</span>
-          <select value={formaAquisicao} onChange={(e) => setFormaAquisicao(e.target.value as FormaAquisicaoTerreno)} style={selectFieldStyle}>
-            <option value="">—</option>
-            <option value="compra">Compra</option>
-            <option value="permuta">Permuta</option>
-            <option value="misto">Misto</option>
-          </select>
-        </label>
-        <div style={{ width: 220 }}>
-          <TextField label="Observação" value={areaObservacao} onChange={(e) => setAreaObservacao(e.target.value)} placeholder="opcional" />
-        </div>
+      <form
+        onSubmit={salvar}
+        style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", background: "var(--surface-2)", borderRadius: 8, padding: "10px 12px" }}
+      >
+        <CamposTerreno
+          numeroMatricula={numeroMatricula}
+          setNumeroMatricula={setNumeroMatricula}
+          areaValor={areaValor}
+          setAreaValor={setAreaValor}
+          areaUnidade={areaUnidade}
+          setAreaUnidade={setAreaUnidade}
+          areaStatusValidacao={areaStatusValidacao}
+          setAreaStatusValidacao={setAreaStatusValidacao}
+          formaAquisicao={formaAquisicao}
+          setFormaAquisicao={setFormaAquisicao}
+          areaObservacao={areaObservacao}
+          setAreaObservacao={setAreaObservacao}
+        />
         <Button type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
           {salvando ? "Salvando…" : "Salvar"}
         </Button>
-        {terreno && (
-          <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "8px 12px", fontSize: 12.5 }}>
-            Cancelar
-          </Button>
-        )}
+        <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+          Cancelar
+        </Button>
       </form>
     );
   }
@@ -400,18 +500,88 @@ function TerrenoSecao({
         : "var(--ink-muted)";
 
   return (
-    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, background: "var(--surface-2)", borderRadius: 8, padding: "10px 12px" }}>
       <div style={{ fontSize: 13, color: "var(--ink-secondary)" }}>
+        {terreno.numeroMatricula && <span style={{ fontWeight: 700, color: "var(--ink-primary)" }}>{terreno.numeroMatricula} — </span>}
         {terreno.areaValor ? `${terreno.areaValor} ${terreno.areaUnidade}` : "Área não informada"}
         {" · "}
         <span style={{ color: corStatus, fontWeight: 600 }}>{terreno.areaStatusValidacao}</span>
         {terreno.formaAquisicao && ` · ${terreno.formaAquisicao}`}
         {terreno.areaObservacao && <div style={{ fontSize: 12, color: "var(--ink-muted)", marginTop: 4 }}>{terreno.areaObservacao}</div>}
       </div>
-      <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12, flex: "none" }}>
-        Editar
-      </Button>
+      <div style={{ display: "flex", gap: 6, flex: "none" }}>
+        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+          Editar
+        </Button>
+        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+          {excluindo ? "…" : "Excluir"}
+        </Button>
+      </div>
     </div>
+  );
+}
+
+function NovoTerrenoForm({
+  empreendimentoId,
+  onCriado,
+  onErro,
+}: {
+  empreendimentoId: string;
+  onCriado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [numeroMatricula, setNumeroMatricula] = useState("");
+  const [areaValor, setAreaValor] = useState("");
+  const [areaUnidade, setAreaUnidade] = useState("m2");
+  const [areaStatusValidacao, setAreaStatusValidacao] = useState<StatusValidacaoArea>("pendente");
+  const [areaObservacao, setAreaObservacao] = useState("");
+  const [formaAquisicao, setFormaAquisicao] = useState<FormaAquisicaoTerreno | "">("");
+  const [salvando, setSalvando] = useState(false);
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await criarTerreno(empreendimentoId, {
+        numeroMatricula: numeroMatricula || undefined,
+        areaValor: areaValor || undefined,
+        areaUnidade: areaUnidade || undefined,
+        areaStatusValidacao,
+        areaObservacao: areaObservacao || undefined,
+        formaAquisicao: formaAquisicao || undefined,
+      });
+      setNumeroMatricula("");
+      setAreaValor("");
+      setAreaObservacao("");
+      setFormaAquisicao("");
+      onCriado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  return (
+    <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+      <CamposTerreno
+        numeroMatricula={numeroMatricula}
+        setNumeroMatricula={setNumeroMatricula}
+        areaValor={areaValor}
+        setAreaValor={setAreaValor}
+        areaUnidade={areaUnidade}
+        setAreaUnidade={setAreaUnidade}
+        areaStatusValidacao={areaStatusValidacao}
+        setAreaStatusValidacao={setAreaStatusValidacao}
+        formaAquisicao={formaAquisicao}
+        setFormaAquisicao={setFormaAquisicao}
+        areaObservacao={areaObservacao}
+        setAreaObservacao={setAreaObservacao}
+      />
+      <Button type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+        {salvando ? "Salvando…" : "Adicionar matrícula"}
+      </Button>
+    </form>
   );
 }
 
