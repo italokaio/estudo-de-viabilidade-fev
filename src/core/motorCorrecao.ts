@@ -13,7 +13,26 @@ import type { DesembolsoMensal, PontoIndiceCorrecao, RecebimentoGerado } from ".
  * Estendido (achado F12) para tambem corrigir desembolsos de custo, com um
  * mes-base fixo por cenario em vez de um mes-base por linha -- ver
  * corrigirDesembolsos abaixo.
+ *
+ * Estendido de novo (achado F20) para suportar mais de uma serie de indice
+ * por cenario, identificadas por um "grupo" livre (ex.: "padrao", "obra").
+ * Vendas sempre corrigem pela serie "padrao" -- o motor nao tem como saber
+ * qual venda "e" obra. Cada desembolso de custo, por sua vez, ja chega com
+ * o grupo que Custo.grupoIndiceCorrecao definiu (src/core/motorCustos.ts),
+ * entao corrigirDesembolsos so precisa escolher a serie certa por linha.
  */
+
+/** Particiona uma serie de indices (varios grupos misturados) por grupo. */
+function agruparIndicesPorGrupo(indices: PontoIndiceCorrecao[]): Map<string, PontoIndiceCorrecao[]> {
+  const porGrupo = new Map<string, PontoIndiceCorrecao[]>();
+  for (const i of indices) {
+    const grupo = i.grupo ?? "padrao";
+    const lista = porGrupo.get(grupo);
+    if (lista) lista.push(i);
+    else porGrupo.set(grupo, [i]);
+  }
+  return porGrupo;
+}
 
 /**
  * Fator de correcao acumulado entre dois meses: produto de
@@ -35,15 +54,16 @@ export function calcularFatorCorrecao(mesInicio: number, mesFim: number, indices
   return fator;
 }
 
-/** Corrige cada recebimento pelo fator acumulado entre o mes da venda que o originou e o mes de competencia da parcela. */
+/** Corrige cada recebimento pelo fator acumulado entre o mes da venda que o originou e o mes de competencia da parcela -- sempre pela serie "padrao" (achado F20). */
 export function corrigirRecebimentos(
   recebimentos: RecebimentoGerado[],
   mesOrigemPorVenda: Map<string, number>,
   indices: PontoIndiceCorrecao[],
 ): { mesCompetencia: number; valorCorrigido: Decimal }[] {
+  const indicesPadrao = agruparIndicesPorGrupo(indices).get("padrao") ?? [];
   return recebimentos.map((r) => {
     const mesOrigem = mesOrigemPorVenda.get(r.vendaId) ?? r.mesCompetencia;
-    const fator = calcularFatorCorrecao(mesOrigem, r.mesCompetencia, indices);
+    const fator = calcularFatorCorrecao(mesOrigem, r.mesCompetencia, indicesPadrao);
     return { mesCompetencia: r.mesCompetencia, valorCorrigido: r.valorPrevisto.times(fator) };
   });
 }
@@ -55,10 +75,16 @@ export function corrigirRecebimentos(
  * cada parcela, um por venda --, aqui o mes-base e sempre o mesmo para
  * todo custo do cenario: o orcamento de obra e fixado uma unica vez, no
  * inicio do cronograma (mes 1), nao a cada linha de custo.
+ *
+ * Cada desembolso usa a serie do seu proprio grupo (achado F20) -- um
+ * grupo sem nenhum ponto cadastrado tem fator 1, igual a nenhum indice
+ * cadastrado no cenario inteiro.
  */
 export function corrigirDesembolsos(desembolsos: DesembolsoMensal[], mesBase: number, indices: PontoIndiceCorrecao[]): { mes: number; valorCorrigido: Decimal }[] {
+  const porGrupo = agruparIndicesPorGrupo(indices);
   return desembolsos.map((d) => {
-    const fator = calcularFatorCorrecao(mesBase, d.mes, indices);
+    const indicesDoGrupo = porGrupo.get(d.grupoIndiceCorrecao ?? "padrao") ?? [];
+    const fator = calcularFatorCorrecao(mesBase, d.mes, indicesDoGrupo);
     return { mes: d.mes, valorCorrigido: d.valor.times(fator) };
   });
 }

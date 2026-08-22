@@ -363,6 +363,14 @@ model Custo {
   valorRealizado      String?
   participaFluxoCaixa Boolean  @default(true)
   status              String   @default("previsto")
+  // Grupo de indice de correcao monetaria que corrige este custo (achado
+  // F20, docs/DECISOES.md — "correcao monetaria por indice diferenciado"):
+  // "padrao" segue a mesma serie que corrige as vendas e os demais custos
+  // do cenario (comportamento identico a antes desta fatia); qualquer
+  // outro valor usa a serie de IndiceCorrecao cadastrada com o mesmo
+  // grupo (ex.: "obra" corrigida por INCC), ou fator 1 se nenhuma existir
+  // com aquele nome.
+  grupoIndiceCorrecao String   @default("padrao")
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -417,18 +425,24 @@ model CronogramaFisicoFinanceiro {
  * "valor corrigido" em RecebimentoProjetado -- e sempre recomputado on the
  * fly a partir desta serie, no mesmo espirito do achado F1 (fluxo de caixa
  * nunca e uma tabela).
+ *
+ * Estendido (achado F20) com `grupo`: um cenario pode ter mais de uma
+ * serie, cada uma identificada por um nome livre ("padrao", "obra", ...).
+ * Vendas sempre corrigem pela serie "padrao" -- so Custo (via
+ * Custo.grupoIndiceCorrecao) pode optar por seguir uma serie diferente.
  */
 model IndiceCorrecao {
   id               String @id @default(cuid())
   empreendimentoId String
   cenarioId        String
+  grupo            String @default("padrao")
   mes              Int
   percentual       String // decimal-as-string, variacao do indice naquele mes (pode ser negativo)
 
   empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
   cenario        Cenario        @relation(fields: [cenarioId], references: [id])
 
-  @@unique([cenarioId, mes])
+  @@unique([cenarioId, grupo, mes])
   @@map("indice_correcao")
 }
 

@@ -859,6 +859,7 @@ function CartaoCenario({
               custos={detalhe.custos}
               categoriasDisponiveis={detalhe.categoriasCustoDisponiveis}
               tipologiasDisponiveis={detalhe.tipologiasDisponiveis}
+              gruposIndiceCorrecao={detalhe.indicesCorrecao}
               onAtualizado={recarregar}
               onErro={onErro}
             />
@@ -1027,16 +1028,28 @@ function IndiceCorrecaoSecao({
   onAtualizado: () => void;
   onErro: (msg: string) => void;
 }) {
+  const [grupo, setGrupo] = useState("padrao");
   const [mes, setMes] = useState("1");
   const [percentual, setPercentual] = useState("");
   const [salvando, setSalvando] = useState(false);
-  const [excluindoMes, setExcluindoMes] = useState<number | null>(null);
+  const [excluindo, setExcluindo] = useState<string | null>(null);
+
+  // Grupos ja usados no cenario (achado F20, docs/DECISOES.md — "correcao
+  // monetaria por indice diferenciado"): sugestao no datalist do formulario,
+  // sempre incluindo "padrao" mesmo que ainda nao tenha nenhum ponto.
+  const gruposConhecidos = Array.from(new Set(["padrao", ...indicesCorrecao.map((p) => p.grupo)]));
+  const porGrupo = new Map<string, CenarioDetalhe["indicesCorrecao"]>();
+  for (const p of indicesCorrecao) {
+    const lista = porGrupo.get(p.grupo) ?? [];
+    lista.push(p);
+    porGrupo.set(p.grupo, lista);
+  }
 
   async function adicionar(e: React.FormEvent) {
     e.preventDefault();
     setSalvando(true);
     try {
-      await definirPontoIndiceCorrecao(cenarioId, { mes: Number(mes), percentual });
+      await definirPontoIndiceCorrecao(cenarioId, { grupo: grupo.trim() || "padrao", mes: Number(mes), percentual });
       setPercentual("");
       onAtualizado();
     } catch (err: any) {
@@ -1046,54 +1059,70 @@ function IndiceCorrecaoSecao({
     }
   }
 
-  async function remover(mesRemover: number) {
-    setExcluindoMes(mesRemover);
+  async function remover(grupoRemover: string, mesRemover: number) {
+    const chave = `${grupoRemover}|${mesRemover}`;
+    setExcluindo(chave);
     try {
-      await excluirPontoIndiceCorrecao(cenarioId, mesRemover);
+      await excluirPontoIndiceCorrecao(cenarioId, grupoRemover, mesRemover);
       onAtualizado();
     } catch (err: any) {
       onErro(String(err.message ?? err));
     } finally {
-      setExcluindoMes(null);
+      setExcluindo(null);
     }
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {indicesCorrecao.length > 0 ? (
-        <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
-              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
-              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Variação</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody style={{ font: "var(--text-mono-body)" }}>
-            {indicesCorrecao.map((p) => (
-              <tr key={p.mes}>
-                <td style={{ padding: "2px 0" }}>{p.mes}</td>
-                <td>{(Number(p.percentual) * 100).toFixed(2)}%</td>
-                <td style={{ textAlign: "right" }}>
-                  <button
-                    type="button"
-                    onClick={() => remover(p.mes)}
-                    disabled={excluindoMes === p.mes}
-                    title="Remover"
-                    style={{ border: "none", background: "transparent", color: "var(--status-critical-text)", cursor: "pointer", fontSize: 13, padding: 0 }}
-                  >
-                    ×
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        Array.from(porGrupo.entries()).map(([g, pontos]) => (
+          <div key={g}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)", marginBottom: 4 }}>
+              {g === "padrao" ? "Padrão (vendas e demais custos)" : g}
+            </div>
+            <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
+                  <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
+                  <th style={{ fontWeight: 600, paddingBottom: 4 }}>Variação</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody style={{ font: "var(--text-mono-body)" }}>
+                {pontos.map((p) => (
+                  <tr key={p.mes}>
+                    <td style={{ padding: "2px 0" }}>{p.mes}</td>
+                    <td>{(Number(p.percentual) * 100).toFixed(2)}%</td>
+                    <td style={{ textAlign: "right" }}>
+                      <button
+                        type="button"
+                        onClick={() => remover(g, p.mes)}
+                        disabled={excluindo === `${g}|${p.mes}`}
+                        title="Remover"
+                        style={{ border: "none", background: "transparent", color: "var(--status-critical-text)", cursor: "pointer", fontSize: 13, padding: 0 }}
+                      >
+                        ×
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))
       ) : (
         <div style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>Nenhum índice cadastrado — o fluxo de caixa não aplica correção monetária.</div>
       )}
 
       <form onSubmit={adicionar} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <div style={{ width: 130 }}>
+          <TextField label="Grupo" list="grupos-indice-correcao" value={grupo} onChange={(e) => setGrupo(e.target.value)} placeholder="padrao" required />
+          <datalist id="grupos-indice-correcao">
+            {gruposConhecidos.map((g) => (
+              <option key={g} value={g} />
+            ))}
+          </datalist>
+        </div>
         <div style={{ width: 80 }}>
           <TextField label="Mês" type="number" min={1} value={mes} onChange={(e) => setMes(e.target.value)} required />
         </div>
@@ -1104,6 +1133,9 @@ function IndiceCorrecaoSecao({
           {salvando ? "Salvando…" : "Definir"}
         </Button>
       </form>
+      <div style={{ fontSize: 11.5, color: "var(--ink-muted)" }}>
+        O grupo "padrao" corrige as vendas e todo custo que não escolher outro grupo específico (aba de custos) — ex.: cadastre um grupo "obra" com a variação do INCC e associe apenas os custos de obra a ele.
+      </div>
     </div>
   );
 }
@@ -1321,6 +1353,7 @@ function CustosSecao({
   custos,
   categoriasDisponiveis,
   tipologiasDisponiveis,
+  gruposIndiceCorrecao,
   onAtualizado,
   onErro,
 }: {
@@ -1328,6 +1361,7 @@ function CustosSecao({
   custos: CenarioDetalhe["custos"];
   categoriasDisponiveis: CategoriaCustoResumo[];
   tipologiasDisponiveis: { id: string; nome: string }[];
+  gruposIndiceCorrecao: CenarioDetalhe["indicesCorrecao"];
   onAtualizado: () => void;
   onErro: (msg: string) => void;
 }) {
@@ -1337,7 +1371,9 @@ function CustosSecao({
   const [percentual, setPercentual] = useState("");
   const [competenciaMes, setCompetenciaMes] = useState("");
   const [recorrencia, setRecorrencia] = useState<"unico" | "mensal">("unico");
+  const [grupoIndiceCorrecao, setGrupoIndiceCorrecao] = useState("padrao");
   const [salvando, setSalvando] = useState(false);
+  const gruposConhecidos = Array.from(new Set(["padrao", ...gruposIndiceCorrecao.map((p) => p.grupo)]));
 
   const categoriaSelecionada = categoriasDisponiveis.find((c) => c.id === categoriaId);
   const incidenciaPorValor = categoriaSelecionada?.tipoIncidencia === "fixo" || categoriaSelecionada?.tipoIncidencia === "pct_execucao";
@@ -1358,6 +1394,7 @@ function CustosSecao({
         percentual: incidenciaPorValor ? undefined : percentual,
         competenciaMes: categoriaSelecionada?.tipoIncidencia === "fixo" ? Number(competenciaMes) : undefined,
         recorrencia: categoriaSelecionada?.tipoIncidencia === "fixo" ? recorrencia : undefined,
+        grupoIndiceCorrecao: grupoIndiceCorrecao.trim() || "padrao",
       });
       setValorPrevisto("");
       setPercentual("");
@@ -1381,6 +1418,7 @@ function CustosSecao({
               <th style={{ fontWeight: 600, paddingBottom: 4 }}>Tipologia</th>
               <th style={{ fontWeight: 600, paddingBottom: 4 }}>Valor</th>
               <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
+              <th style={{ fontWeight: 600, paddingBottom: 4 }}>Índice</th>
               <th></th>
             </tr>
           </thead>
@@ -1454,6 +1492,20 @@ function CustosSecao({
             </label>
           </>
         )}
+        <div style={{ width: 130 }}>
+          <TextField
+            label="Índice"
+            list="grupos-indice-correcao-custo"
+            value={grupoIndiceCorrecao}
+            onChange={(e) => setGrupoIndiceCorrecao(e.target.value)}
+            placeholder="padrao"
+          />
+          <datalist id="grupos-indice-correcao-custo">
+            {gruposConhecidos.map((g) => (
+              <option key={g} value={g} />
+            ))}
+          </datalist>
+        </div>
         <Button type="submit" disabled={salvando}>
           {salvando ? "Salvando…" : "Adicionar"}
         </Button>
@@ -1477,6 +1529,7 @@ function LinhaCusto({
   const [percentual, setPercentual] = useState(custo.percentual ?? "");
   const [competenciaMes, setCompetenciaMes] = useState(custo.competenciaMes?.toString() ?? "");
   const [recorrencia, setRecorrencia] = useState<"unico" | "mensal">((custo.recorrencia as "unico" | "mensal") ?? "unico");
+  const [grupoIndiceCorrecao, setGrupoIndiceCorrecao] = useState(custo.grupoIndiceCorrecao);
   const [salvando, setSalvando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
   const [mostrarSplit, setMostrarSplit] = useState(false);
@@ -1520,6 +1573,7 @@ function LinhaCusto({
         percentual: incidenciaPorValor ? undefined : percentual,
         competenciaMes: custo.tipoIncidencia === "fixo" ? Number(competenciaMes) : undefined,
         recorrencia: custo.tipoIncidencia === "fixo" ? recorrencia : undefined,
+        grupoIndiceCorrecao: grupoIndiceCorrecao.trim() || "padrao",
       });
       setEditando(false);
       onAtualizado();
@@ -1546,7 +1600,7 @@ function LinhaCusto({
   if (editando) {
     return (
       <tr>
-        <td colSpan={5} style={{ padding: "6px 0" }}>
+        <td colSpan={6} style={{ padding: "6px 0" }}>
           <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", font: "var(--text-body)" }}>
             {incidenciaPorValor ? (
               <div style={{ width: 130 }}>
@@ -1575,6 +1629,9 @@ function LinhaCusto({
                 </label>
               </>
             )}
+            <div style={{ width: 110 }}>
+              <TextField label="Índice" value={grupoIndiceCorrecao} onChange={(e) => setGrupoIndiceCorrecao(e.target.value)} placeholder="padrao" />
+            </div>
             <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
               {salvando ? "Salvando…" : "Salvar"}
             </Button>
@@ -1594,6 +1651,9 @@ function LinhaCusto({
         <td style={{ color: custo.tipologiaNome ? "var(--ink-primary)" : "var(--ink-muted)" }}>{custo.tipologiaNome ?? "Todas"}</td>
         <td>{custo.valorPrevisto ? formatBRL(custo.valorPrevisto) : `${(Number(custo.percentual) * 100).toFixed(1)}%`}</td>
         <td>{custo.competenciaMes ?? "—"}</td>
+        <td style={{ color: custo.grupoIndiceCorrecao === "padrao" ? "var(--ink-muted)" : "var(--ink-primary)" }}>
+          {custo.grupoIndiceCorrecao === "padrao" ? "Padrão" : custo.grupoIndiceCorrecao}
+        </td>
         <td style={{ textAlign: "right" }}>
           <Button variant="secondary" onClick={() => setMostrarSplit((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
             Split{custo.destinatariosComissao.length > 0 ? ` (${custo.destinatariosComissao.length})` : ""}
@@ -1608,7 +1668,7 @@ function LinhaCusto({
       </tr>
       {mostrarSplit && (
         <tr>
-          <td colSpan={5} style={{ padding: "6px 0 10px", font: "var(--text-body)" }}>
+          <td colSpan={6} style={{ padding: "6px 0 10px", font: "var(--text-body)" }}>
             <div style={{ background: "var(--surface)", border: "1px solid var(--border-subtle)", borderRadius: 8, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)" }}>
                 Split nominal — quem recebe esta comissão (não afeta o motor financeiro)

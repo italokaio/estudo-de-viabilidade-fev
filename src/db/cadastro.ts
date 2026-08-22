@@ -167,7 +167,7 @@ export async function duplicarCenario(cenarioId: string, novoNome: string) {
   const indices = await prisma.indiceCorrecao.findMany({ where: { cenarioId } });
   if (indices.length > 0) {
     await prisma.indiceCorrecao.createMany({
-      data: indices.map((i) => ({ empreendimentoId: i.empreendimentoId, cenarioId: novo.id, mes: i.mes, percentual: i.percentual })),
+      data: indices.map((i) => ({ empreendimentoId: i.empreendimentoId, cenarioId: novo.id, grupo: i.grupo, mes: i.mes, percentual: i.percentual })),
     });
   }
 
@@ -201,6 +201,7 @@ export async function duplicarCenario(cenarioId: string, novoNome: string) {
         vencimentoMes: c.vencimentoMes,
         recorrencia: c.recorrencia,
         participaFluxoCaixa: c.participaFluxoCaixa,
+        grupoIndiceCorrecao: c.grupoIndiceCorrecao,
       },
     });
     // Destinatarios de comissao (achado F13) tambem sao copiados -- criados
@@ -761,6 +762,8 @@ export interface CriarCustoInput {
   vencimentoMes?: number;
   recorrencia?: "unico" | "mensal";
   participaFluxoCaixa?: boolean;
+  /** Grupo de indice de correcao monetaria (achado F20) — ver Custo.grupoIndiceCorrecao no schema. */
+  grupoIndiceCorrecao?: string;
 }
 
 export async function criarCusto(input: CriarCustoInput) {
@@ -774,6 +777,7 @@ export interface AtualizarCustoInput {
   percentual?: string | null;
   competenciaMes?: number | null;
   recorrencia?: "unico" | "mensal";
+  grupoIndiceCorrecao?: string;
 }
 
 /** Atualizar um custo e direto -- so excluir precisa levar em conta DestinatarioComissao (achado F13). */
@@ -887,28 +891,36 @@ export async function excluirCronograma(cenarioId: string) {
 export interface DefinirPontoIndiceCorrecaoInput {
   empreendimentoId: string;
   cenarioId: string;
+  /** Serie a que este ponto pertence (achado F20) — "padrao" quando omitido. */
+  grupo?: string;
   mes: number;
   percentual: string;
 }
 
 /**
  * Cadastra ou atualiza a variacao do indice de correcao monetaria (achado
- * F6, docs/DECISOES.md) para um mes do cenario. Upsert por mes, ao
+ * F6, docs/DECISOES.md) para um mes do cenario. Upsert por (grupo, mes), ao
  * contrario do cronograma (R6): cada mes e independente, sem soma
  * obrigatoria, entao o usuario pode completar a serie aos poucos conforme
  * novos indices sao divulgados, sem precisar apagar e recriar tudo.
+ *
+ * Estendido (achado F20, docs/DECISOES.md — "correcao monetaria por indice
+ * diferenciado") para suportar mais de uma serie por cenario, identificadas
+ * por `grupo` -- "padrao" quando omitido, mesma serie unica de antes desta
+ * fatia.
  */
 export async function definirPontoIndiceCorrecao(input: DefinirPontoIndiceCorrecaoInput) {
+  const grupo = input.grupo ?? "padrao";
   return prisma.indiceCorrecao.upsert({
-    where: { cenarioId_mes: { cenarioId: input.cenarioId, mes: input.mes } },
+    where: { cenarioId_grupo_mes: { cenarioId: input.cenarioId, grupo, mes: input.mes } },
     update: { percentual: input.percentual },
-    create: input,
+    create: { ...input, grupo },
   });
 }
 
-/** Remove a variacao cadastrada para um mes -- aquele mes volta a nao corrigir (fator=1). */
-export async function excluirPontoIndiceCorrecao(cenarioId: string, mes: number) {
-  await prisma.indiceCorrecao.deleteMany({ where: { cenarioId, mes } });
+/** Remove a variacao cadastrada para um mes de uma serie -- aquele mes volta a nao corrigir (fator=1) naquele grupo. */
+export async function excluirPontoIndiceCorrecao(cenarioId: string, grupo: string, mes: number) {
+  await prisma.indiceCorrecao.deleteMany({ where: { cenarioId, grupo, mes } });
 }
 
 export interface DefinirFinanciamentoInput {

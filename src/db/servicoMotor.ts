@@ -45,6 +45,7 @@ async function montarEntradaMotor(cenarioId: string, opcoes: { taxaDescontoMensa
     recorrencia: c.recorrencia as "unico" | "mensal",
     participaFluxoCaixa: c.participaFluxoCaixa,
     tipologiaId: c.tipologiaId ?? undefined,
+    grupoIndiceCorrecao: c.grupoIndiceCorrecao,
   }));
 
   const cronogramaDb = await prisma.cronogramaFisicoFinanceiro.findMany({
@@ -57,7 +58,7 @@ async function montarEntradaMotor(cenarioId: string, opcoes: { taxaDescontoMensa
   }));
 
   const indicesDb = await prisma.indiceCorrecao.findMany({ where: { cenarioId }, orderBy: { mes: "asc" } });
-  const indiceCorrecao: PontoIndiceCorrecao[] = indicesDb.map((i) => ({ mes: i.mes, percentual: new Decimal(i.percentual) }));
+  const indiceCorrecao: PontoIndiceCorrecao[] = indicesDb.map((i) => ({ mes: i.mes, percentual: new Decimal(i.percentual), grupo: i.grupo }));
 
   const financiamentoDb = await prisma.financiamentoProducao.findUnique({ where: { cenarioId } });
   const financiamento: FinanciamentoInput | undefined = financiamentoDb

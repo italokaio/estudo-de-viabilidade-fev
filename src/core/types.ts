@@ -71,6 +71,13 @@ export interface CustoInput {
    * em vez de todas as vendas do cenario.
    */
   tipologiaId?: string;
+  /**
+   * Grupo de indice de correcao monetaria (achado F20, docs/DECISOES.md —
+   * "correcao monetaria por indice diferenciado"): omitido/"padrao" segue a
+   * mesma serie que corrige as vendas; qualquer outro valor usa a serie de
+   * PontoIndiceCorrecao com o mesmo grupo, ou fator 1 se nenhuma existir.
+   */
+  grupoIndiceCorrecao?: string;
 }
 
 export interface PontoCronograma {
@@ -82,6 +89,8 @@ export interface DesembolsoMensal {
   custoId: string;
   mes: number;
   valor: Decimal;
+  /** grupo de indice que corrige este desembolso (achado F20) -- omitido = "padrao" */
+  grupoIndiceCorrecao?: string;
 }
 
 /** Variacao de indice de correcao monetaria (ex.: INCC, IGP-M) num mes do calendario do cenario. */
@@ -89,6 +98,8 @@ export interface PontoIndiceCorrecao {
   mes: number;
   /** variacao do indice naquele mes, ex.: 0.005 = 0.5% (pode ser negativo) */
   percentual: Decimal;
+  /** serie a que este ponto pertence (achado F20) -- omitido = "padrao" */
+  grupo?: string;
 }
 
 export interface FluxoMensal {

@@ -206,6 +206,7 @@ export interface CustoResumo {
   recorrencia: string;
   valorRealizado: string | null;
   status: string;
+  grupoIndiceCorrecao: string;
   destinatariosComissao: DestinatarioComissaoResumo[];
 }
 
@@ -231,7 +232,7 @@ export interface CenarioDetalhe {
   premissasVelocidade: { id: string; tipologiaId: string; tipologiaNome: string; mes: number; unidadesPrevistas: string }[];
   custos: CustoResumo[];
   cronograma: { mes: number; percentualExecucaoMensal: string }[];
-  indicesCorrecao: { mes: number; percentual: string }[];
+  indicesCorrecao: { grupo: string; mes: number; percentual: string }[];
   financiamento: FinanciamentoResumo | null;
   totalVendasGeradas: number;
 }
@@ -331,7 +332,15 @@ export function criarCategoriaCusto(empreendimentoId: string, input: { nome: str
 
 export function criarCusto(
   cenarioId: string,
-  input: { categoriaId: string; tipologiaId?: string; valorPrevisto?: string; percentual?: string; competenciaMes?: number; recorrencia?: "unico" | "mensal" },
+  input: {
+    categoriaId: string;
+    tipologiaId?: string;
+    valorPrevisto?: string;
+    percentual?: string;
+    competenciaMes?: number;
+    recorrencia?: "unico" | "mensal";
+    grupoIndiceCorrecao?: string;
+  },
 ) {
   return postJson<CustoResumo>(`/api/cenarios/${cenarioId}/custos`, input);
 }
@@ -498,7 +507,13 @@ export function excluirCategoriaCusto(id: string) {
 
 export function atualizarCusto(
   id: string,
-  input: { valorPrevisto?: string | null; percentual?: string | null; competenciaMes?: number | null; recorrencia?: "unico" | "mensal" },
+  input: {
+    valorPrevisto?: string | null;
+    percentual?: string | null;
+    competenciaMes?: number | null;
+    recorrencia?: "unico" | "mensal";
+    grupoIndiceCorrecao?: string;
+  },
 ) {
   return patchJson<CustoResumo>(`/api/custos/${id}`, input);
 }
@@ -523,12 +538,12 @@ export function excluirCronograma(cenarioId: string) {
   return del(`/api/cenarios/${cenarioId}/cronograma`);
 }
 
-export function definirPontoIndiceCorrecao(cenarioId: string, input: { mes: number; percentual: string }) {
-  return postJson<{ mes: number; percentual: string }>(`/api/cenarios/${cenarioId}/indices-correcao`, input);
+export function definirPontoIndiceCorrecao(cenarioId: string, input: { grupo?: string; mes: number; percentual: string }) {
+  return postJson<{ grupo: string; mes: number; percentual: string }>(`/api/cenarios/${cenarioId}/indices-correcao`, input);
 }
 
-export function excluirPontoIndiceCorrecao(cenarioId: string, mes: number) {
-  return del(`/api/cenarios/${cenarioId}/indices-correcao/${mes}`);
+export function excluirPontoIndiceCorrecao(cenarioId: string, grupo: string, mes: number) {
+  return del(`/api/cenarios/${cenarioId}/indices-correcao/${mes}?grupo=${encodeURIComponent(grupo)}`);
 }
 
 export function definirFinanciamento(

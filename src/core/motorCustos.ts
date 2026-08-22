@@ -24,6 +24,10 @@ export interface ContextoCustos {
  * apenas um Custo com tipoIncidencia="pct_recebido_mes_anterior".
  */
 export function gerarDesembolsosMensais(custo: CustoInput, ctx: ContextoCustos): DesembolsoMensal[] {
+  return gerarDesembolsosSemGrupo(custo, ctx).map((d) => ({ ...d, grupoIndiceCorrecao: custo.grupoIndiceCorrecao }));
+}
+
+function gerarDesembolsosSemGrupo(custo: CustoInput, ctx: ContextoCustos): DesembolsoMensal[] {
   switch (custo.tipoIncidencia) {
     case "fixo": {
       const valor = custo.valorPrevisto ?? new Decimal(0);

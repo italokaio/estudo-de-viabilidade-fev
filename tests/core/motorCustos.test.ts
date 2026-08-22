@@ -122,4 +122,19 @@ describe("motor de custos — as 4 estrategias de incidencia", () => {
     expect(validarCronograma([{ mes: 1, percentualExecucaoMensal: new Decimal("1") }]).valido).toBe(true);
     expect(validarCronograma([{ mes: 1, percentualExecucaoMensal: new Decimal("0.5") }]).valido).toBe(false);
   });
+
+  it("cada desembolso gerado carrega o grupoIndiceCorrecao do custo que o originou (achado F20)", () => {
+    const custo: CustoInput = {
+      id: "c6",
+      categoriaNome: "Obra",
+      tipoIncidencia: "fixo",
+      valorPrevisto: new Decimal("50000"),
+      competenciaMes: 2,
+      recorrencia: "unico",
+      participaFluxoCaixa: true,
+      grupoIndiceCorrecao: "obra",
+    };
+    const desembolsos = gerarDesembolsosMensais(custo, ctxBase);
+    expect(desembolsos).toEqual([{ custoId: "c6", mes: 2, valor: new Decimal("50000"), grupoIndiceCorrecao: "obra" }]);
+  });
 });

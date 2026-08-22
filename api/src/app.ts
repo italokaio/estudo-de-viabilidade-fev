@@ -1009,10 +1009,11 @@ export async function buildApp() {
         recorrencia: c.recorrencia,
         valorRealizado: c.valorRealizado,
         status: c.status,
+        grupoIndiceCorrecao: c.grupoIndiceCorrecao,
         destinatariosComissao: c.destinatarios.map((d) => ({ id: d.id, nome: d.nome, percentualSplit: d.percentualSplit })),
       })),
       cronograma: cenario.cronograma.map((p) => ({ mes: p.mes, percentualExecucaoMensal: p.percentualExecucaoMensal })),
-      indicesCorrecao: cenario.indicesCorrecao.map((i) => ({ mes: i.mes, percentual: i.percentual })),
+      indicesCorrecao: cenario.indicesCorrecao.map((i) => ({ grupo: i.grupo, mes: i.mes, percentual: i.percentual })),
       financiamento: cenario.financiamento
         ? {
             valorContratado: cenario.financiamento.valorContratado,
@@ -1100,9 +1101,9 @@ export async function buildApp() {
 
   app.post<{
     Params: { id: string };
-    Body: { categoriaId?: string; tipologiaId?: string; valorPrevisto?: string; percentual?: string; competenciaMes?: number; recorrencia?: string };
+    Body: { categoriaId?: string; tipologiaId?: string; valorPrevisto?: string; percentual?: string; competenciaMes?: number; recorrencia?: string; grupoIndiceCorrecao?: string };
   }>("/api/cenarios/:id/custos", async (req, reply) => {
-    const { categoriaId, tipologiaId, valorPrevisto, percentual, competenciaMes, recorrencia } = req.body ?? {};
+    const { categoriaId, tipologiaId, valorPrevisto, percentual, competenciaMes, recorrencia, grupoIndiceCorrecao } = req.body ?? {};
     if (!categoriaId) {
       reply.code(400);
       return { erro: "Categoria de custo é obrigatória" };
@@ -1155,6 +1156,7 @@ export async function buildApp() {
       percentual: incidenciaPorValor ? undefined : percentual,
       competenciaMes: categoria.tipoIncidencia === "fixo" ? competenciaMes : undefined,
       recorrencia: (recorrencia as "unico" | "mensal") ?? "unico",
+      grupoIndiceCorrecao: grupoIndiceCorrecao?.trim() || undefined,
     });
     reply.code(201);
     return custo;
@@ -1294,10 +1296,10 @@ export async function buildApp() {
   // do cronograma, cada mes e independente (sem soma obrigatoria) -- upsert
   // por mes em vez de "criar tudo de uma vez", para o usuario poder
   // completar a serie aos poucos conforme novos indices sao divulgados.
-  app.post<{ Params: { id: string }; Body: { mes?: number; percentual?: string } }>(
+  app.post<{ Params: { id: string }; Body: { grupo?: string; mes?: number; percentual?: string } }>(
     "/api/cenarios/:id/indices-correcao",
     async (req, reply) => {
-      const { mes, percentual } = req.body ?? {};
+      const { grupo, mes, percentual } = req.body ?? {};
       if (mes === undefined || !Number.isInteger(mes) || mes < 1) {
         reply.code(400);
         return { erro: "mês deve ser um número inteiro maior ou igual a 1" };
@@ -1312,13 +1314,19 @@ export async function buildApp() {
         return { erro: "Cenário não encontrado" };
       }
       if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
-      const ponto = await definirPontoIndiceCorrecao({ empreendimentoId: cenario.empreendimentoId, cenarioId: cenario.id, mes, percentual: percentual.trim() });
+      const ponto = await definirPontoIndiceCorrecao({
+        empreendimentoId: cenario.empreendimentoId,
+        cenarioId: cenario.id,
+        grupo: grupo?.trim() || undefined,
+        mes,
+        percentual: percentual.trim(),
+      });
       reply.code(201);
       return ponto;
     },
   );
 
-  app.delete<{ Params: { id: string; mes: string } }>("/api/cenarios/:id/indices-correcao/:mes", async (req, reply) => {
+  app.delete<{ Params: { id: string; mes: string }; Querystring: { grupo?: string } }>("/api/cenarios/:id/indices-correcao/:mes", async (req, reply) => {
     if (req.usuario!.papel !== "admin") {
       reply.code(403);
       return { erro: "Apenas administradores podem excluir" };
@@ -1329,7 +1337,7 @@ export async function buildApp() {
       return { erro: "Cenário não encontrado" };
     }
     if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
-    await excluirPontoIndiceCorrecao(cenario.id, Number(req.params.mes));
+    await excluirPontoIndiceCorrecao(cenario.id, req.query?.grupo?.trim() || "padrao", Number(req.params.mes));
     reply.code(204);
     return null;
   });
@@ -1415,9 +1423,10 @@ export async function buildApp() {
       competenciaMes?: number | null;
       recorrencia?: "unico" | "mensal";
       estornar?: boolean;
+      grupoIndiceCorrecao?: string;
     };
   }>("/api/custos/:id", async (req, reply) => {
-    const { valorRealizado, valorPrevisto, percentual, competenciaMes, recorrencia, estornar } = req.body ?? {};
+    const { valorRealizado, valorPrevisto, percentual, competenciaMes, recorrencia, estornar, grupoIndiceCorrecao } = req.body ?? {};
     const custo = await prisma.custo.findUnique({ where: { id: req.params.id }, include: { categoria: true } });
     if (!custo) {
       reply.code(404);
@@ -1444,7 +1453,7 @@ export async function buildApp() {
       return prisma.custo.update({ where: { id: req.params.id }, data: { valorRealizado: valorRealizado.trim(), status: "realizado" } });
     }
 
-    return atualizarCusto(req.params.id, { valorPrevisto, percentual, competenciaMes, recorrencia });
+    return atualizarCusto(req.params.id, { valorPrevisto, percentual, competenciaMes, recorrencia, grupoIndiceCorrecao: grupoIndiceCorrecao?.trim() || undefined });
   });
 
   app.get<{ Params: { id: string } }>("/api/cenarios/:id/recebimentos", async (req, reply) => {
