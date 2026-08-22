@@ -215,6 +215,14 @@
 
 **Status.** Aprovado e implementado (trigésima fatia). Testado em `tests/integration/api.realizadoPercentual.test.ts` (listagem restrita a custos percentuais, registro/estorno, estabilidade de id entre recálculos — mesmo achado da sétima fatia —, e dois testes de regressão para exclusão em cascata de cenário/empreendimento com um desembolso já marcado como pago, mesmo padrão recorrente dos achados F10/F11/F13/F17). Verificado num navegador real (claro e escuro): gerou uma venda de R$300.000 com comissão de 5%, marcou a parcela de R$15.000 prevista como paga por R$14.500 na nova coluna "Custos percentuais" do painel Realizado × Projetado, e confirmou a tabela "Detalhe mês a mês" mostrando R$15.000,00 em Corrigido e R$14.500,00 em Pago no mesmo mês, nos dois temas.
 
+## F22 — Vínculo de usuário em lote: `empreendimentoIds` plural, `empreendimentoId` singular preservado (achado da Fase 1)
+
+**Contexto.** `POST /api/usuarios/:id/empreendimentos` (achado F5, controle de acesso por empreendimento) só vinculava um empreendimento por requisição — dar acesso a um usuário que gerencia vários empreendimentos exigia repetir a ação "Adicionar" uma vez por empreendimento, sem necessidade real.
+
+**Decisão.** A mesma rota passou a aceitar `empreendimentoIds` (array) além de `empreendimentoId` (string, comportamento original preservado — tratado como uma lista de um elemento). Todos os ids são validados como existentes antes de vincular qualquer um — se um id da lista não existir, a requisição inteira falha com 404 e nenhum vínculo é criado, evitando um estado parcial silencioso. Na tela, o `<select>` de "Dar acesso a" virou `multiple`, com o rótulo explicando o atalho (Ctrl/Cmd + clique).
+
+**Status.** Aprovado e implementado (trigésima primeira fatia). Testado em `tests/integration/api.permissaoPorEmpreendimento.test.ts` (vínculo de vários de uma vez, `empreendimentoId` singular continua funcionando, 400 sem nenhum dos dois campos, 404 com id inválido na lista sem vincular nenhum dos válidos). Verificado num navegador real (claro e escuro): criou um usuário de teste, selecionou dois empreendimentos de uma vez no `select multiple` e confirmou os dois aparecendo como chips após uma única ação "Adicionar (2)".
+
 ## Execução dos testes de integração em sequência, não em paralelo
 
 **Problema encontrado durante a Fase 0 (não estava previsto na especificação).** O Vitest roda arquivos de teste em paralelo por padrão; como os três arquivos de teste de integração compartilham o mesmo arquivo SQLite, um arquivo apagava dados que outro estava inserindo no mesmo instante, causando erros de chave estrangeira e timeouts intermitentes.

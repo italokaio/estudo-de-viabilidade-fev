@@ -189,4 +189,72 @@ describe("API — permissão por empreendimento", () => {
     });
     expect(semAcessoUnidades.statusCode).toBe(404);
   });
+
+  /**
+   * Vinculo em lote (achado F22, docs/DECISOES.md — "vinculo de usuario em
+   * lote"): `empreendimentoIds` (plural) vincula varios de uma vez, alem do
+   * `empreendimentoId` (singular) que ja existia.
+   */
+  describe("vínculo em lote (achado F22)", () => {
+    it("vincula vários empreendimentos de uma vez via empreendimentoIds", async () => {
+      const cookieAdmin = await criarAdminLogado();
+      const a = await app.inject({ method: "POST", url: "/api/empreendimentos", headers: { cookie: cookieAdmin }, payload: { nome: "Vila Sol" } });
+      const b = await app.inject({ method: "POST", url: "/api/empreendimentos", headers: { cookie: cookieAdmin }, payload: { nome: "Vila Lua" } });
+      const usuarioComum = await criarUsuario({ email: "lote@local.test", nome: "Usuário Lote", senha: "senha123", papel: "usuario" });
+
+      const vincular = await app.inject({
+        method: "POST",
+        url: `/api/usuarios/${usuarioComum.id}/empreendimentos`,
+        headers: { cookie: cookieAdmin },
+        payload: { empreendimentoIds: [a.json().id, b.json().id] },
+      });
+      expect(vincular.statusCode).toBe(201);
+      expect(vincular.json()).toHaveLength(2);
+
+      const cookieComum = await login("lote@local.test", "senha123");
+      const lista = await app.inject({ method: "GET", url: "/api/empreendimentos", headers: { cookie: cookieComum } });
+      expect(lista.json()).toHaveLength(2);
+    });
+
+    it("empreendimentoId (singular) continua funcionando, sem quebrar compatibilidade", async () => {
+      const cookieAdmin = await criarAdminLogado();
+      const criado = await app.inject({ method: "POST", url: "/api/empreendimentos", headers: { cookie: cookieAdmin }, payload: { nome: "Vila Sol" } });
+      const usuarioComum = await criarUsuario({ email: "singular@local.test", nome: "Usuário", senha: "senha123", papel: "usuario" });
+
+      const vincular = await app.inject({
+        method: "POST",
+        url: `/api/usuarios/${usuarioComum.id}/empreendimentos`,
+        headers: { cookie: cookieAdmin },
+        payload: { empreendimentoId: criado.json().id },
+      });
+      expect(vincular.statusCode).toBe(201);
+      expect(vincular.json()).toHaveLength(1);
+    });
+
+    it("rejeita quando nem empreendimentoId nem empreendimentoIds são enviados", async () => {
+      const cookieAdmin = await criarAdminLogado();
+      const usuarioComum = await criarUsuario({ email: "vazio@local.test", nome: "Usuário", senha: "senha123", papel: "usuario" });
+
+      const res = await app.inject({ method: "POST", url: `/api/usuarios/${usuarioComum.id}/empreendimentos`, headers: { cookie: cookieAdmin }, payload: {} });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("404 quando algum id da lista não existe, e não vincula nenhum dos válidos", async () => {
+      const cookieAdmin = await criarAdminLogado();
+      const a = await app.inject({ method: "POST", url: "/api/empreendimentos", headers: { cookie: cookieAdmin }, payload: { nome: "Vila Sol" } });
+      const usuarioComum = await criarUsuario({ email: "parcial@local.test", nome: "Usuário", senha: "senha123", papel: "usuario" });
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/usuarios/${usuarioComum.id}/empreendimentos`,
+        headers: { cookie: cookieAdmin },
+        payload: { empreendimentoIds: [a.json().id, "inexistente"] },
+      });
+      expect(res.statusCode).toBe(404);
+
+      const cookieComum = await login("parcial@local.test", "senha123");
+      const lista = await app.inject({ method: "GET", url: "/api/empreendimentos", headers: { cookie: cookieComum } });
+      expect(lista.json()).toHaveLength(0);
+    });
+  });
 });

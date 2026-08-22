@@ -7,7 +7,7 @@ import {
   fetchEmpreendimentosDoUsuario,
   fetchUsuarios,
   redefinirSenhaUsuario,
-  vincularEmpreendimento,
+  vincularEmpreendimentos,
   type EmpreendimentoResumo,
   type EmpreendimentoVinculado,
   type Papel,
@@ -228,7 +228,7 @@ function RedefinirSenhaForm({ usuarioId, onErro }: { usuarioId: string; onErro: 
 function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErro: (msg: string) => void }) {
   const [vinculados, setVinculados] = useState<EmpreendimentoVinculado[]>([]);
   const [todos, setTodos] = useState<EmpreendimentoResumo[]>([]);
-  const [novoId, setNovoId] = useState("");
+  const [novosIds, setNovosIds] = useState<string[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
 
@@ -248,17 +248,16 @@ function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErr
 
   const disponiveis = todos.filter((e) => !vinculados.some((v) => v.id === e.id));
 
-  useEffect(() => {
-    if (!novoId && disponiveis[0]) setNovoId(disponiveis[0].id);
-  }, [disponiveis.length]);
-
+  // Vínculo em lote (achado F22, docs/DECISOES.md): selecao multipla
+  // (Ctrl/Cmd + clique) manda varios empreendimentoIds numa unica
+  // requisicao, em vez de repetir "Adicionar" um por um.
   async function adicionar(e: React.FormEvent) {
     e.preventDefault();
-    if (!novoId) return;
+    if (novosIds.length === 0) return;
     setSalvando(true);
     try {
-      await vincularEmpreendimento(usuarioId, novoId);
-      setNovoId("");
+      await vincularEmpreendimentos(usuarioId, novosIds);
+      setNovosIds([]);
       recarregar();
     } catch (err: any) {
       onErro(String(err.message ?? err));
@@ -317,10 +316,14 @@ function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErr
       {disponiveis.length > 0 && (
         <form onSubmit={adicionar} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 220 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Dar acesso a</span>
+            <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>
+              Dar acesso a (Ctrl/Cmd + clique para vários)
+            </span>
             <select
-              value={novoId}
-              onChange={(e) => setNovoId(e.target.value)}
+              multiple
+              value={novosIds}
+              onChange={(e) => setNovosIds(Array.from(e.target.selectedOptions, (o) => o.value))}
+              size={Math.min(disponiveis.length, 5)}
               style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
             >
               {disponiveis.map((e) => (
@@ -330,8 +333,8 @@ function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErr
               ))}
             </select>
           </label>
-          <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
-            {salvando ? "Salvando…" : "Adicionar"}
+          <Button type="submit" disabled={salvando || novosIds.length === 0} style={{ padding: "6px 10px", fontSize: 12 }}>
+            {salvando ? "Salvando…" : novosIds.length > 1 ? `Adicionar (${novosIds.length})` : "Adicionar"}
           </Button>
         </form>
       )}

@@ -648,8 +648,9 @@ export async function fetchEmpreendimentosDoUsuario(usuarioId: string): Promise<
   return res.json();
 }
 
-export function vincularEmpreendimento(usuarioId: string, empreendimentoId: string) {
-  return postJson<EmpreendimentoVinculado[]>(`/api/usuarios/${usuarioId}/empreendimentos`, { empreendimentoId });
+/** Vínculo em lote (achado F22, docs/DECISOES.md) — uma ou várias de uma vez. */
+export function vincularEmpreendimentos(usuarioId: string, empreendimentoIds: string[]) {
+  return postJson<EmpreendimentoVinculado[]>(`/api/usuarios/${usuarioId}/empreendimentos`, { empreendimentoIds });
 }
 
 export function desvincularEmpreendimento(usuarioId: string, empreendimentoId: string) {

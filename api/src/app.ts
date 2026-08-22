@@ -226,30 +226,42 @@ export async function buildApp() {
     return listarEmpreendimentosDoUsuario(req.params.id);
   });
 
-  app.post<{ Params: { id: string }; Body: { empreendimentoId?: string } }>("/api/usuarios/:id/empreendimentos", async (req, reply) => {
-    if (req.usuario!.papel !== "admin") {
-      reply.code(403);
-      return { erro: "Apenas administradores podem gerenciar vínculos de acesso" };
-    }
-    const { empreendimentoId } = req.body ?? {};
-    if (!empreendimentoId) {
-      reply.code(400);
-      return { erro: "empreendimentoId é obrigatório" };
-    }
-    const usuario = await prisma.usuario.findUnique({ where: { id: req.params.id } });
-    if (!usuario) {
-      reply.code(404);
-      return { erro: "Usuário não encontrado" };
-    }
-    const empreendimento = await prisma.empreendimento.findUnique({ where: { id: empreendimentoId } });
-    if (!empreendimento) {
-      reply.code(404);
-      return { erro: "Empreendimento não encontrado" };
-    }
-    await vincularUsuarioEmpreendimento(req.params.id, empreendimentoId);
-    reply.code(201);
-    return listarEmpreendimentosDoUsuario(req.params.id);
-  });
+  // Vinculo em lote (achado F22, docs/DECISOES.md — "vinculo de usuario em
+  // lote"): `empreendimentoIds` (plural) vincula varios de uma vez;
+  // `empreendimentoId` (singular) continua funcionando, para nao quebrar
+  // nenhum chamador existente -- e tratado como uma lista de um elemento.
+  app.post<{ Params: { id: string }; Body: { empreendimentoId?: string; empreendimentoIds?: string[] } }>(
+    "/api/usuarios/:id/empreendimentos",
+    async (req, reply) => {
+      if (req.usuario!.papel !== "admin") {
+        reply.code(403);
+        return { erro: "Apenas administradores podem gerenciar vínculos de acesso" };
+      }
+      const { empreendimentoId, empreendimentoIds } = req.body ?? {};
+      const ids = empreendimentoIds && empreendimentoIds.length > 0 ? empreendimentoIds : empreendimentoId ? [empreendimentoId] : [];
+      if (ids.length === 0) {
+        reply.code(400);
+        return { erro: "empreendimentoId ou empreendimentoIds é obrigatório" };
+      }
+      const usuario = await prisma.usuario.findUnique({ where: { id: req.params.id } });
+      if (!usuario) {
+        reply.code(404);
+        return { erro: "Usuário não encontrado" };
+      }
+      const empreendimentos = await prisma.empreendimento.findMany({ where: { id: { in: ids } }, select: { id: true } });
+      const idsEncontrados = new Set(empreendimentos.map((e) => e.id));
+      const idsInexistentes = ids.filter((id) => !idsEncontrados.has(id));
+      if (idsInexistentes.length > 0) {
+        reply.code(404);
+        return { erro: `Empreendimento(s) não encontrado(s): ${idsInexistentes.join(", ")}` };
+      }
+      for (const id of ids) {
+        await vincularUsuarioEmpreendimento(req.params.id, id);
+      }
+      reply.code(201);
+      return listarEmpreendimentosDoUsuario(req.params.id);
+    },
+  );
 
   app.delete<{ Params: { id: string; empreendimentoId: string } }>(
     "/api/usuarios/:id/empreendimentos/:empreendimentoId",
