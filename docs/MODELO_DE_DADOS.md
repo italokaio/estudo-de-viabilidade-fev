@@ -1,6 +1,6 @@
 # Modelo de dados — Fase 0
 
-Schema completo em [`prisma/schema.prisma`](../prisma/schema.prisma). 23 tabelas (13 da Fase 0 + `permuta`, `usuario`, `sessao`, `empreendimento_usuario`, `indice_correcao`, `distrato`, `financiamento_producao`, `destinatario_comissao`, `renegociacao_venda` e `desembolso_custo`, adicionadas na Fase 1), todas genéricas — nenhuma coluna ou valor específico de um empreendimento. O que muda entre o Splendido e qualquer outro empreendimento são as **linhas**, nunca a tabela.
+Schema completo em [`prisma/schema.prisma`](../prisma/schema.prisma). 24 tabelas (13 da Fase 0 + `permuta`, `usuario`, `sessao`, `empreendimento_usuario`, `indice_correcao`, `distrato`, `financiamento_producao`, `destinatario_comissao`, `renegociacao_venda`, `desembolso_custo` e `contraparte_permuta`, adicionadas na Fase 1), todas genéricas — nenhuma coluna ou valor específico de um empreendimento. O que muda entre o Splendido e qualquer outro empreendimento são as **linhas**, nunca a tabela.
 
 Convenção: todo valor monetário ou percentual é `String` (texto decimal), nunca `Float`. Ver `docs/ARQUITETURA.md`, princípio B.
 
@@ -12,6 +12,7 @@ Convenção: todo valor monetário ou percentual é `String` (texto decimal), nu
 | `tipologia` | Produto (ex.: "1 Quarto", "Loja") | Cadastro livre, sem lista fixa |
 | `unidade` | Unidade física vendável | `precoVenda` é um valor direto na linha — sempre foi assim, inclusive quando calculado por cascata de andar (Fase 1, achado F2): a estratégia de precificação decide o número no momento da criação, o schema nunca soube que existia mais de uma estratégia |
 | `permuta` | Cadastro nominal de quem recebeu uma unidade permutada | 1:1 com `unidade` (achado F3/F4); nunca lida pelo motor — `Unidade.status='permutada'` já é suficiente para excluir a unidade do VGV |
+| `contraparte_permuta` | Permuta parcial — quem mais divide a mesma permuta com a contraparte principal (Fase 1, achado F24) | 1:N com `permuta`; nunca lida pelo motor, mesmo espírito de `destinatario_comissao` (achado F13) — a soma de `percentualSplit` de uma permuta nunca pode ultrapassar 100%, validado na API |
 | `condicao_pagamento` | Agrupa modalidades | 0 ou 1 por tipologia (ou pode ser por empreendimento, se `tipologiaId` for nulo) |
 | `modalidade_pagamento` | Uma fatia da condição (ex.: "Entrada") | `tipoDistribuicao` é o campo que generaliza o motor — ver `REGRAS_DE_NEGOCIO.md` |
 | `premissa_velocidade_vendas` | Quantas unidades/mês/tipologia se espera vender | Consumida por `gerarVendasDePremissaVelocidade()` para criar `Venda` reais |

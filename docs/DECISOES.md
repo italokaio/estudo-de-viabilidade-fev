@@ -233,6 +233,14 @@
 
 **Status.** Aprovado e implementado (trigésima segunda fatia). Testado em `tests/integration/api.permissaoPorEmpreendimento.test.ts` (vínculo sem papel continua "edicao", "leitura" permite GET e bloqueia POST/PATCH/DELETE com 403, reenviar o mesmo vínculo com papel diferente troca o papel — upsert, achado F22 —, validação de papel inválido, admin nunca é afetado). Verificado num navegador real (claro e escuro): vinculou um usuário de teste como "Leitura" pela tela, confirmou via chamadas diretas à API (sessão do próprio usuário) que GET devolve 200 e POST devolve 403 com a mensagem correta, alternou o papel para "Edição" clicando no badge do vínculo, e confirmou o badge atualizado nos dois temas.
 
+## F24 — Permuta parcial: `ContrapartePermuta` espelha `DestinatarioComissao`, sem tocar em `Permuta` (achado da Fase 1)
+
+**Contexto.** `Permuta` (achado F3) sempre modelou uma contraparte única por unidade — `nomeContraparte` direto na linha, `unidadeId` único. Na prática, o imóvel/terreno permutado às vezes pertence a mais de uma pessoa (herdeiros, sócios), e cada uma recebe uma fatia da unidade dada em troca — o mesmo problema estrutural do split nominal de comissão (achado F13), agora do lado da permuta.
+
+**Decisão.** Nova tabela `ContrapartePermuta` (`permutaId`, `nome`, `documento?`, `percentualSplit`, `valorAtribuido?`), cadastro nominal puro — nunca lido pelo motor, mesmo espírito de `Permuta`/`Distrato`/`DestinatarioComissao`. `Permuta.nomeContraparte` continua sendo a contraparte principal (nenhuma mudança nela); `ContrapartePermuta` registra quem mais divide a mesma permuta. A soma de `percentualSplit` de todas as contrapartes de uma permuta nunca pode ultrapassar 100% — validação idêntica, código idêntico em espírito ao achado F13 (mesma tolerância de arredondamento, mesma mensagem de erro adaptada).
+
+**Status.** Aprovado e implementado (trigésima terceira fatia). Testado em `tests/integration/api.permuta.test.ts` (cadastro, soma exata de 100%, rejeição de excesso, edição respeitando o limite contra as demais, exclusão, exclusão em cascata ao desfazer a permuta e ao excluir o empreendimento, 403 para usuário comum, 404 para permuta inexistente). Verificado num navegador real (claro e escuro): registrou uma permuta com "João da Silva", abriu o painel "Split" da unidade e cadastrou "Maria Sócia" com 40%, confirmando o badge "Split (1)" no botão e a linha "Maria Sócia — 40.0%" no painel, nos dois temas.
+
 ## Execução dos testes de integração em sequência, não em paralelo
 
 **Problema encontrado durante a Fase 0 (não estava previsto na especificação).** O Vitest roda arquivos de teste em paralelo por padrão; como os três arquivos de teste de integração compartilham o mesmo arquivo SQLite, um arquivo apagava dados que outro estava inserindo no mesmo instante, causando erros de chave estrangeira e timeouts intermitentes.

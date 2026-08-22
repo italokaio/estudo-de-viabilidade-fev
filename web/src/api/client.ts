@@ -466,6 +466,14 @@ export interface VendaResumo {
   renegociacoes: RenegociacaoResumo[];
 }
 
+export interface ContrapartePermutaResumo {
+  id: string;
+  nome: string;
+  documento: string | null;
+  percentualSplit: string;
+  valorAtribuido: string | null;
+}
+
 export interface UnidadeResumo {
   id: string;
   numero: string;
@@ -473,7 +481,9 @@ export interface UnidadeResumo {
   areaPrivativa: string | null;
   precoVenda: string | null;
   status: string;
-  permuta: { id: string; nomeContraparte: string; documento: string | null; valorAtribuido: string | null } | null;
+  permuta:
+    | { id: string; nomeContraparte: string; documento: string | null; valorAtribuido: string | null; contrapartes: ContrapartePermutaResumo[] }
+    | null;
   venda: VendaResumo | null;
 }
 
@@ -499,6 +509,19 @@ export function atualizarPermuta(
 
 export function desfazerPermuta(unidadeId: string) {
   return del(`/api/unidades/${unidadeId}/permuta`);
+}
+
+/** Permuta parcial (achado F24, docs/DECISOES.md) — contraparte adicional que divide a mesma permuta. */
+export function criarContrapartePermuta(permutaId: string, input: { nome: string; documento?: string; percentualSplit: string; valorAtribuido?: string }) {
+  return postJson<ContrapartePermutaResumo>(`/api/permutas/${permutaId}/contrapartes`, input);
+}
+
+export function atualizarContrapartePermuta(id: string, input: { nome?: string; documento?: string; percentualSplit?: string; valorAtribuido?: string }) {
+  return patchJson<ContrapartePermutaResumo>(`/api/contrapartes-permuta/${id}`, input);
+}
+
+export function excluirContrapartePermuta(id: string) {
+  return del(`/api/contrapartes-permuta/${id}`);
 }
 
 export function registrarDistrato(vendaId: string, input: { percentualRetencao?: string; motivo?: string }) {

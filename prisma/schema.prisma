@@ -221,8 +221,33 @@ model Permuta {
 
   empreendimento Empreendimento @relation(fields: [empreendimentoId], references: [id])
   unidade        Unidade        @relation(fields: [unidadeId], references: [id])
+  contrapartes   ContrapartePermuta[]
 
   @@map("permuta")
+}
+
+/**
+ * Permuta parcial (achado F24, docs/DECISOES.md — "permuta parcial: dividir
+ * uma unidade entre multiplas contrapartes"): cadastro nominal de quem mais
+ * divide a mesma permuta com a contraparte principal (Permuta.nomeContraparte)
+ * -- ex.: um terreno permutado que pertencia a varios herdeiros/socios, cada
+ * um recebendo uma fatia da unidade dada em troca. Mesmo espirito de
+ * DestinatarioComissao (achado F13): puramente informativo, nunca lido pelo
+ * motor -- a soma de percentualSplit nunca pode ultrapassar 100%, validado
+ * na API.
+ */
+model ContrapartePermuta {
+  id              String   @id @default(cuid())
+  permutaId       String
+  nome            String
+  documento       String?
+  percentualSplit String // decimal-as-string, 0..1 -- fatia desta permuta que esta contraparte recebe
+  valorAtribuido  String? // decimal-as-string, so para registro -- nao participa do motor
+  createdAt       DateTime @default(now())
+
+  permuta Permuta @relation(fields: [permutaId], references: [id])
+
+  @@map("contraparte_permuta")
 }
 
 model CondicaoPagamento {

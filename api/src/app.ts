@@ -9,11 +9,13 @@ import {
   atualizarCusto,
   atualizarDestinatarioComissao,
   atualizarEmpreendimento,
+  atualizarContrapartePermuta,
   atualizarPermuta,
   atualizarTipologia,
   criarCategoriaCusto,
   criarCenario,
   criarCondicaoPagamento,
+  criarContrapartePermuta,
   criarCronograma,
   criarCusto,
   criarDestinatarioComissao,
@@ -31,6 +33,7 @@ import {
   excluirCategoriaCusto,
   excluirCenario,
   excluirCondicaoPagamento,
+  excluirContrapartePermuta,
   excluirCronograma,
   excluirCusto,
   excluirDestinatarioComissao,
@@ -572,7 +575,7 @@ export async function buildApp() {
     const unidades = await prisma.unidade.findMany({
       where: { tipologiaId: req.params.id },
       include: {
-        permuta: true,
+        permuta: { include: { contrapartes: { orderBy: { createdAt: "asc" } } } },
         vendas: { orderBy: { createdAt: "desc" }, take: 1, include: { distrato: true, renegociacoes: { orderBy: { createdAt: "asc" } } } },
       },
       orderBy: [{ andar: "asc" }, { numero: "asc" }],
@@ -586,7 +589,21 @@ export async function buildApp() {
         areaPrivativa: u.areaPrivativa,
         precoVenda: u.precoVenda,
         status: u.status,
-        permuta: u.permuta ? { id: u.permuta.id, nomeContraparte: u.permuta.nomeContraparte, documento: u.permuta.documento, valorAtribuido: u.permuta.valorAtribuido } : null,
+        permuta: u.permuta
+          ? {
+              id: u.permuta.id,
+              nomeContraparte: u.permuta.nomeContraparte,
+              documento: u.permuta.documento,
+              valorAtribuido: u.permuta.valorAtribuido,
+              contrapartes: u.permuta.contrapartes.map((c) => ({
+                id: c.id,
+                nome: c.nome,
+                documento: c.documento,
+                percentualSplit: c.percentualSplit,
+                valorAtribuido: c.valorAtribuido,
+              })),
+            }
+          : null,
         venda: ultimaVenda
           ? {
               id: ultimaVenda.id,
@@ -683,6 +700,83 @@ export async function buildApp() {
       reply.code(404);
       return { erro };
     }
+    reply.code(204);
+    return null;
+  });
+
+  // Contraparte adicional de uma permuta (achado F24, docs/DECISOES.md —
+  // "permuta parcial"): cadastro nominal de quem mais divide a mesma
+  // permuta com a contraparte principal. Nunca lido pelo motor, mesmo
+  // espirito de DestinatarioComissao (achado F13).
+  app.post<{
+    Params: { permutaId: string };
+    Body: { nome?: string; documento?: string; percentualSplit?: string; valorAtribuido?: string };
+  }>("/api/permutas/:permutaId/contrapartes", async (req, reply) => {
+    const { nome, documento, percentualSplit, valorAtribuido } = req.body ?? {};
+    if (!nome || !nome.trim()) {
+      reply.code(400);
+      return { erro: "Nome da contraparte é obrigatório" };
+    }
+    if (!percentualSplit || !percentualSplit.trim()) {
+      reply.code(400);
+      return { erro: "Percentual de split é obrigatório" };
+    }
+    const permuta = await prisma.permuta.findUnique({ where: { id: req.params.permutaId } });
+    if (!permuta) {
+      reply.code(404);
+      return { erro: "Permuta não encontrada" };
+    }
+    if (!(await garantirAcesso(req, reply, permuta.empreendimentoId))) return;
+    const resultado = await criarContrapartePermuta(permuta.id, {
+      nome: nome.trim(),
+      documento: documento?.trim() || undefined,
+      percentualSplit: percentualSplit.trim(),
+      valorAtribuido,
+    });
+    if ("erro" in resultado) {
+      reply.code(400);
+      return resultado;
+    }
+    reply.code(201);
+    return resultado.contraparte;
+  });
+
+  app.patch<{
+    Params: { id: string };
+    Body: { nome?: string; documento?: string | null; percentualSplit?: string; valorAtribuido?: string | null };
+  }>("/api/contrapartes-permuta/:id", async (req, reply) => {
+    const contraparte = await prisma.contrapartePermuta.findUnique({ where: { id: req.params.id }, include: { permuta: true } });
+    if (!contraparte) {
+      reply.code(404);
+      return { erro: "Contraparte de permuta não encontrada" };
+    }
+    if (!(await garantirAcesso(req, reply, contraparte.permuta.empreendimentoId))) return;
+    const { nome, documento, percentualSplit, valorAtribuido } = req.body ?? {};
+    const resultado = await atualizarContrapartePermuta(req.params.id, {
+      nome: nome?.trim() || undefined,
+      documento,
+      percentualSplit: percentualSplit?.trim() || undefined,
+      valorAtribuido,
+    });
+    if ("erro" in resultado) {
+      reply.code(400);
+      return resultado;
+    }
+    return resultado.contraparte;
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/contrapartes-permuta/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const contraparte = await prisma.contrapartePermuta.findUnique({ where: { id: req.params.id }, include: { permuta: true } });
+    if (!contraparte) {
+      reply.code(404);
+      return { erro: "Contraparte de permuta não encontrada" };
+    }
+    if (!(await garantirAcesso(req, reply, contraparte.permuta.empreendimentoId))) return;
+    await excluirContrapartePermuta(req.params.id);
     reply.code(204);
     return null;
   });

@@ -50,6 +50,9 @@ export async function excluirEmpreendimento(id: string) {
   await prisma.premissaVelocidadeVendas.deleteMany({ where: { empreendimentoId: id } });
   await prisma.modalidadePagamento.deleteMany({ where: { condicaoPagamento: { empreendimentoId: id } } });
   await prisma.condicaoPagamento.deleteMany({ where: { empreendimentoId: id } });
+  // ContrapartePermuta (achado F24) referencia Permuta sem cascade -- mesmo
+  // padrao dos achados F10/F11/F13/F17/F21.
+  await prisma.contrapartePermuta.deleteMany({ where: { permuta: { empreendimentoId: id } } });
   await prisma.permuta.deleteMany({ where: { empreendimentoId: id } });
   await prisma.unidade.deleteMany({ where: { empreendimentoId: id } });
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { empreendimentoId: id } });
@@ -436,9 +439,67 @@ export async function atualizarPermuta(unidadeId: string, input: AtualizarPermut
 export async function desfazerPermuta(unidadeId: string): Promise<string | null> {
   const permuta = await prisma.permuta.findUnique({ where: { unidadeId } });
   if (!permuta) return "Esta unidade não tem permuta registrada";
+  // ContrapartePermuta (achado F24) referencia Permuta sem cascade -- mesmo
+  // padrao dos achados F10/F11/F13/F17/F21.
+  await prisma.contrapartePermuta.deleteMany({ where: { permutaId: permuta.id } });
   await prisma.permuta.delete({ where: { unidadeId } });
   await prisma.unidade.update({ where: { id: unidadeId }, data: { status: "estoque" } });
   return null;
+}
+
+
+/**
+ * Cria uma contraparte adicional de uma permuta (achado F24,
+ * docs/DECISOES.md — "permuta parcial") -- cadastro nominal puro, nunca
+ * lido pelo motor, mesmo espirito de DestinatarioComissao (achado F13). A
+ * soma de percentualSplit de todas as contrapartes de uma permuta nunca
+ * pode ultrapassar 100%.
+ */
+export async function criarContrapartePermuta(
+  permutaId: string,
+  input: { nome: string; documento?: string; percentualSplit: string; valorAtribuido?: string },
+): Promise<{ erro: string } | { contraparte: Awaited<ReturnType<typeof prisma.contrapartePermuta.create>> }> {
+  const existentes = await prisma.contrapartePermuta.findMany({ where: { permutaId } });
+  const somaAtual = existentes.reduce((acc, c) => acc.plus(new Decimal(c.percentualSplit)), new Decimal(0));
+  const novo = new Decimal(input.percentualSplit);
+  if (somaAtual.plus(novo).greaterThan(new Decimal(1).plus(TOLERANCIA_SPLIT))) {
+    return {
+      erro: `Esta permuta já tem ${somaAtual.times(100).toFixed(1)}% do split alocado — adicionar ${novo.times(100).toFixed(1)}% ultrapassaria 100%.`,
+    };
+  }
+  const contraparte = await prisma.contrapartePermuta.create({ data: { permutaId, ...input } });
+  return { contraparte };
+}
+
+export interface AtualizarContrapartePermutaInput {
+  nome?: string;
+  documento?: string | null;
+  percentualSplit?: string;
+  valorAtribuido?: string | null;
+}
+
+export async function atualizarContrapartePermuta(
+  id: string,
+  input: AtualizarContrapartePermutaInput,
+): Promise<{ erro: string } | { contraparte: Awaited<ReturnType<typeof prisma.contrapartePermuta.update>> }> {
+  const atual = await prisma.contrapartePermuta.findUnique({ where: { id } });
+  if (!atual) return { erro: "Contraparte de permuta não encontrada" };
+  if (input.percentualSplit) {
+    const outros = await prisma.contrapartePermuta.findMany({ where: { permutaId: atual.permutaId, id: { not: id } } });
+    const somaOutros = outros.reduce((acc, c) => acc.plus(new Decimal(c.percentualSplit)), new Decimal(0));
+    const novo = new Decimal(input.percentualSplit);
+    if (somaOutros.plus(novo).greaterThan(new Decimal(1).plus(TOLERANCIA_SPLIT))) {
+      return {
+        erro: `As demais contrapartes já somam ${somaOutros.times(100).toFixed(1)}% — ${novo.times(100).toFixed(1)}% ultrapassaria 100%.`,
+      };
+    }
+  }
+  const contraparte = await prisma.contrapartePermuta.update({ where: { id }, data: input });
+  return { contraparte };
+}
+
+export async function excluirContrapartePermuta(id: string) {
+  await prisma.contrapartePermuta.delete({ where: { id } });
 }
 
 export interface RegistrarDistratoInput {

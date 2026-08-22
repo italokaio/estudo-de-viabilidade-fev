@@ -10,6 +10,7 @@ import {
   criarCategoriaCusto,
   criarCenario,
   criarCondicaoPagamento,
+  criarContrapartePermuta,
   criarCronograma,
   criarCusto,
   criarDestinatarioComissao,
@@ -28,6 +29,7 @@ import {
   duplicarCenario,
   excluirCenario,
   excluirCondicaoPagamento,
+  excluirContrapartePermuta,
   excluirCronograma,
   excluirCusto,
   excluirDestinatarioComissao,
@@ -2022,6 +2024,36 @@ function LinhaUnidadePermuta({
   const [novoValorVenda, setNovoValorVenda] = useState("");
   const [motivoRenegociacao, setMotivoRenegociacao] = useState("");
   const [salvando, setSalvando] = useState(false);
+  const [mostrarSplit, setMostrarSplit] = useState(false);
+  const [nomeContraparteSplit, setNomeContraparteSplit] = useState("");
+  const [percentualSplit, setPercentualSplit] = useState("");
+  const [salvandoContraparte, setSalvandoContraparte] = useState(false);
+
+  async function adicionarContraparte(e: React.FormEvent) {
+    e.preventDefault();
+    if (!unidade.permuta) return;
+    setSalvandoContraparte(true);
+    try {
+      await criarContrapartePermuta(unidade.permuta.id, { nome: nomeContraparteSplit, percentualSplit: percentualSplit });
+      setNomeContraparteSplit("");
+      setPercentualSplit("");
+      onRegistrado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvandoContraparte(false);
+    }
+  }
+
+  async function removerContraparte(id: string, nome: string) {
+    if (!window.confirm(`Remover "${nome}" do split desta permuta?`)) return;
+    try {
+      await excluirContrapartePermuta(id);
+      onRegistrado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    }
+  }
 
   function abrirRegistro() {
     setNomeContraparte("");
@@ -2182,49 +2214,95 @@ function LinhaUnidadePermuta({
 
   const distratoInfo = unidade.status === "estoque" && unidade.venda?.status === "distratada" ? unidade.venda.distrato : null;
   const ultimaRenegociacao = unidade.venda?.renegociacoes.length ? unidade.venda.renegociacoes[unidade.venda.renegociacoes.length - 1] : null;
+  const contrapartes = unidade.permuta?.contrapartes ?? [];
 
   return (
-    <tr>
-      <td style={{ padding: "4px 0", color: "var(--ink-primary)", font: "var(--text-mono-body)" }}>{unidade.numero}</td>
-      <td style={{ color: "var(--ink-secondary)" }}>{unidade.status}</td>
-      <td style={{ color: "var(--ink-secondary)" }}>
-        {unidade.permuta?.nomeContraparte ??
-          (distratoInfo ? `Reembolsar ${formatBRL(distratoInfo.valorReembolsar)} · retido ${formatBRL(distratoInfo.valorRetido)}` : null) ??
-          (ultimaRenegociacao ? `Renegociada: ${formatBRL(ultimaRenegociacao.valorVendaAnterior)} → ${formatBRL(ultimaRenegociacao.novoValorVenda)}` : "—")}
-      </td>
-      <td style={{ textAlign: "right" }}>
-        {unidade.status === "estoque" && (
-          <Button variant="secondary" onClick={abrirRegistro} style={{ padding: "4px 8px", fontSize: 11, marginRight: distratoInfo ? 6 : 0 }}>
-            Registrar permuta
-          </Button>
-        )}
-        {unidade.status === "permutada" && (
-          <>
-            <Button variant="secondary" onClick={abrirEdicaoPermuta} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
-              Editar
+    <>
+      <tr>
+        <td style={{ padding: "4px 0", color: "var(--ink-primary)", font: "var(--text-mono-body)" }}>{unidade.numero}</td>
+        <td style={{ color: "var(--ink-secondary)" }}>{unidade.status}</td>
+        <td style={{ color: "var(--ink-secondary)" }}>
+          {unidade.permuta?.nomeContraparte ??
+            (distratoInfo ? `Reembolsar ${formatBRL(distratoInfo.valorReembolsar)} · retido ${formatBRL(distratoInfo.valorRetido)}` : null) ??
+            (ultimaRenegociacao ? `Renegociada: ${formatBRL(ultimaRenegociacao.valorVendaAnterior)} → ${formatBRL(ultimaRenegociacao.novoValorVenda)}` : "—")}
+        </td>
+        <td style={{ textAlign: "right" }}>
+          {unidade.status === "estoque" && (
+            <Button variant="secondary" onClick={abrirRegistro} style={{ padding: "4px 8px", fontSize: 11, marginRight: distratoInfo ? 6 : 0 }}>
+              Registrar permuta
             </Button>
-            <Button variant="secondary" onClick={desfazer} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
-              Desfazer
+          )}
+          {unidade.status === "permutada" && (
+            <>
+              <Button variant="secondary" onClick={() => setMostrarSplit((v) => !v)} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
+                Split{contrapartes.length > 0 ? ` (${contrapartes.length})` : ""}
+              </Button>
+              <Button variant="secondary" onClick={abrirEdicaoPermuta} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
+                Editar
+              </Button>
+              <Button variant="secondary" onClick={desfazer} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+                Desfazer
+              </Button>
+            </>
+          )}
+          {unidade.status === "vendida" && unidade.venda?.status === "ativa" && (
+            <>
+              <Button variant="secondary" onClick={() => setRenegociando(true)} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
+                Renegociar
+              </Button>
+              <Button variant="secondary" onClick={() => setDistratando(true)} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+                Distratar
+              </Button>
+            </>
+          )}
+          {distratoInfo && (
+            <Button variant="secondary" onClick={desfazerDistratoAcao} style={{ padding: "4px 8px", fontSize: 11 }}>
+              Desfazer distrato
             </Button>
-          </>
-        )}
-        {unidade.status === "vendida" && unidade.venda?.status === "ativa" && (
-          <>
-            <Button variant="secondary" onClick={() => setRenegociando(true)} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
-              Renegociar
-            </Button>
-            <Button variant="secondary" onClick={() => setDistratando(true)} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
-              Distratar
-            </Button>
-          </>
-        )}
-        {distratoInfo && (
-          <Button variant="secondary" onClick={desfazerDistratoAcao} style={{ padding: "4px 8px", fontSize: 11 }}>
-            Desfazer distrato
-          </Button>
-        )}
-      </td>
-    </tr>
+          )}
+        </td>
+      </tr>
+      {mostrarSplit && unidade.permuta && (
+        <tr>
+          <td colSpan={4} style={{ padding: "6px 0 10px", font: "var(--text-body)" }}>
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border-subtle)", borderRadius: 8, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)" }}>
+                Split nominal — quem mais divide esta permuta com {unidade.permuta.nomeContraparte} (não afeta o motor financeiro)
+              </div>
+              {contrapartes.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {contrapartes.map((c) => (
+                    <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+                      <span style={{ flex: 1 }}>{c.nome}</span>
+                      <span style={{ font: "var(--text-mono-body)", color: "var(--ink-muted)" }}>{(Number(c.percentualSplit) * 100).toFixed(1)}%</span>
+                      <button
+                        type="button"
+                        onClick={() => removerContraparte(c.id, c.nome)}
+                        title="Remover"
+                        style={{ border: "none", background: "transparent", color: "var(--status-critical-text)", cursor: "pointer", fontSize: 13, padding: 0 }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <form onSubmit={adicionarContraparte} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <TextField label="Nome" value={nomeContraparteSplit} onChange={(e) => setNomeContraparteSplit(e.target.value)} placeholder="Coproprietário, sócio…" required />
+                </div>
+                <div style={{ width: 100 }}>
+                  <TextField label="% (0–1)" value={percentualSplit} onChange={(e) => setPercentualSplit(e.target.value)} placeholder="0.5" required />
+                </div>
+                <Button type="submit" disabled={salvandoContraparte} style={{ padding: "6px 10px", fontSize: 12 }}>
+                  {salvandoContraparte ? "Salvando…" : "Adicionar"}
+                </Button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

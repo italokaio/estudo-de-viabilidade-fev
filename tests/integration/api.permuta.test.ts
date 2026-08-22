@@ -96,6 +96,111 @@ describe("API — permuta nominal", () => {
     expect(unidade.permuta).toBeNull();
   });
 
+  /**
+   * Permuta parcial (achado F24, docs/DECISOES.md — "permuta parcial: dividir
+   * uma unidade entre multiplas contrapartes"): cadastro nominal de quem mais
+   * divide a mesma permuta, mesmo espirito do split nominal de comissao
+   * (achado F13) — puramente informativo, nunca lido pelo motor.
+   */
+  describe("permuta parcial — split entre múltiplas contrapartes (achado F24)", () => {
+    async function cadastrarUnidadePermutada() {
+      const { tipologiaId, empreendimentoId } = await cadastrarTipologiaComUnidades(1);
+      const unidades = (await app.inject({ method: "GET", url: `/api/tipologias/${tipologiaId}/unidades` })).json();
+      const unidadeId = unidades[0].id as string;
+      await app.inject({ method: "POST", url: `/api/unidades/${unidadeId}/permuta`, payload: { nomeContraparte: "João da Silva" } });
+      const listaAtualizada = (await app.inject({ method: "GET", url: `/api/tipologias/${tipologiaId}/unidades` })).json();
+      const permutaId = listaAtualizada.find((u: any) => u.id === unidadeId).permuta.id as string;
+      return { empreendimentoId, tipologiaId, unidadeId, permutaId };
+    }
+
+    it("cadastra uma contraparte adicional e ela aparece na listagem da unidade", async () => {
+      const { tipologiaId, permutaId } = await cadastrarUnidadePermutada();
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/permutas/${permutaId}/contrapartes`,
+        payload: { nome: "Maria Sócia", percentualSplit: "0.4" },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json().nome).toBe("Maria Sócia");
+
+      const lista = (await app.inject({ method: "GET", url: `/api/tipologias/${tipologiaId}/unidades` })).json();
+      const unidade = lista.find((u: any) => u.permuta?.id === permutaId);
+      expect(unidade.permuta.contrapartes).toHaveLength(1);
+      expect(unidade.permuta.contrapartes[0].percentualSplit).toBe("0.4");
+    });
+
+    it("aceita a soma exata de 100% entre contrapartes", async () => {
+      const { permutaId } = await cadastrarUnidadePermutada();
+      const p1 = await app.inject({ method: "POST", url: `/api/permutas/${permutaId}/contrapartes`, payload: { nome: "A", percentualSplit: "0.6" } });
+      expect(p1.statusCode).toBe(201);
+      const p2 = await app.inject({ method: "POST", url: `/api/permutas/${permutaId}/contrapartes`, payload: { nome: "B", percentualSplit: "0.4" } });
+      expect(p2.statusCode).toBe(201);
+    });
+
+    it("rejeita ultrapassar 100% na soma dos splits", async () => {
+      const { permutaId } = await cadastrarUnidadePermutada();
+      await app.inject({ method: "POST", url: `/api/permutas/${permutaId}/contrapartes`, payload: { nome: "A", percentualSplit: "0.6" } });
+      const excesso = await app.inject({ method: "POST", url: `/api/permutas/${permutaId}/contrapartes`, payload: { nome: "B", percentualSplit: "0.5" } });
+      expect(excesso.statusCode).toBe(400);
+    });
+
+    it("edita o percentual de uma contraparte respeitando o limite contra as demais", async () => {
+      const { permutaId } = await cadastrarUnidadePermutada();
+      const a = await app.inject({ method: "POST", url: `/api/permutas/${permutaId}/contrapartes`, payload: { nome: "A", percentualSplit: "0.5" } });
+      await app.inject({ method: "POST", url: `/api/permutas/${permutaId}/contrapartes`, payload: { nome: "B", percentualSplit: "0.3" } });
+
+      const excesso = await app.inject({ method: "PATCH", url: `/api/contrapartes-permuta/${a.json().id}`, payload: { percentualSplit: "0.8" } });
+      expect(excesso.statusCode).toBe(400);
+
+      const ok = await app.inject({ method: "PATCH", url: `/api/contrapartes-permuta/${a.json().id}`, payload: { percentualSplit: "0.7" } });
+      expect(ok.statusCode).toBe(200);
+      expect(ok.json().percentualSplit).toBe("0.7");
+    });
+
+    it("exclui uma contraparte", async () => {
+      const { tipologiaId, permutaId } = await cadastrarUnidadePermutada();
+      const c = await app.inject({ method: "POST", url: `/api/permutas/${permutaId}/contrapartes`, payload: { nome: "A", percentualSplit: "0.5" } });
+
+      const del = await app.inject({ method: "DELETE", url: `/api/contrapartes-permuta/${c.json().id}` });
+      expect(del.statusCode).toBe(204);
+
+      const lista = (await app.inject({ method: "GET", url: `/api/tipologias/${tipologiaId}/unidades` })).json();
+      const unidade = lista.find((u: any) => u.permuta?.id === permutaId);
+      expect(unidade.permuta.contrapartes).toHaveLength(0);
+    });
+
+    it("usuário comum recebe 403 ao tentar excluir uma contraparte", async () => {
+      const { permutaId } = await cadastrarUnidadePermutada();
+      const c = await app.inject({ method: "POST", url: `/api/permutas/${permutaId}/contrapartes`, payload: { nome: "A", percentualSplit: "0.5" } });
+
+      const appUsuario = await buildAuthenticatedApp("usuario");
+      const res = await appUsuario.inject({ method: "DELETE", url: `/api/contrapartes-permuta/${c.json().id}` });
+      expect(res.statusCode).toBe(403);
+      await appUsuario.close();
+    });
+
+    it("404 para permuta inexistente ao cadastrar contraparte", async () => {
+      const res = await app.inject({ method: "POST", url: `/api/permutas/inexistente/contrapartes`, payload: { nome: "A", percentualSplit: "0.5" } });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("desfazer a permuta remove as contrapartes junto (regressão do padrão F10/F11/F13/F17/F21)", async () => {
+      const { unidadeId, permutaId } = await cadastrarUnidadePermutada();
+      await app.inject({ method: "POST", url: `/api/permutas/${permutaId}/contrapartes`, payload: { nome: "A", percentualSplit: "0.5" } });
+
+      const del = await app.inject({ method: "DELETE", url: `/api/unidades/${unidadeId}/permuta` });
+      expect(del.statusCode).toBe(204);
+    });
+
+    it("excluir um empreendimento com contrapartes de permuta cadastradas não falha (regressão de exclusão em cascata)", async () => {
+      const { empreendimentoId, permutaId } = await cadastrarUnidadePermutada();
+      await app.inject({ method: "POST", url: `/api/permutas/${permutaId}/contrapartes`, payload: { nome: "A", percentualSplit: "0.5" } });
+
+      const del = await app.inject({ method: "DELETE", url: `/api/empreendimentos/${empreendimentoId}` });
+      expect(del.statusCode).toBe(204);
+    });
+  });
+
   it("uma unidade permutada não é elegível para geração de vendas (permanece excluída do VGV)", async () => {
     const { tipologiaId, empreendimentoId } = await cadastrarTipologiaComUnidades(2);
     const unidades = (await app.inject({ method: "GET", url: `/api/tipologias/${tipologiaId}/unidades` })).json();
