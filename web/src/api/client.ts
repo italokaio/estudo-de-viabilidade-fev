@@ -381,6 +381,30 @@ export function estornarCustoRealizado(id: string) {
   return patchJson<CustoResumo>(`/api/custos/${id}`, { estornar: true });
 }
 
+export interface DesembolsoCustoResumo {
+  id: string;
+  custoId: string;
+  categoriaNome: string;
+  mes: number;
+  valorPrevisto: string;
+  valorRealizado: string | null;
+  status: string;
+}
+
+export async function fetchDesembolsosCustos(cenarioId: string): Promise<DesembolsoCustoResumo[]> {
+  const res = await apiFetch(`/api/cenarios/${cenarioId}/desembolsos-custos`);
+  if (!res.ok) throw new Error(`Falha ao carregar desembolsos de custo (${res.status})`);
+  return res.json();
+}
+
+export function registrarDesembolsoCustoRealizado(id: string, input: { valorRealizado: string }) {
+  return patchJson<DesembolsoCustoResumo>(`/api/desembolsos-custos/${id}`, input);
+}
+
+export function estornarDesembolsoCustoRealizado(id: string) {
+  return patchJson<DesembolsoCustoResumo>(`/api/desembolsos-custos/${id}`, { estornar: true });
+}
+
 export function atualizarEmpreendimento(id: string, input: { nome?: string; incorporador?: string | null; endereco?: string | null }) {
   return patchJson<{ id: string; nome: string }>(`/api/empreendimentos/${id}`, input);
 }

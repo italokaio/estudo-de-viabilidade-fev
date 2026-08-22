@@ -1513,6 +1513,63 @@ export async function buildApp() {
     },
   );
 
+  // Desembolsos de custo percentual (achado F21, docs/DECISOES.md —
+  // "realizado para custos percentuais"): mesmo espirito de
+  // GET/PATCH .../recebimentos, mas para as parcelas de um Custo de
+  // incidencia nao-fixa, persistidas em DesembolsoCusto por
+  // rodarMotorParaCenario (src/db/servicoMotor.ts). Depende de o fluxo de
+  // caixa do cenario ja ter sido calculado ao menos uma vez (mesma
+  // dependencia implicita de GET .../recebimentos com RecebimentoProjetado).
+  app.get<{ Params: { id: string } }>("/api/cenarios/:id/desembolsos-custos", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+    const desembolsos = await prisma.desembolsoCusto.findMany({
+      where: { custo: { cenarioId: req.params.id } },
+      include: { custo: { include: { categoria: { select: { nome: true } } } } },
+      orderBy: [{ mes: "asc" }],
+    });
+    return desembolsos.map((d) => ({
+      id: d.id,
+      custoId: d.custoId,
+      categoriaNome: d.custo.categoria.nome,
+      mes: d.mes,
+      valorPrevisto: d.valorPrevisto,
+      valorRealizado: d.valorRealizado,
+      status: d.status,
+    }));
+  });
+
+  app.patch<{ Params: { id: string }; Body: { valorRealizado?: string; estornar?: boolean } }>(
+    "/api/desembolsos-custos/:id",
+    async (req, reply) => {
+      const { valorRealizado, estornar } = req.body ?? {};
+      if (!estornar && (!valorRealizado || !valorRealizado.trim())) {
+        reply.code(400);
+        return { erro: "Valor realizado é obrigatório" };
+      }
+      const desembolso = await prisma.desembolsoCusto.findUnique({
+        where: { id: req.params.id },
+        include: { custo: { select: { empreendimentoId: true } } },
+      });
+      if (!desembolso) {
+        reply.code(404);
+        return { erro: "Desembolso não encontrado" };
+      }
+      if (!(await garantirAcesso(req, reply, desembolso.custo.empreendimentoId))) return;
+      if (estornar) {
+        return prisma.desembolsoCusto.update({ where: { id: req.params.id }, data: { valorRealizado: null, status: "previsto" } });
+      }
+      return prisma.desembolsoCusto.update({
+        where: { id: req.params.id },
+        data: { valorRealizado: valorRealizado!.trim(), status: "realizado" },
+      });
+    },
+  );
+
   app.post<{ Params: { id: string }; Body: { itens?: { tipologiaId: string; mes: number; unidadesPrevistas: string }[] } }>(
     "/api/cenarios/:id/premissas-velocidade",
     async (req, reply) => {
@@ -1574,9 +1631,10 @@ export async function buildApp() {
 
     // "Realizado" nunca passa pelo motor (que so conhece "previsto") -- e uma
     // camada de leitura por cima, somando RecebimentoProjetado.valorRealizado
-    // e Custo.valorRealizado (so custos fixos, que tem um mes de competencia
-    // unico; custos percentuais sao recalculados pelo motor a cada mes, sem
-    // uma linha por mes para marcar como realizada).
+    // e Custo.valorRealizado (custos fixos, que tem um mes de competencia
+    // unico) mais DesembolsoCusto.valorRealizado (achado F21, docs/DECISOES.md
+    // — custos percentuais geram varias parcelas por mes, sem um unico lugar
+    // na linha do Custo para marcar como realizada).
     const recebimentosRealizados = await prisma.recebimentoProjetado.findMany({
       where: { venda: { cenarioId }, status: "recebido" },
       select: { mesCompetencia: true, valorRealizado: true },
@@ -1584,6 +1642,10 @@ export async function buildApp() {
     const custosRealizados = await prisma.custo.findMany({
       where: { cenarioId, status: "realizado", competenciaMes: { not: null } },
       select: { competenciaMes: true, valorRealizado: true },
+    });
+    const desembolsosRealizados = await prisma.desembolsoCusto.findMany({
+      where: { custo: { cenarioId }, status: "realizado" },
+      select: { mes: true, valorRealizado: true },
     });
     const entradasRealizadasPorMes = new Map<number, Decimal>();
     for (const r of recebimentosRealizados) {
@@ -1595,6 +1657,10 @@ export async function buildApp() {
       const mes = c.competenciaMes as number;
       const atual = saidasRealizadasPorMes.get(mes) ?? new Decimal(0);
       saidasRealizadasPorMes.set(mes, atual.plus(new Decimal(c.valorRealizado ?? "0")));
+    }
+    for (const d of desembolsosRealizados) {
+      const atual = saidasRealizadasPorMes.get(d.mes) ?? new Decimal(0);
+      saidasRealizadasPorMes.set(d.mes, atual.plus(new Decimal(d.valorRealizado ?? "0")));
     }
 
     const entradasCorrigidasPorMes = new Map(resultado.entradasCorrigidas.map((e) => [e.mes, e.valor]));

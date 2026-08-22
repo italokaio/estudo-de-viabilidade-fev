@@ -379,8 +379,37 @@ model Custo {
   categoria      CategoriaCusto @relation(fields: [categoriaId], references: [id])
   tipologia      Tipologia?     @relation(fields: [tipologiaId], references: [id])
   destinatarios  DestinatarioComissao[]
+  desembolsos    DesembolsoCusto[]
 
   @@map("custo")
+}
+
+/**
+ * Uma parcela mensal computada pelo motor para um Custo de incidencia
+ * percentual (achado F21, docs/DECISOES.md — "realizado para custos
+ * percentuais"). Custo fixo continua usando Custo.valorRealizado/.status
+ * diretamente (achado da setima fatia) -- essa tabela so existe porque um
+ * custo percentual gera VARIAS parcelas (uma por mes, recalculadas a cada
+ * rodada do motor), sem um unico lugar na linha do Custo para marcar como
+ * paga. Mesmo padrao de RecebimentoProjetado: persistida so para guardar
+ * valorRealizado/status entre recalculos (nunca para o motor ler de volta
+ * -- valorPrevisto e sempre regenerado a partir de Custo+Venda+Cronograma),
+ * com upsert por chave (custoId, mes) em vez de delete+recreate, para o id
+ * da linha nao mudar sob uma acao "marcar como pago" ja em andamento na
+ * tela (mesmo achado da setima fatia).
+ */
+model DesembolsoCusto {
+  id             String  @id @default(cuid())
+  custoId        String
+  mes            Int
+  valorPrevisto  String // decimal-as-string, sempre regenerado pelo motor -- nunca editado pelo usuario
+  valorRealizado String?
+  status         String  @default("previsto")
+
+  custo Custo @relation(fields: [custoId], references: [id])
+
+  @@unique([custoId, mes])
+  @@map("desembolso_custo")
 }
 
 // Cadastro nominal de quem recebe a comissao de um Custo, e como ela se

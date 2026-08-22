@@ -96,6 +96,7 @@ export async function rodarMotorParaCenario(
   const entrada = await montarEntradaMotor(cenarioId, opcoes);
   const resultado = executarMotorFinanceiro(entrada);
   await persistirRecebimentos(cenarioId, resultado);
+  await persistirDesembolsosCusto(cenarioId, resultado);
   return resultado;
 }
 
@@ -160,6 +161,51 @@ async function persistirRecebimentos(cenarioId: string, resultado: SaidaMotorFin
   for (const r of aAtualizar) {
     const existente = existentePorChave.get(`${r.vendaId}|${r.modalidadeId}|${r.mesCompetencia}`)!;
     await prisma.recebimentoProjetado.update({ where: { id: existente.id }, data: { valorPrevisto: r.valorPrevisto.toString() } });
+  }
+}
+
+/**
+ * Persiste DesembolsoCusto para custos de incidencia percentual (achado
+ * F21, docs/DECISOES.md — "realizado para custos percentuais"). Custo
+ * fixo continua usando Custo.valorRealizado/.status diretamente (achado
+ * da setima fatia) -- nao entra aqui. Mesmo padrao diff-based de
+ * persistirRecebimentos, upsert por (custoId, mes), para preservar id,
+ * valorRealizado e status entre recalculos.
+ */
+async function persistirDesembolsosCusto(cenarioId: string, resultado: SaidaMotorFinanceiro) {
+  const custosPercentuais = await prisma.custo.findMany({
+    where: { cenarioId, categoria: { tipoIncidencia: { not: "fixo" } } },
+    select: { id: true },
+  });
+  const custoIdsPercentuais = new Set(custosPercentuais.map((c) => c.id));
+  const desembolsos = resultado.desembolsos.filter((d) => custoIdsPercentuais.has(d.custoId));
+
+  const existentes = await prisma.desembolsoCusto.findMany({
+    where: { custoId: { in: [...custoIdsPercentuais] } },
+    select: { id: true, custoId: true, mes: true, valorPrevisto: true },
+  });
+  const existentePorChave = new Map(existentes.map((e) => [`${e.custoId}|${e.mes}`, e]));
+
+  const chavesNovas = new Set(desembolsos.map((d) => `${d.custoId}|${d.mes}`));
+  const idsObsoletos = existentes.filter((e) => !chavesNovas.has(`${e.custoId}|${e.mes}`)).map((e) => e.id);
+  if (idsObsoletos.length > 0) {
+    await prisma.desembolsoCusto.deleteMany({ where: { id: { in: idsObsoletos } } });
+  }
+
+  const aCriar = desembolsos.filter((d) => !existentePorChave.has(`${d.custoId}|${d.mes}`));
+  if (aCriar.length > 0) {
+    await prisma.desembolsoCusto.createMany({
+      data: aCriar.map((d) => ({ custoId: d.custoId, mes: d.mes, valorPrevisto: d.valor.toString() })),
+    });
+  }
+
+  const aAtualizar = desembolsos.filter((d) => {
+    const existente = existentePorChave.get(`${d.custoId}|${d.mes}`);
+    return existente && existente.valorPrevisto !== d.valor.toString();
+  });
+  for (const d of aAtualizar) {
+    const existente = existentePorChave.get(`${d.custoId}|${d.mes}`)!;
+    await prisma.desembolsoCusto.update({ where: { id: existente.id }, data: { valorPrevisto: d.valor.toString() } });
   }
 }
 

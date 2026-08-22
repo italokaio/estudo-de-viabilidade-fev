@@ -55,6 +55,9 @@ export async function excluirEmpreendimento(id: string) {
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { empreendimentoId: id } });
   await prisma.indiceCorrecao.deleteMany({ where: { empreendimentoId: id } });
   await prisma.financiamentoProducao.deleteMany({ where: { empreendimentoId: id } });
+  // DesembolsoCusto (achado F21) referencia Custo sem cascade -- mesmo
+  // padrao dos achados F10/F11/F13/F17.
+  await prisma.desembolsoCusto.deleteMany({ where: { custo: { empreendimentoId: id } } });
   await prisma.custo.deleteMany({ where: { empreendimentoId: id } });
   await prisma.categoriaCusto.deleteMany({ where: { empreendimentoId: id } });
   await prisma.tipologia.deleteMany({ where: { empreendimentoId: id } });
@@ -109,6 +112,9 @@ export async function excluirCenario(id: string) {
     await prisma.unidade.updateMany({ where: { id: { in: unidadeIds } }, data: { status: "estoque" } });
   }
   await prisma.premissaVelocidadeVendas.deleteMany({ where: { cenarioId: id } });
+  // DesembolsoCusto (achado F21) referencia Custo sem cascade -- mesmo
+  // padrao dos achados F10/F11/F13/F17.
+  await prisma.desembolsoCusto.deleteMany({ where: { custo: { cenarioId: id } } });
   await prisma.custo.deleteMany({ where: { cenarioId: id } });
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { cenarioId: id } });
   await prisma.indiceCorrecao.deleteMany({ where: { cenarioId: id } });
@@ -789,8 +795,10 @@ export async function excluirCusto(id: string) {
   // Sem onDelete cascade no schema -- excluir um custo que tem
   // destinatarios de comissao cadastrados (achado F13) falharia por
   // violacao de chave estrangeira sem isso, mesmo padrao do bug corrigido
-  // em excluirCenario para derivadoDeCenarioId (achado F10).
+  // em excluirCenario para derivadoDeCenarioId (achado F10). DesembolsoCusto
+  // (achado F21) e o mesmo padrao de novo.
   await prisma.destinatarioComissao.deleteMany({ where: { custoId: id } });
+  await prisma.desembolsoCusto.deleteMany({ where: { custoId: id } });
   await prisma.custo.delete({ where: { id } });
 }
 

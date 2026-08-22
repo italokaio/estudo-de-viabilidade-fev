@@ -5,7 +5,7 @@ import { gerarDesembolsosMensais, type ContextoCustos } from "./motorCustos.js";
 import { calcularFinanciamento, type FinanciamentoInput, type PontoFinanciamento } from "./motorFinanciamento.js";
 import { calcularIndicadores, consolidarFluxoCaixa } from "./motorFluxoCaixa.js";
 import { gerarRecebimentos } from "./motorRecebimentos.js";
-import type { CustoInput, FluxoMensal, IndicadoresFluxo, PontoCronograma, PontoIndiceCorrecao, RecebimentoGerado, VendaInput } from "./types.js";
+import type { CustoInput, DesembolsoMensal, FluxoMensal, IndicadoresFluxo, PontoCronograma, PontoIndiceCorrecao, RecebimentoGerado, VendaInput } from "./types.js";
 
 export interface EntradaMotorFinanceiro {
   vendas: VendaInput[];
@@ -23,6 +23,8 @@ export interface EntradaMotorFinanceiro {
 
 export interface SaidaMotorFinanceiro {
   recebimentos: RecebimentoGerado[];
+  /** desembolsos de custo, nominais (sem correcao monetaria) -- ver src/db/servicoMotor.ts, persistirDesembolsosCusto (achado F21) */
+  desembolsos: DesembolsoMensal[];
   fluxo: FluxoMensal[];
   indicadores: IndicadoresFluxo;
   /** entradas de cada mes corrigidas pelo indice de correcao, incluindo liberacoes de financiamento (sem correcao aplicada a elas -- nao sao saldo de venda) */
@@ -138,5 +140,5 @@ export function executarMotorFinanceiro(entrada: EntradaMotorFinanceiro): SaidaM
     entrada.limiteNecessidadeMaximaCapital,
   );
 
-  return { recebimentos, fluxo, indicadores, entradasCorrigidas, saidasCorrigidas, financiamento, alertas };
+  return { recebimentos, desembolsos, fluxo, indicadores, entradasCorrigidas, saidasCorrigidas, financiamento, alertas };
 }
