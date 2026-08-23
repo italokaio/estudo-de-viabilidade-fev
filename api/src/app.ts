@@ -10,6 +10,7 @@ import {
   atualizarDestinatarioComissao,
   atualizarEmpreendimento,
   atualizarContrapartePermuta,
+  atualizarFaixaComissao,
   atualizarPermuta,
   atualizarTipologia,
   criarCategoriaCusto,
@@ -19,6 +20,7 @@ import {
   criarCronograma,
   criarCusto,
   criarDestinatarioComissao,
+  criarFaixaComissao,
   criarEmpreendimento,
   criarPremissaVelocidade,
   criarTipologia,
@@ -39,6 +41,7 @@ import {
   excluirCronograma,
   excluirCusto,
   excluirDestinatarioComissao,
+  excluirFaixaComissao,
   excluirEmpreendimento,
   excluirFinanciamento,
   excluirPontoIndiceCorrecao,
@@ -943,7 +946,7 @@ export async function buildApp() {
     "/api/empreendimentos/:id/categorias-custo",
     async (req, reply) => {
       const { nome, tipoIncidencia } = req.body ?? {};
-      const tiposValidos = ["fixo", "pct_vgv_vendido_no_mes", "pct_recebido_mes_anterior", "pct_execucao", "pct_recebido_no_mes"];
+      const tiposValidos = ["fixo", "pct_vgv_vendido_no_mes", "pct_recebido_mes_anterior", "pct_execucao", "pct_recebido_no_mes", "faixas_vgv_acumulado"];
       if (!nome || !nome.trim()) {
         reply.code(400);
         return { erro: "Nome da categoria de custo é obrigatório" };
@@ -972,7 +975,7 @@ export async function buildApp() {
     "/api/categorias-custo/:id",
     async (req, reply) => {
       const { nome, tipoIncidencia } = req.body ?? {};
-      const tiposValidos = ["fixo", "pct_vgv_vendido_no_mes", "pct_recebido_mes_anterior", "pct_execucao", "pct_recebido_no_mes"];
+      const tiposValidos = ["fixo", "pct_vgv_vendido_no_mes", "pct_recebido_mes_anterior", "pct_execucao", "pct_recebido_no_mes", "faixas_vgv_acumulado"];
       if (nome !== undefined && !nome.trim()) {
         reply.code(400);
         return { erro: "Nome da categoria de custo não pode ficar vazio" };
@@ -1146,7 +1149,12 @@ export async function buildApp() {
         },
         premissasVelocidade: { include: { tipologia: { select: { nome: true } } }, orderBy: { mes: "asc" } },
         custos: {
-          include: { categoria: true, tipologia: { select: { nome: true } }, destinatarios: { orderBy: { createdAt: "asc" } } },
+          include: {
+            categoria: true,
+            tipologia: { select: { nome: true } },
+            destinatarios: { orderBy: { createdAt: "asc" } },
+            faixas: { orderBy: { createdAt: "asc" } },
+          },
           orderBy: { createdAt: "asc" },
         },
         cronograma: { orderBy: { mes: "asc" } },
@@ -1191,6 +1199,7 @@ export async function buildApp() {
         status: c.status,
         grupoIndiceCorrecao: c.grupoIndiceCorrecao,
         destinatariosComissao: c.destinatarios.map((d) => ({ id: d.id, nome: d.nome, percentualSplit: d.percentualSplit })),
+        faixasComissao: c.faixas.map((f) => ({ id: f.id, volumeAte: f.volumeAte, percentual: f.percentual })),
       })),
       cronograma: cenario.cronograma.map((p) => ({ mes: p.mes, percentualExecucaoMensal: p.percentualExecucaoMensal })),
       indicesCorrecao: cenario.indicesCorrecao.map((i) => ({ grupo: i.grupo, mes: i.mes, percentual: i.percentual })),
@@ -1363,11 +1372,16 @@ export async function buildApp() {
       return { erro: "Categoria de custo não encontrada" };
     }
     const incidenciaPorValor = categoria.tipoIncidencia === "fixo" || categoria.tipoIncidencia === "pct_execucao";
+    // Faixas de comissao progressiva (achado F28, docs/DECISOES.md): o
+    // percentual nao e um unico valor no Custo, e sim uma tabela cadastrada
+    // depois via POST /api/custos/:custoId/faixas-comissao -- nem
+    // valorPrevisto nem percentual sao pedidos na criacao.
+    const usaFaixas = categoria.tipoIncidencia === "faixas_vgv_acumulado";
     if (incidenciaPorValor && (!valorPrevisto || !valorPrevisto.trim())) {
       reply.code(400);
       return { erro: "Valor previsto é obrigatório para esta categoria de custo" };
     }
-    if (!incidenciaPorValor && (!percentual || !percentual.trim())) {
+    if (!incidenciaPorValor && !usaFaixas && (!percentual || !percentual.trim())) {
       reply.code(400);
       return { erro: "Percentual é obrigatório para esta categoria de custo" };
     }
@@ -1376,11 +1390,12 @@ export async function buildApp() {
       return { erro: "Mês de competência é obrigatório para custo fixo" };
     }
     // Escopo por tipologia (achado F11, docs/DECISOES.md — "estrutura de
-    // comissao") so faz sentido para pct_vgv_vendido_no_mes ou
-    // pct_recebido_no_mes (achado F25) -- nas outras incidencias (fixo,
-    // pct_execucao, pct_recebido_mes_anterior) nao ha como um
-    // valor/percentual "incidir sobre uma tipologia".
-    const suportaTipologia = categoria.tipoIncidencia === "pct_vgv_vendido_no_mes" || categoria.tipoIncidencia === "pct_recebido_no_mes";
+    // comissao") so faz sentido para pct_vgv_vendido_no_mes,
+    // pct_recebido_no_mes (achado F25) ou faixas_vgv_acumulado (achado F28)
+    // -- nas outras incidencias (fixo, pct_execucao, pct_recebido_mes_anterior)
+    // nao ha como um valor/percentual "incidir sobre uma tipologia".
+    const suportaTipologia =
+      categoria.tipoIncidencia === "pct_vgv_vendido_no_mes" || categoria.tipoIncidencia === "pct_recebido_no_mes" || usaFaixas;
     if (tipologiaId && !suportaTipologia) {
       reply.code(400);
       return { erro: "Escopo por tipologia só é aplicável a custos de incidência sobre valor vendido ou recebido" };
@@ -1398,7 +1413,7 @@ export async function buildApp() {
       categoriaId,
       tipologiaId: tipologiaId || undefined,
       valorPrevisto: incidenciaPorValor ? valorPrevisto : undefined,
-      percentual: incidenciaPorValor ? undefined : percentual,
+      percentual: incidenciaPorValor || usaFaixas ? undefined : percentual,
       competenciaMes: categoria.tipoIncidencia === "fixo" ? competenciaMes : undefined,
       recorrencia: (recorrencia as "unico" | "mensal") ?? "unico",
       grupoIndiceCorrecao: grupoIndiceCorrecao?.trim() || undefined,
@@ -1488,6 +1503,73 @@ export async function buildApp() {
     }
     if (!(await garantirAcesso(req, reply, destinatario.custo.empreendimentoId))) return;
     await excluirDestinatarioComissao(req.params.id);
+    reply.code(204);
+    return null;
+  });
+
+  // Faixas de uma tabela de comissao progressiva por VGV acumulado (achado
+  // F28, docs/DECISOES.md — "faixas de comissao progressivas por volume
+  // vendido"): diferente de destinatarios-comissao, o motor le esta lista
+  // (src/core/motorCustos.ts) -- so faz sentido para um Custo cuja
+  // categoria tem tipoIncidencia="faixas_vgv_acumulado".
+  app.post<{ Params: { custoId: string }; Body: { volumeAte?: string | null; percentual?: string } }>(
+    "/api/custos/:custoId/faixas-comissao",
+    async (req, reply) => {
+      const { volumeAte, percentual } = req.body ?? {};
+      if (!percentual || !percentual.trim()) {
+        reply.code(400);
+        return { erro: "Percentual da faixa é obrigatório" };
+      }
+      const custo = await prisma.custo.findUnique({ where: { id: req.params.custoId } });
+      if (!custo) {
+        reply.code(404);
+        return { erro: "Custo não encontrado" };
+      }
+      if (!(await garantirAcesso(req, reply, custo.empreendimentoId))) return;
+      const resultado = await criarFaixaComissao(custo.id, volumeAte?.trim() || null, percentual.trim());
+      if ("erro" in resultado) {
+        reply.code(400);
+        return resultado;
+      }
+      reply.code(201);
+      return resultado.faixa;
+    },
+  );
+
+  app.patch<{ Params: { id: string }; Body: { volumeAte?: string | null; percentual?: string } }>(
+    "/api/faixas-comissao/:id",
+    async (req, reply) => {
+      const faixa = await prisma.faixaComissao.findUnique({ where: { id: req.params.id }, include: { custo: true } });
+      if (!faixa) {
+        reply.code(404);
+        return { erro: "Faixa de comissão não encontrada" };
+      }
+      if (!(await garantirAcesso(req, reply, faixa.custo.empreendimentoId))) return;
+      const { volumeAte, percentual } = req.body ?? {};
+      const resultado = await atualizarFaixaComissao(req.params.id, {
+        volumeAte: volumeAte === undefined ? undefined : volumeAte?.trim() || null,
+        percentual: percentual?.trim() || undefined,
+      });
+      if ("erro" in resultado) {
+        reply.code(400);
+        return resultado;
+      }
+      return resultado.faixa;
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>("/api/faixas-comissao/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const faixa = await prisma.faixaComissao.findUnique({ where: { id: req.params.id }, include: { custo: true } });
+    if (!faixa) {
+      reply.code(404);
+      return { erro: "Faixa de comissão não encontrada" };
+    }
+    if (!(await garantirAcesso(req, reply, faixa.custo.empreendimentoId))) return;
+    await excluirFaixaComissao(req.params.id);
     reply.code(204);
     return null;
   });

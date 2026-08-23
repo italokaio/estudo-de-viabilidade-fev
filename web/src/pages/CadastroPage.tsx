@@ -14,6 +14,7 @@ import {
   criarCronograma,
   criarCusto,
   criarDestinatarioComissao,
+  criarFaixaComissao,
   criarEmpreendimento,
   criarPremissasVelocidade,
   criarTerreno,
@@ -35,6 +36,7 @@ import {
   excluirCronograma,
   excluirCusto,
   excluirDestinatarioComissao,
+  excluirFaixaComissao,
   excluirEmpreendimento,
   excluirFinanciamento,
   excluirPontoIndiceCorrecao,
@@ -1549,11 +1551,18 @@ function CustosSecao({
 
   const categoriaSelecionada = categoriasDisponiveis.find((c) => c.id === categoriaId);
   const incidenciaPorValor = categoriaSelecionada?.tipoIncidencia === "fixo" || categoriaSelecionada?.tipoIncidencia === "pct_execucao";
+  // Faixas de comissao progressiva (achado F28, docs/DECISOES.md): o
+  // percentual nao e um valor unico no Custo -- e cadastrado depois, como
+  // uma tabela de faixas, no painel "Faixas" da propria linha.
+  const usaFaixas = categoriaSelecionada?.tipoIncidencia === "faixas_vgv_acumulado";
   // Escopo por tipologia (achado F11, docs/DECISOES.md — "estrutura de
-  // comissao") so faz sentido para pct_vgv_vendido_no_mes ou
-  // pct_recebido_no_mes (achado F25): permite um percentual de comissao
-  // diferente por tipologia (ex.: loja x apartamento).
-  const suportaTipologia = categoriaSelecionada?.tipoIncidencia === "pct_vgv_vendido_no_mes" || categoriaSelecionada?.tipoIncidencia === "pct_recebido_no_mes";
+  // comissao") so faz sentido para pct_vgv_vendido_no_mes, pct_recebido_no_mes
+  // (achado F25) ou faixas_vgv_acumulado (achado F28): permite um
+  // percentual/tabela de comissao diferente por tipologia (ex.: loja x apartamento).
+  const suportaTipologia =
+    categoriaSelecionada?.tipoIncidencia === "pct_vgv_vendido_no_mes" ||
+    categoriaSelecionada?.tipoIncidencia === "pct_recebido_no_mes" ||
+    usaFaixas;
 
   async function submeter(e: React.FormEvent) {
     e.preventDefault();
@@ -1564,7 +1573,7 @@ function CustosSecao({
         categoriaId,
         tipologiaId: suportaTipologia && tipologiaId ? tipologiaId : undefined,
         valorPrevisto: incidenciaPorValor ? valorPrevisto : undefined,
-        percentual: incidenciaPorValor ? undefined : percentual,
+        percentual: incidenciaPorValor || usaFaixas ? undefined : percentual,
         competenciaMes: categoriaSelecionada?.tipoIncidencia === "fixo" ? Number(competenciaMes) : undefined,
         recorrencia: categoriaSelecionada?.tipoIncidencia === "fixo" ? recorrencia : undefined,
         grupoIndiceCorrecao: grupoIndiceCorrecao.trim() || "padrao",
@@ -1638,7 +1647,7 @@ function CustosSecao({
             </select>
           </label>
         )}
-        {incidenciaPorValor ? (
+        {usaFaixas ? null : incidenciaPorValor ? (
           <div style={{ width: 140 }}>
             <TextField label="Valor previsto" value={valorPrevisto} onChange={(e) => setValorPrevisto(e.target.value)} placeholder="500000" required />
           </div>
@@ -1682,6 +1691,11 @@ function CustosSecao({
         <Button type="submit" disabled={salvando}>
           {salvando ? "Salvando…" : "Adicionar"}
         </Button>
+        {usaFaixas && (
+          <span style={{ fontSize: 11, color: "var(--ink-muted)", flexBasis: "100%" }}>
+            As faixas de VGV/percentual são cadastradas depois, no botão "Faixas" da linha do custo.
+          </span>
+        )}
       </form>
       )}
     </div>
@@ -1709,8 +1723,41 @@ function LinhaCusto({
   const [nomeDestinatario, setNomeDestinatario] = useState("");
   const [splitDestinatario, setSplitDestinatario] = useState("");
   const [salvandoDestinatario, setSalvandoDestinatario] = useState(false);
+  const [mostrarFaixas, setMostrarFaixas] = useState(false);
+  const [volumeAteFaixa, setVolumeAteFaixa] = useState("");
+  const [percentualFaixa, setPercentualFaixa] = useState("");
+  const [salvandoFaixa, setSalvandoFaixa] = useState(false);
 
   const incidenciaPorValor = custo.tipoIncidencia === "fixo" || custo.tipoIncidencia === "pct_execucao";
+  // Faixas de comissao progressiva (achado F28, docs/DECISOES.md): nem
+  // valorPrevisto nem percentual existem neste Custo -- a tabela de faixas
+  // e que define a comissao, cadastrada no painel "Faixas" abaixo.
+  const usaFaixas = custo.tipoIncidencia === "faixas_vgv_acumulado";
+
+  async function adicionarFaixa(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvandoFaixa(true);
+    try {
+      await criarFaixaComissao(custo.id, volumeAteFaixa.trim() || null, percentualFaixa);
+      setVolumeAteFaixa("");
+      setPercentualFaixa("");
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvandoFaixa(false);
+    }
+  }
+
+  async function removerFaixa(id: string) {
+    if (!window.confirm("Remover esta faixa da tabela de comissão?")) return;
+    try {
+      await excluirFaixaComissao(id);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    }
+  }
 
   async function adicionarDestinatario(e: React.FormEvent) {
     e.preventDefault();
@@ -1743,7 +1790,7 @@ function LinhaCusto({
     try {
       await atualizarCusto(custo.id, {
         valorPrevisto: incidenciaPorValor ? valorPrevisto : undefined,
-        percentual: incidenciaPorValor ? undefined : percentual,
+        percentual: incidenciaPorValor || usaFaixas ? undefined : percentual,
         competenciaMes: custo.tipoIncidencia === "fixo" ? Number(competenciaMes) : undefined,
         recorrencia: custo.tipoIncidencia === "fixo" ? recorrencia : undefined,
         grupoIndiceCorrecao: grupoIndiceCorrecao.trim() || "padrao",
@@ -1775,7 +1822,7 @@ function LinhaCusto({
       <tr>
         <td colSpan={6} style={{ padding: "6px 0" }}>
           <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", font: "var(--text-body)" }}>
-            {incidenciaPorValor ? (
+            {usaFaixas ? null : incidenciaPorValor ? (
               <div style={{ width: 130 }}>
                 <TextField label="Valor previsto" value={valorPrevisto} onChange={(e) => setValorPrevisto(e.target.value)} required />
               </div>
@@ -1822,12 +1869,25 @@ function LinhaCusto({
       <tr>
         <td style={{ padding: "2px 0" }}>{custo.categoriaNome}</td>
         <td style={{ color: custo.tipologiaNome ? "var(--ink-primary)" : "var(--ink-muted)" }}>{custo.tipologiaNome ?? "Todas"}</td>
-        <td>{custo.valorPrevisto ? formatBRL(custo.valorPrevisto) : `${(Number(custo.percentual) * 100).toFixed(1)}%`}</td>
+        <td>
+          {usaFaixas
+            ? `${custo.faixasComissao.length} faixa${custo.faixasComissao.length === 1 ? "" : "s"}`
+            : custo.valorPrevisto
+              ? formatBRL(custo.valorPrevisto)
+              : `${(Number(custo.percentual) * 100).toFixed(1)}%`}
+        </td>
         <td>{custo.competenciaMes ?? "—"}</td>
         <td style={{ color: custo.grupoIndiceCorrecao === "padrao" ? "var(--ink-muted)" : "var(--ink-primary)" }}>
           {custo.grupoIndiceCorrecao === "padrao" ? "Padrão" : custo.grupoIndiceCorrecao}
         </td>
         <td style={{ textAlign: "right" }}>
+          {usaFaixas && (
+            <>
+              <Button variant="secondary" onClick={() => setMostrarFaixas((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
+                Faixas{custo.faixasComissao.length > 0 ? ` (${custo.faixasComissao.length})` : ""}
+              </Button>{" "}
+            </>
+          )}
           <Button variant="secondary" onClick={() => setMostrarSplit((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
             Split{custo.destinatariosComissao.length > 0 ? ` (${custo.destinatariosComissao.length})` : ""}
           </Button>{" "}
@@ -1873,6 +1933,71 @@ function LinhaCusto({
                 </div>
                 <Button type="submit" disabled={salvandoDestinatario} style={{ padding: "6px 10px", fontSize: 12 }}>
                   {salvandoDestinatario ? "Salvando…" : "Adicionar"}
+                </Button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      )}
+      {mostrarFaixas && (
+        <tr>
+          <td colSpan={6} style={{ padding: "6px 0 10px", font: "var(--text-body)" }}>
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border-subtle)", borderRadius: 8, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", color: "var(--ink-muted)" }}>
+                Faixas de comissão por VGV acumulado — em ordem, volume final crescente, a última pode ficar em aberto
+              </div>
+              {custo.faixasComissao.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {/* A API devolve as faixas por ordem de cadastro, não por volumeAte (achado F28: cadastrar fora
+                      de ordem é válido, o motor reordena sozinho) -- a tela precisa ordenar antes de exibir, senão
+                      o rótulo "Até"/"De ... até" fica incoerente com o valor de quem veio antes na lista visual. */}
+                  {[...custo.faixasComissao]
+                    .sort((a, b) => {
+                      if (a.volumeAte === null) return 1;
+                      if (b.volumeAte === null) return -1;
+                      return Number(a.volumeAte) - Number(b.volumeAte);
+                    })
+                    .map((f, i, ordenadas) => {
+                      const anterior = ordenadas[i - 1];
+                      let rotulo: string;
+                      if (f.volumeAte === null) {
+                        rotulo = anterior ? `De ${formatBRL(anterior.volumeAte!)} em diante` : "Qualquer volume";
+                      } else if (anterior) {
+                        rotulo = `De ${formatBRL(anterior.volumeAte!)} até ${formatBRL(f.volumeAte)}`;
+                      } else {
+                        rotulo = `Até ${formatBRL(f.volumeAte)}`;
+                      }
+                      return (
+                        <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+                          <span style={{ flex: 1 }}>{rotulo}</span>
+                          <span style={{ font: "var(--text-mono-body)", color: "var(--ink-muted)" }}>{(Number(f.percentual) * 100).toFixed(1)}%</span>
+                          <button
+                            type="button"
+                            onClick={() => removerFaixa(f.id)}
+                            title="Remover"
+                            style={{ border: "none", background: "transparent", color: "var(--status-critical-text)", cursor: "pointer", fontSize: 13, padding: 0 }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+              <form onSubmit={adicionarFaixa} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <div style={{ width: 150 }}>
+                  <TextField
+                    label="Volume até (vazio = sem limite)"
+                    value={volumeAteFaixa}
+                    onChange={(e) => setVolumeAteFaixa(e.target.value)}
+                    placeholder="1000000"
+                  />
+                </div>
+                <div style={{ width: 100 }}>
+                  <TextField label="% (0–1)" value={percentualFaixa} onChange={(e) => setPercentualFaixa(e.target.value)} placeholder="0.05" required />
+                </div>
+                <Button type="submit" disabled={salvandoFaixa} style={{ padding: "6px 10px", fontSize: 12 }}>
+                  {salvandoFaixa ? "Salvando…" : "Adicionar faixa"}
                 </Button>
               </form>
             </div>
@@ -2601,6 +2726,7 @@ const ROTULO_INCIDENCIA: Record<TipoIncidenciaCusto, string> = {
   pct_recebido_no_mes: "% do recebido, na curva de recebimento",
   pct_recebido_mes_anterior: "% do recebido no mês anterior",
   pct_execucao: "% da curva de execução (cronograma)",
+  faixas_vgv_acumulado: "Faixas progressivas por volume vendido (VGV acumulado)",
 };
 
 function LinhaCategoriaCusto({

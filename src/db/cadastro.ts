@@ -58,9 +58,10 @@ export async function excluirEmpreendimento(id: string) {
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { empreendimentoId: id } });
   await prisma.indiceCorrecao.deleteMany({ where: { empreendimentoId: id } });
   await prisma.financiamentoProducao.deleteMany({ where: { empreendimentoId: id } });
-  // DesembolsoCusto (achado F21) referencia Custo sem cascade -- mesmo
-  // padrao dos achados F10/F11/F13/F17.
+  // DesembolsoCusto (achado F21) e FaixaComissao (achado F28) referenciam
+  // Custo sem cascade -- mesmo padrao dos achados F10/F11/F13/F17.
   await prisma.desembolsoCusto.deleteMany({ where: { custo: { empreendimentoId: id } } });
+  await prisma.faixaComissao.deleteMany({ where: { custo: { empreendimentoId: id } } });
   await prisma.custo.deleteMany({ where: { empreendimentoId: id } });
   await prisma.categoriaCusto.deleteMany({ where: { empreendimentoId: id } });
   await prisma.tipologia.deleteMany({ where: { empreendimentoId: id } });
@@ -117,9 +118,10 @@ export async function excluirCenario(id: string) {
     await prisma.unidade.updateMany({ where: { id: { in: unidadeIds } }, data: { status: "estoque" } });
   }
   await prisma.premissaVelocidadeVendas.deleteMany({ where: { cenarioId: id } });
-  // DesembolsoCusto (achado F21) referencia Custo sem cascade -- mesmo
-  // padrao dos achados F10/F11/F13/F17.
+  // DesembolsoCusto (achado F21) e FaixaComissao (achado F28) referenciam
+  // Custo sem cascade -- mesmo padrao dos achados F10/F11/F13/F17.
   await prisma.desembolsoCusto.deleteMany({ where: { custo: { cenarioId: id } } });
+  await prisma.faixaComissao.deleteMany({ where: { custo: { cenarioId: id } } });
   await prisma.custo.deleteMany({ where: { cenarioId: id } });
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { cenarioId: id } });
   await prisma.indiceCorrecao.deleteMany({ where: { cenarioId: id } });
@@ -198,7 +200,7 @@ export async function duplicarCenario(cenarioId: string, novoNome: string) {
   }
 
   // valorRealizado/status NAO copiados -- o custo duplicado comeca "previsto", mesmo se o original ja tinha sido marcado como realizado.
-  const custos = await prisma.custo.findMany({ where: { cenarioId }, include: { destinatarios: true } });
+  const custos = await prisma.custo.findMany({ where: { cenarioId }, include: { destinatarios: true, faixas: true } });
   for (const c of custos) {
     const novoCusto = await prisma.custo.create({
       data: {
@@ -215,12 +217,18 @@ export async function duplicarCenario(cenarioId: string, novoNome: string) {
         grupoIndiceCorrecao: c.grupoIndiceCorrecao,
       },
     });
-    // Destinatarios de comissao (achado F13) tambem sao copiados -- criados
+    // Destinatarios de comissao (achado F13) e faixas de comissao
+    // progressiva (achado F28) tambem sao copiados -- criados
     // individualmente (nao createMany) porque cada custo precisa do id
     // NOVO gerado acima, nao do original.
     if (c.destinatarios.length > 0) {
       await prisma.destinatarioComissao.createMany({
         data: c.destinatarios.map((d) => ({ custoId: novoCusto.id, nome: d.nome, percentualSplit: d.percentualSplit })),
+      });
+    }
+    if (c.faixas.length > 0) {
+      await prisma.faixaComissao.createMany({
+        data: c.faixas.map((f) => ({ custoId: novoCusto.id, volumeAte: f.volumeAte, percentual: f.percentual })),
       });
     }
   }
@@ -861,9 +869,10 @@ export async function excluirCusto(id: string) {
   // destinatarios de comissao cadastrados (achado F13) falharia por
   // violacao de chave estrangeira sem isso, mesmo padrao do bug corrigido
   // em excluirCenario para derivadoDeCenarioId (achado F10). DesembolsoCusto
-  // (achado F21) e o mesmo padrao de novo.
+  // (achado F21) e FaixaComissao (achado F28) sao o mesmo padrao de novo.
   await prisma.destinatarioComissao.deleteMany({ where: { custoId: id } });
   await prisma.desembolsoCusto.deleteMany({ where: { custoId: id } });
+  await prisma.faixaComissao.deleteMany({ where: { custoId: id } });
   await prisma.custo.delete({ where: { id } });
 }
 
@@ -920,6 +929,94 @@ export async function atualizarDestinatarioComissao(
 
 export async function excluirDestinatarioComissao(id: string) {
   await prisma.destinatarioComissao.delete({ where: { id } });
+}
+
+/**
+ * Valida que uma lista de faixas de comissao progressiva (achado F28,
+ * docs/DECISOES.md) nao tem volumeAte duplicado (dois limites iguais
+ * deixariam ambiguo qual faixa vale) nem mais de uma faixa aberta
+ * (volumeAte=null, sem limite superior). Deliberadamente independente da
+ * ordem de insercao -- o motor sempre ordena as faixas por volumeAte antes
+ * de usa-las (src/core/motorCustos.ts, faixa aberta sempre por ultimo), entao
+ * cadastrar/editar uma faixa com um volumeAte menor que uma ja existente e
+ * uma reordenacao legitima, nao um erro. Reaproveitada tanto na criacao
+ * (existentes + nova) quanto na edicao (existentes sem a que esta sendo
+ * editada + a editada).
+ */
+function validarFaixasAscendentes(faixas: { volumeAte: Decimal | null }[]): boolean {
+  const ordenadas = [...faixas].sort((a, b) => {
+    if (a.volumeAte === null) return 1;
+    if (b.volumeAte === null) return -1;
+    return a.volumeAte.comparedTo(b.volumeAte);
+  });
+  for (let i = 1; i < ordenadas.length; i++) {
+    const anterior = ordenadas[i - 1]!.volumeAte;
+    const atual = ordenadas[i]!.volumeAte;
+    if (anterior === null) return false; // duas faixas abertas -- so a ordenacao (nulls por ultimo) as colocou lado a lado
+    if (atual !== null && atual.lessThanOrEqualTo(anterior)) return false; // volumeAte duplicado
+  }
+  return true;
+}
+
+/**
+ * Cria uma faixa de uma tabela de comissao progressiva por VGV acumulado
+ * (achado F28, docs/DECISOES.md). Diferente de DestinatarioComissao, as
+ * faixas NAO sao so informativas -- o motor le esta lista para calcular a
+ * comissao de cada venda (src/core/motorCustos.ts), entao so fazem sentido
+ * num Custo cuja categoria e tipoIncidencia="faixas_vgv_acumulado". Podem
+ * ser cadastradas em qualquer ordem (validarFaixasAscendentes reordena
+ * sozinha) -- um custo sem nenhuma faixa ainda simplesmente gera comissao
+ * zero (mesmo espirito de um cronograma sem pontos para pct_execucao).
+ */
+export async function criarFaixaComissao(
+  custoId: string,
+  volumeAte: string | null,
+  percentual: string,
+): Promise<{ erro: string } | { faixa: Awaited<ReturnType<typeof prisma.faixaComissao.create>> }> {
+  const custo = await prisma.custo.findUnique({ where: { id: custoId }, include: { categoria: true } });
+  if (!custo) return { erro: "Custo não encontrado" };
+  if (custo.categoria.tipoIncidencia !== "faixas_vgv_acumulado") {
+    return { erro: "Faixas de comissão só podem ser cadastradas para um custo com incidência 'faixas de comissão progressivas por volume vendido'" };
+  }
+  const existentes = await prisma.faixaComissao.findMany({ where: { custoId } });
+  const candidatas = [
+    ...existentes.map((f) => ({ volumeAte: f.volumeAte ? new Decimal(f.volumeAte) : null })),
+    { volumeAte: volumeAte ? new Decimal(volumeAte) : null },
+  ];
+  if (!validarFaixasAscendentes(candidatas)) {
+    return { erro: "As faixas devem ter volume final estritamente crescente, com no máximo uma faixa aberta (sem limite), sempre a última." };
+  }
+  const faixa = await prisma.faixaComissao.create({ data: { custoId, volumeAte, percentual } });
+  return { faixa };
+}
+
+export interface AtualizarFaixaComissaoInput {
+  volumeAte?: string | null;
+  percentual?: string;
+}
+
+export async function atualizarFaixaComissao(
+  id: string,
+  input: AtualizarFaixaComissaoInput,
+): Promise<{ erro: string } | { faixa: Awaited<ReturnType<typeof prisma.faixaComissao.update>> }> {
+  const atual = await prisma.faixaComissao.findUnique({ where: { id } });
+  if (!atual) return { erro: "Faixa de comissão não encontrada" };
+  if (input.volumeAte !== undefined) {
+    const outras = await prisma.faixaComissao.findMany({ where: { custoId: atual.custoId, id: { not: id } } });
+    const candidatas = [
+      ...outras.map((f) => ({ volumeAte: f.volumeAte ? new Decimal(f.volumeAte) : null })),
+      { volumeAte: input.volumeAte ? new Decimal(input.volumeAte) : null },
+    ];
+    if (!validarFaixasAscendentes(candidatas)) {
+      return { erro: "As faixas devem ter volume final estritamente crescente, com no máximo uma faixa aberta (sem limite), sempre a última." };
+    }
+  }
+  const faixa = await prisma.faixaComissao.update({ where: { id }, data: input });
+  return { faixa };
+}
+
+export async function excluirFaixaComissao(id: string) {
+  await prisma.faixaComissao.delete({ where: { id } });
 }
 
 export interface CriarCronogramaInput {

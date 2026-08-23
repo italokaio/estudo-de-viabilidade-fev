@@ -184,3 +184,83 @@ describe("motor de custos — as 4 estrategias de incidencia", () => {
     expect(desembolsos).toEqual([{ custoId: "c6", mes: 2, valor: new Decimal("50000"), grupoIndiceCorrecao: "obra" }]);
   });
 });
+
+describe("motor de custos — faixas de comissão progressiva por VGV acumulado (achado F28)", () => {
+  function venda(id: string, mesOrigem: number, valorVenda: string, tipologiaId = "t-apto"): VendaInput {
+    return { id, unidadeId: `u-${id}`, tipologiaId, mesOrigem, valorVenda: new Decimal(valorVenda), condicaoPagamento: { id: "x", nome: "x", modalidades: [] } };
+  }
+
+  const faixas = [
+    { volumeAte: new Decimal("1000000"), percentual: new Decimal("0.03") },
+    { volumeAte: new Decimal("2000000"), percentual: new Decimal("0.04") },
+    { percentual: new Decimal("0.05") }, // faixa aberta, sem volumeAte
+  ];
+
+  it("cada venda usa a taxa da faixa em que o VGV acumulado se encontra após incluí-la — taxa única, não fatiada", () => {
+    const vendas = [venda("v1", 1, "800000"), venda("v2", 2, "500000"), venda("v3", 3, "1000000")];
+    const custo: CustoInput = {
+      id: "c7",
+      categoriaNome: "Comissão progressiva",
+      tipoIncidencia: "faixas_vgv_acumulado",
+      recorrencia: "mensal",
+      participaFluxoCaixa: true,
+      faixas,
+    };
+    const desembolsos = gerarDesembolsosMensais(custo, { ...ctxBase, vendas });
+    const porMes = new Map(desembolsos.map((d) => [d.mes, d.valor.toString()]));
+    // v1: acumulado 800.000 (<=1.000.000) -> 3% de 800.000 = 24.000
+    expect(porMes.get(1)).toBe("24000");
+    // v2: acumulado 1.300.000 (<=2.000.000) -> 4% de 500.000 = 20.000
+    expect(porMes.get(2)).toBe("20000");
+    // v3: acumulado 2.300.000 (faixa aberta) -> 5% de 1.000.000 = 50.000
+    expect(porMes.get(3)).toBe("50000");
+  });
+
+  it("o VGV acumula desde o início do cenário, nunca reinicia — não depende de reordenar as faixas na entrada", () => {
+    const vendas = [venda("v1", 1, "1500000")];
+    const custo: CustoInput = {
+      id: "c8",
+      categoriaNome: "Comissão progressiva",
+      tipoIncidencia: "faixas_vgv_acumulado",
+      recorrencia: "mensal",
+      participaFluxoCaixa: true,
+      // faixas fora de ordem -- o motor precisa ordenar sozinho
+      faixas: [faixas[2]!, faixas[0]!, faixas[1]!],
+    };
+    const desembolsos = gerarDesembolsosMensais(custo, { ...ctxBase, vendas });
+    // acumulado 1.500.000 cai na segunda faixa (<=2.000.000) -> 4% de 1.500.000 = 60.000
+    expect(desembolsos).toEqual([{ custoId: "c8", mes: 1, valor: new Decimal("60000") }]);
+  });
+
+  it("escopado a uma tipologia, o VGV acumulado só considera as vendas daquela tipologia (mesmo mecanismo do achado F11)", () => {
+    const vendas = [venda("v1", 1, "800000", "t-apto"), venda("v2", 1, "800000", "t-loja"), venda("v3", 2, "500000", "t-apto")];
+    const custo: CustoInput = {
+      id: "c9",
+      categoriaNome: "Comissão progressiva",
+      tipologiaId: "t-apto",
+      tipoIncidencia: "faixas_vgv_acumulado",
+      recorrencia: "mensal",
+      participaFluxoCaixa: true,
+      faixas,
+    };
+    const desembolsos = gerarDesembolsosMensais(custo, { ...ctxBase, vendas });
+    const porMes = new Map(desembolsos.map((d) => [d.mes, d.valor.toString()]));
+    // a venda da loja (mes 1) e ignorada -- acumulado do apto e so 800.000 no mes 1
+    expect(porMes.get(1)).toBe("24000"); // 3% de 800.000
+    expect(porMes.get(2)).toBe("20000"); // acumulado 1.300.000 -> 4% de 500.000
+  });
+
+  it("sem nenhuma faixa cadastrada ainda, gera comissão zero em vez de falhar — mesmo espírito de um cronograma sem pontos", () => {
+    const vendas = [venda("v1", 1, "800000")];
+    const custo: CustoInput = {
+      id: "c10",
+      categoriaNome: "Comissão progressiva",
+      tipoIncidencia: "faixas_vgv_acumulado",
+      recorrencia: "mensal",
+      participaFluxoCaixa: true,
+      faixas: [],
+    };
+    const desembolsos = gerarDesembolsosMensais(custo, { ...ctxBase, vendas });
+    expect(desembolsos).toEqual([{ custoId: "c10", mes: 1, valor: new Decimal("0") }]);
+  });
+});

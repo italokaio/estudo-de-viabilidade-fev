@@ -25,13 +25,14 @@ export interface ContextoCustos {
  * encargo — sobre valor vendido ou sobre valor recebido — e parametrizavel
  * por rubrica, nunca fixa no motor).
  *
- * Nenhuma das cinco estrategias abaixo sabe o nome da rubrica que a usa —
+ * Nenhuma das seis estrategias abaixo sabe o nome da rubrica que a usa —
  * "comissao" e "RET" nao aparecem em lugar nenhum deste arquivo. O que a
  * um empreendimento chama de "comissao no mes da venda" e apenas um Custo
  * com tipoIncidencia="pct_vgv_vendido_no_mes"; "comissao na curva de
- * recebimento" (achado F25) e tipoIncidencia="pct_recebido_no_mes"; um
- * encargo do tipo "RET" e apenas um Custo com
- * tipoIncidencia="pct_recebido_mes_anterior".
+ * recebimento" (achado F25) e tipoIncidencia="pct_recebido_no_mes";
+ * "comissao progressiva por volume vendido" (achado F28) e
+ * tipoIncidencia="faixas_vgv_acumulado"; um encargo do tipo "RET" e apenas
+ * um Custo com tipoIncidencia="pct_recebido_mes_anterior".
  */
 export function gerarDesembolsosMensais(custo: CustoInput, ctx: ContextoCustos): DesembolsoMensal[] {
   return gerarDesembolsosSemGrupo(custo, ctx).map((d) => ({ ...d, grupoIndiceCorrecao: custo.grupoIndiceCorrecao }));
@@ -93,6 +94,49 @@ function gerarDesembolsosSemGrupo(custo: CustoInput, ctx: ContextoCustos): Desem
       const desembolsos: DesembolsoMensal[] = [];
       for (const [mes, totalRecebido] of totalPorMes) {
         desembolsos.push({ custoId: custo.id, mes, valor: totalRecebido.times(percentual) });
+      }
+      return desembolsos;
+    }
+
+    case "faixas_vgv_acumulado": {
+      // Faixas de comissao progressiva por volume vendido (achado F28,
+      // docs/DECISOES.md): o volume de referencia e o VGV vendido
+      // acumulado desde o inicio do cenario, nunca reinicia por mes/periodo.
+      // Cada venda usa uma taxa unica -- a da faixa em que o acumulado se
+      // encontra logo apos incluir aquela venda -- em vez de fatiar o valor
+      // da propria venda marginalmente entre faixas (nao e como imposto de
+      // renda; e como a maioria das tabelas de comissao comercial).
+      const faixasOrdenadas = [...(custo.faixas ?? [])].sort((a, b) => {
+        if (a.volumeAte === undefined) return 1;
+        if (b.volumeAte === undefined) return -1;
+        return a.volumeAte.comparedTo(b.volumeAte);
+      });
+      function percentualDaFaixa(vgvAcumulado: Decimal): Decimal {
+        for (const f of faixasOrdenadas) {
+          if (f.volumeAte === undefined || vgvAcumulado.lessThanOrEqualTo(f.volumeAte)) return f.percentual;
+        }
+        // acumulado superou o limite de toda faixa cadastrada: usa a taxa da
+        // ultima (mais alta) em vez de zerar -- evita que a tabela precise
+        // sempre terminar com uma faixa aberta para continuar valendo.
+        return faixasOrdenadas.length > 0 ? faixasOrdenadas[faixasOrdenadas.length - 1]!.percentual : new Decimal(0);
+      }
+      const vendasBase = custo.tipologiaId ? ctx.vendas.filter((v) => v.tipologiaId === custo.tipologiaId) : ctx.vendas;
+      // Ordem cronologica de venda; desempate por id (estavel e
+      // deterministico) para vendas geradas no mesmo mes -- a ordem exata
+      // entre elas so importa perto de uma fronteira de faixa.
+      const vendasOrdenadas = [...vendasBase].sort((a, b) => a.mesOrigem - b.mesOrigem || a.id.localeCompare(b.id));
+      let vgvAcumulado = new Decimal(0);
+      const totalPorMes = new Map<number, Decimal>();
+      for (const venda of vendasOrdenadas) {
+        vgvAcumulado = vgvAcumulado.plus(venda.valorVenda);
+        const percentual = percentualDaFaixa(vgvAcumulado);
+        const comissao = venda.valorVenda.times(percentual);
+        const atual = totalPorMes.get(venda.mesOrigem) ?? new Decimal(0);
+        totalPorMes.set(venda.mesOrigem, atual.plus(comissao));
+      }
+      const desembolsos: DesembolsoMensal[] = [];
+      for (const [mes, valor] of totalPorMes) {
+        desembolsos.push({ custoId: custo.id, mes, valor });
       }
       return desembolsos;
     }

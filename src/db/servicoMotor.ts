@@ -32,7 +32,7 @@ async function montarEntradaMotor(cenarioId: string, opcoes: { taxaDescontoMensa
 
   const custosDb = await prisma.custo.findMany({
     where: { cenarioId },
-    include: { categoria: true },
+    include: { categoria: true, faixas: true },
   });
 
   const custos: CustoInput[] = custosDb.map((c) => ({
@@ -46,6 +46,10 @@ async function montarEntradaMotor(cenarioId: string, opcoes: { taxaDescontoMensa
     participaFluxoCaixa: c.participaFluxoCaixa,
     tipologiaId: c.tipologiaId ?? undefined,
     grupoIndiceCorrecao: c.grupoIndiceCorrecao,
+    // Faixas de comissao progressiva (achado F28) -- so preenchido quando
+    // tipoIncidencia="faixas_vgv_acumulado"; a ordenacao e feita pelo
+    // proprio motor (src/core/motorCustos.ts), nao aqui.
+    faixas: c.faixas.map((f) => ({ volumeAte: f.volumeAte ? new Decimal(f.volumeAte) : undefined, percentual: new Decimal(f.percentual) })),
   }));
 
   const cronogramaDb = await prisma.cronogramaFisicoFinanceiro.findMany({

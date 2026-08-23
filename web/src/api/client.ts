@@ -158,7 +158,13 @@ export interface CenarioResumo {
   derivadoDeNome: string | null;
 }
 
-export type TipoIncidenciaCusto = "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao" | "pct_recebido_no_mes";
+export type TipoIncidenciaCusto =
+  | "fixo"
+  | "pct_vgv_vendido_no_mes"
+  | "pct_recebido_mes_anterior"
+  | "pct_execucao"
+  | "pct_recebido_no_mes"
+  | "faixas_vgv_acumulado";
 
 export interface CategoriaCustoResumo {
   id: string;
@@ -196,6 +202,13 @@ export interface DestinatarioComissaoResumo {
   percentualSplit: string;
 }
 
+/** Uma faixa de uma tabela de comissão progressiva por VGV acumulado (achado F28, docs/DECISOES.md). volumeAte null = faixa aberta, sem limite. */
+export interface FaixaComissaoResumo {
+  id: string;
+  volumeAte: string | null;
+  percentual: string;
+}
+
 export interface CustoResumo {
   id: string;
   categoriaNome: string;
@@ -210,6 +223,7 @@ export interface CustoResumo {
   status: string;
   grupoIndiceCorrecao: string;
   destinatariosComissao: DestinatarioComissaoResumo[];
+  faixasComissao: FaixaComissaoResumo[];
 }
 
 export type TipoAmortizacao = "unico" | "sac" | "price";
@@ -628,6 +642,18 @@ export function atualizarDestinatarioComissao(id: string, input: { nome?: string
 
 export function excluirDestinatarioComissao(id: string) {
   return del(`/api/destinatarios-comissao/${id}`);
+}
+
+export function criarFaixaComissao(custoId: string, volumeAte: string | null, percentual: string) {
+  return postJson<FaixaComissaoResumo>(`/api/custos/${custoId}/faixas-comissao`, { volumeAte, percentual });
+}
+
+export function atualizarFaixaComissao(id: string, input: { volumeAte?: string | null; percentual?: string }) {
+  return patchJson<FaixaComissaoResumo>(`/api/faixas-comissao/${id}`, input);
+}
+
+export function excluirFaixaComissao(id: string) {
+  return del(`/api/faixas-comissao/${id}`);
 }
 
 export function excluirCronograma(cenarioId: string) {

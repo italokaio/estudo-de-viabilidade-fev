@@ -19,6 +19,7 @@ export async function resetDatabase() {
   await prisma.indiceCorrecao.deleteMany();
   await prisma.financiamentoProducao.deleteMany();
   await prisma.destinatarioComissao.deleteMany();
+  await prisma.faixaComissao.deleteMany();
   await prisma.desembolsoCusto.deleteMany();
   await prisma.custo.deleteMany();
   await prisma.categoriaCusto.deleteMany();

@@ -435,6 +435,7 @@ model Custo {
   tipologia      Tipologia?     @relation(fields: [tipologiaId], references: [id])
   destinatarios  DestinatarioComissao[]
   desembolsos    DesembolsoCusto[]
+  faixas         FaixaComissao[]
 
   @@map("custo")
 }
@@ -483,6 +484,27 @@ model DestinatarioComissao {
   custo Custo @relation(fields: [custoId], references: [id])
 
   @@map("destinatario_comissao")
+}
+
+// Uma faixa de uma tabela de comissao progressiva por volume de VGV vendido
+// acumulado (achado F28, docs/DECISOES.md — "faixas de comissao
+// progressivas por volume vendido"): cada Custo com
+// CategoriaCusto.tipoIncidencia="faixas_vgv_acumulado" tem uma ou mais
+// faixas, com volumeAte estritamente crescente e no maximo uma faixa aberta
+// (volumeAte=null, sem limite superior), sempre a ultima -- validado na API
+// a cada criacao/edicao (src/db/cadastro.ts), nunca no schema. O motor lê
+// toda a lista e decide sozinho (src/core/motorCustos.ts); Custo.percentual
+// fica sem uso para este tipo de incidencia.
+model FaixaComissao {
+  id         String   @id @default(cuid())
+  custoId    String
+  volumeAte  String? // decimal-as-string, limite superior de VGV acumulado desta faixa -- nulo = faixa aberta, sem limite
+  percentual String // decimal-as-string, 0..1
+  createdAt  DateTime @default(now())
+
+  custo Custo @relation(fields: [custoId], references: [id])
+
+  @@map("faixa_comissao")
 }
 
 model CronogramaFisicoFinanceiro {

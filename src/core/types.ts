@@ -50,7 +50,24 @@ export interface RecebimentoGerado {
   valorPrevisto: Decimal;
 }
 
-export type TipoIncidenciaCusto = "fixo" | "pct_vgv_vendido_no_mes" | "pct_recebido_mes_anterior" | "pct_execucao" | "pct_recebido_no_mes";
+export type TipoIncidenciaCusto =
+  | "fixo"
+  | "pct_vgv_vendido_no_mes"
+  | "pct_recebido_mes_anterior"
+  | "pct_execucao"
+  | "pct_recebido_no_mes"
+  | "faixas_vgv_acumulado";
+
+/**
+ * Uma faixa de uma tabela de comissao progressiva por VGV acumulado (achado
+ * F28, docs/DECISOES.md — "faixas de comissao progressivas por volume
+ * vendido"). volumeAte=undefined so na ultima faixa da lista (sem limite
+ * superior).
+ */
+export interface FaixaComissaoInput {
+  volumeAte?: Decimal;
+  percentual: Decimal;
+}
 
 export interface CustoInput {
   id: string;
@@ -58,7 +75,7 @@ export interface CustoInput {
   tipoIncidencia: TipoIncidenciaCusto;
   /** valor absoluto — usado quando tipoIncidencia = "fixo" */
   valorPrevisto?: Decimal;
-  /** 0..1 — usado quando tipoIncidencia != "fixo" */
+  /** 0..1 — usado quando tipoIncidencia != "fixo" e != "faixas_vgv_acumulado" */
   percentual?: Decimal;
   /** mes de lancamento — usado quando tipoIncidencia = "fixo" e recorrencia = "unico" */
   competenciaMes?: number;
@@ -66,10 +83,10 @@ export interface CustoInput {
   participaFluxoCaixa: boolean;
   /**
    * Escopo opcional por tipologia (achado F11, docs/DECISOES.md — "estrutura
-   * de comissao"): relevante para tipoIncidencia="pct_vgv_vendido_no_mes" ou
-   * "pct_recebido_no_mes" (achado F25) — quando preenchido, o custo so
-   * incide sobre vendas daquela tipologia, em vez de todas as vendas do
-   * cenario.
+   * de comissao"): relevante para tipoIncidencia="pct_vgv_vendido_no_mes",
+   * "pct_recebido_no_mes" (achado F25) ou "faixas_vgv_acumulado" (achado
+   * F28) — quando preenchido, o custo so incide sobre vendas daquela
+   * tipologia, em vez de todas as vendas do cenario.
    */
   tipologiaId?: string;
   /**
@@ -79,6 +96,8 @@ export interface CustoInput {
    * PontoIndiceCorrecao com o mesmo grupo, ou fator 1 se nenhuma existir.
    */
   grupoIndiceCorrecao?: string;
+  /** Tabela de faixas — so usado quando tipoIncidencia = "faixas_vgv_acumulado" (achado F28). */
+  faixas?: FaixaComissaoInput[];
 }
 
 export interface PontoCronograma {
