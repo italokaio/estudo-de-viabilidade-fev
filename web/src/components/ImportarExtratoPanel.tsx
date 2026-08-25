@@ -35,6 +35,14 @@ export function ImportarExtratoPanel({ cenarioId, onAtualizado }: { cenarioId: s
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // Fechamento/hardening da Fase 1: sugestões pendentes de um cenário
+    // anterior não podem sobreviver à troca de cenário -- o backend já
+    // rejeita confirmar candidatos que não pertencem ao cenário atual (ver
+    // confirmarConciliacao em src/db/conciliacao.ts), mas deixar o painel
+    // mostrando dados do cenário errado até um clique falhar é confuso.
+    setSugestoes(null);
+    setSelecoes({});
+    setErro(null);
     fetchCenarioDetalhe(cenarioId)
       .then((d) => setDataMesUmInput(d.dataMesUm ?? ""))
       .catch((e) => setErro(String(e.message ?? e)));

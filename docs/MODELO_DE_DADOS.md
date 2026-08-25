@@ -4,6 +4,8 @@ Schema completo em [`prisma/schema.prisma`](../prisma/schema.prisma). 25 tabelas
 
 Convenção: todo valor monetário ou percentual é `String` (texto decimal), nunca `Float`. Ver `docs/ARQUITETURA.md`, princípio B.
 
+Convenção sobre exclusão em cascata (achado F29, fechamento/hardening da Fase 1): nenhuma relação do schema tem `onDelete` além das quatro citadas abaixo (`destinatario_comissao`, `faixa_comissao`, `desembolso_custo`, `contraparte_permuta`) — todas as outras cascatas são responsabilidade explícita do código de aplicação em `src/db/cadastro.ts` (`excluirEmpreendimento`/`excluirCenario`/etc.), porque envolvem regra de negócio real (ex.: `Unidade` volta para `status="estoque"` em vez de ser apagada). As quatro exceções são tabelas de enriquecimento puro, sem sentido de negócio independente do pai — `onDelete: Cascade` é seguro só para elas.
+
 | Tabela | Finalidade | Observação |
 |---|---|---|
 | `empreendimento` | Raiz de tudo | `incorporador` é um campo texto simples nesta fase (achado da revisão: multiempresa real não é necessária ainda — só multiempreendimento) |

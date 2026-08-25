@@ -11,6 +11,9 @@
     "prisma:push": "prisma db push",
     "import:splendido": "tsx src/import/importadorSplendido.ts",
     "import:ficticio": "tsx src/import/importadorFicticio.ts",
+    "import:testeA": "tsx src/import/importadorTesteA.ts",
+    "import:testeB": "tsx src/import/importadorTesteB.ts",
+    "import:testeC": "tsx src/import/importadorTesteC.ts",
     "seed:admin": "tsx src/import/seedAdmin.ts",
     "typecheck": "tsc --noEmit"
   },

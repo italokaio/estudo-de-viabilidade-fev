@@ -368,6 +368,8 @@ export function criarCronograma(cenarioId: string, pontos: { mes: number; percen
 
 export interface RecebimentoResumo {
   id: string;
+  /** Fase 2.1 — tela de Vendas: filtra "os recebimentos desta venda" sem rota nova. */
+  vendaId: string;
   unidadeNumero: string;
   modalidadeNome: string;
   mesCompetencia: number;
@@ -388,6 +390,52 @@ export function registrarRecebimentoRealizado(id: string, input: { valorRealizad
 
 export function estornarRecebimentoRealizado(id: string) {
   return patchJson<RecebimentoResumo>(`/api/recebimentos/${id}`, { estornar: true });
+}
+
+/** Fase 2.1 — tela de Vendas. */
+export interface VendaCenarioResumo {
+  id: string;
+  status: string;
+  mesOrigem: number;
+  valorVenda: string;
+  comprador: string | null;
+  documentoComprador: string | null;
+  unidade: { id: string; numero: string; andar: number | null };
+  tipologia: { id: string; nome: string };
+  condicaoPagamento: { id: string; nome: string };
+  distrato: DistratoResumo | null;
+  renegociacoes: RenegociacaoResumo[];
+}
+
+export async function fetchVendasDoCenario(cenarioId: string): Promise<VendaCenarioResumo[]> {
+  const res = await apiFetch(`/api/cenarios/${cenarioId}/vendas`);
+  if (!res.ok) throw new Error(`Falha ao carregar vendas (${res.status})`);
+  return res.json();
+}
+
+export function criarVenda(
+  cenarioId: string,
+  input: { unidadeId: string; condicaoPagamentoId: string; mesOrigem: number; valorVenda?: string; comprador?: string; documentoComprador?: string },
+) {
+  return postJson<VendaCenarioResumo>(`/api/cenarios/${cenarioId}/vendas`, input);
+}
+
+export function atualizarVenda(
+  id: string,
+  input: { comprador?: string | null; documentoComprador?: string | null; valorVenda?: string; mesOrigem?: number },
+) {
+  return patchJson<VendaCenarioResumo>(`/api/vendas/${id}`, input);
+}
+
+export interface EstoqueResumo {
+  total: number;
+  porStatus: Record<string, number>;
+}
+
+export async function fetchEstoque(empreendimentoId: string): Promise<EstoqueResumo> {
+  const res = await apiFetch(`/api/empreendimentos/${empreendimentoId}/estoque`);
+  if (!res.ok) throw new Error(`Falha ao carregar estoque (${res.status})`);
+  return res.json();
 }
 
 export function registrarCustoRealizado(id: string, input: { valorRealizado: string }) {
@@ -420,6 +468,57 @@ export function registrarDesembolsoCustoRealizado(id: string, input: { valorReal
 
 export function estornarDesembolsoCustoRealizado(id: string) {
   return patchJson<DesembolsoCustoResumo>(`/api/desembolsos-custos/${id}`, { estornar: true });
+}
+
+/**
+ * Visão gerencial de custos (Fase 2.2, docs/DECISOES.md — achado F31):
+ * previsto/realizado/saldo/desvio por custo, calculados no backend a
+ * partir do que o motor já projeta -- a tela de Custos nunca soma valores
+ * sozinha.
+ */
+export interface CustoResumoGerencial {
+  id: string;
+  categoriaId: string;
+  categoriaNome: string;
+  tipoIncidencia: TipoIncidenciaCusto;
+  tipologiaId: string | null;
+  tipologiaNome: string | null;
+  recorrencia: string;
+  competenciaMes: number | null;
+  status: string;
+  totalPrevisto: string;
+  totalRealizado: string;
+  saldoARealizar: string;
+  desvio: string;
+  desvioPercentual: string | null;
+}
+
+export async function fetchCustosResumo(cenarioId: string): Promise<CustoResumoGerencial[]> {
+  const res = await apiFetch(`/api/cenarios/${cenarioId}/custos-resumo`);
+  if (!res.ok) throw new Error(`Falha ao carregar resumo de custos (${res.status})`);
+  return res.json();
+}
+
+/**
+ * Distribuição mensal do previsto de um custo, reaproveitando exatamente
+ * o que rodarMotorParaCenario já calcula (resultado.desembolsos) -- nenhum
+ * cálculo novo. `granular` indica se há realizado por mês (custos
+ * percentuais, DesembolsoCusto) ou só um valor agregado (custos fixos —
+ * limitação real do modelo atual, não uma escolha da tela).
+ */
+export interface DistribuicaoMensalCusto {
+  custoId: string;
+  tipoIncidencia: TipoIncidenciaCusto;
+  recorrencia: string;
+  granular: boolean;
+  meses: { mes: number; valorPrevisto: string }[];
+  realizadoPorMes: { mes: number; valorRealizado: string | null; status: string; desembolsoId: string }[];
+}
+
+export async function fetchDistribuicaoMensalCusto(custoId: string): Promise<DistribuicaoMensalCusto> {
+  const res = await apiFetch(`/api/custos/${custoId}/distribuicao-mensal`);
+  if (!res.ok) throw new Error(`Falha ao carregar distribuição mensal do custo (${res.status})`);
+  return res.json();
 }
 
 /** Importação em lote de extrato bancário (achado F27, docs/DECISOES.md) — "sugerir e confirmar", nunca marcar sozinho. */

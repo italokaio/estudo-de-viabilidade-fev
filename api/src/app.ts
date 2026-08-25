@@ -1,5 +1,6 @@
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import { Decimal } from "decimal.js";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import {
@@ -13,6 +14,7 @@ import {
   atualizarFaixaComissao,
   atualizarPermuta,
   atualizarTipologia,
+  atualizarVenda,
   criarCategoriaCusto,
   criarCenario,
   criarCondicaoPagamento,
@@ -46,9 +48,12 @@ import {
   excluirFinanciamento,
   excluirPontoIndiceCorrecao,
   excluirTipologia,
+  listarVendasDoCenario,
   registrarDistrato,
   registrarPermuta,
   registrarRenegociacaoVenda,
+  registrarVenda,
+  resumoEstoque,
   type ModalidadeInput,
 } from "../../src/db/cadastro.js";
 import {
@@ -124,10 +129,37 @@ async function garantirAcesso(req: FastifyRequest, reply: FastifyReply, empreend
  * Exportado separado de server.ts para poder ser testado com app.inject()
  * (Fastify) sem precisar abrir uma porta real.
  */
+// Fechamento/hardening da Fase 1 (achado F29, docs/DECISOES.md): `origin:
+// true` aceitava QUALQUER origem com `credentials: true` -- adequado
+// enquanto o sistema só roda em localhost, mas uma vulnerabilidade real
+// assim que a API for exposta além disso (qualquer site poderia fazer
+// requisições autenticadas com o cookie de sessão do usuário). A lista é
+// configurável por `CORS_ORIGINS` (separado por vírgula) para produção,
+// com um padrão que cobre só as origens de desenvolvimento local
+// conhecidas -- nunca "aceitar tudo" por omissão.
+const ORIGENS_PERMITIDAS = (process.env.CORS_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 export async function buildApp() {
   const app = Fastify({ logger: false });
-  await app.register(cors, { origin: true, credentials: true });
+  // Limite de tentativas de login por minuto, por IP. Lido dentro de
+  // buildApp() (não como constante de módulo) para que um teste possa
+  // mudar process.env.RATE_LIMIT_LOGIN_MAX e chamar buildApp() de novo,
+  // sem depender da ordem em que os módulos foram importados. Sob a suíte
+  // de testes (Vitest, identificado por process.env.VITEST) toda chamada
+  // de app.inject() compartilha o mesmo IP sintético, e a suíte inteira
+  // faz centenas de logins -- por isso o padrão sob teste é bem mais alto,
+  // nunca atingido pelo uso normal dos outros ~40 arquivos de teste.
+  const LOGIN_RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_LOGIN_MAX ?? (process.env.VITEST ? 100000 : 20));
+  await app.register(cors, { origin: ORIGENS_PERMITIDAS, credentials: true });
   await app.register(cookie);
+  // Fechamento/hardening da Fase 1: sem isso, /api/auth/login aceitava
+  // tentativas ilimitadas de senha -- um alvo óbvio de força bruta. 20
+  // tentativas por minuto por IP é folgado o bastante para um usuário
+  // real errar a senha algumas vezes, mas barra um script automatizado.
+  await app.register(rateLimit, { global: false });
 
   // Toda rota /api/* exige sessao valida, exceto login (senao ninguem
   // consegue entrar) e logout (um cookie invalido ainda precisa poder ser
@@ -146,25 +178,29 @@ export async function buildApp() {
     req.usuario = usuario;
   });
 
-  app.post<{ Body: { email?: string; senha?: string } }>("/api/auth/login", async (req, reply) => {
-    const { email, senha } = req.body ?? {};
-    if (!email || !senha) {
-      reply.code(400);
-      return { erro: "Email e senha são obrigatórios" };
-    }
-    const resultado = await autenticar({ email, senha });
-    if (!resultado) {
-      reply.code(401);
-      return { erro: "Email ou senha inválidos" };
-    }
-    reply.setCookie(NOME_COOKIE_SESSAO, resultado.token, {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: DURACAO_COOKIE_SEGUNDOS,
-    });
-    return resultado.usuario;
-  });
+  app.post<{ Body: { email?: string; senha?: string } }>(
+    "/api/auth/login",
+    { config: { rateLimit: { max: LOGIN_RATE_LIMIT_MAX, timeWindow: "1 minute" } } },
+    async (req, reply) => {
+      const { email, senha } = req.body ?? {};
+      if (!email || !senha) {
+        reply.code(400);
+        return { erro: "Email e senha são obrigatórios" };
+      }
+      const resultado = await autenticar({ email, senha });
+      if (!resultado) {
+        reply.code(401);
+        return { erro: "Email ou senha inválidos" };
+      }
+      reply.setCookie(NOME_COOKIE_SESSAO, resultado.token, {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: DURACAO_COOKIE_SEGUNDOS,
+      });
+      return resultado.usuario;
+    },
+  );
 
   app.post("/api/auth/logout", async (req, reply) => {
     const token = req.cookies[NOME_COOKIE_SESSAO];
@@ -832,6 +868,118 @@ export async function buildApp() {
     return null;
   });
 
+  // Registro individual de venda (Fase 2, tela de Vendas) -- diferente de
+  // POST /api/cenarios/:id/gerar-vendas (Fase 1, aloca unidades em lote a
+  // partir de premissa de velocidade), aqui o usuario escolhe a unidade e
+  // o comprador diretamente. Depois de criar a Venda, roda o motor para
+  // este cenario (mesma funcao ja usada por GET /fluxo-caixa) para que os
+  // recebimentos da venda ja existam quando a tela for consultar -- nao e
+  // uma regra nova, e o mesmo recalculo que qualquer outra mudanca dispara.
+  app.post<{
+    Params: { cenarioId: string };
+    Body: { unidadeId?: string; condicaoPagamentoId?: string; mesOrigem?: number; valorVenda?: string; comprador?: string; documentoComprador?: string };
+  }>("/api/cenarios/:cenarioId/vendas", async (req, reply) => {
+    const { unidadeId, condicaoPagamentoId, mesOrigem, valorVenda, comprador, documentoComprador } = req.body ?? {};
+    if (!unidadeId) {
+      reply.code(400);
+      return { erro: "Unidade é obrigatória" };
+    }
+    if (!condicaoPagamentoId) {
+      reply.code(400);
+      return { erro: "Condição de pagamento é obrigatória" };
+    }
+    if (!mesOrigem) {
+      reply.code(400);
+      return { erro: "Mês da venda é obrigatório" };
+    }
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.cenarioId } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+    const resultado = await registrarVenda({
+      cenarioId: cenario.id,
+      unidadeId,
+      condicaoPagamentoId,
+      mesOrigem,
+      valorVenda,
+      comprador,
+      documentoComprador,
+    });
+    if ("erro" in resultado) {
+      reply.code(resultado.erro === "Unidade não encontrada" || resultado.erro === "Condição de pagamento não encontrada" ? 404 : 400);
+      return { erro: resultado.erro };
+    }
+    await rodarMotorParaCenario(cenario.id);
+    reply.code(201);
+    return resultado.venda;
+  });
+
+  app.get<{ Params: { cenarioId: string } }>("/api/cenarios/:cenarioId/vendas", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.cenarioId } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+    const vendas = await listarVendasDoCenario(cenario.id);
+    return vendas.map((v) => ({
+      id: v.id,
+      status: v.status,
+      mesOrigem: v.mesOrigem,
+      valorVenda: v.valorVenda,
+      comprador: v.comprador,
+      documentoComprador: v.documentoComprador,
+      unidade: { id: v.unidade.id, numero: v.unidade.numero, andar: v.unidade.andar },
+      tipologia: { id: v.unidade.tipologia.id, nome: v.unidade.tipologia.nome },
+      condicaoPagamento: { id: v.condicaoPagamento.id, nome: v.condicaoPagamento.nome },
+      distrato: v.distrato
+        ? {
+            valorRecebidoAteDistrato: v.distrato.valorRecebidoAteDistrato,
+            percentualRetencao: v.distrato.percentualRetencao,
+            valorRetido: v.distrato.valorRetido,
+            valorReembolsar: v.distrato.valorReembolsar,
+          }
+        : null,
+      renegociacoes: v.renegociacoes.map((r) => ({ id: r.id, valorVendaAnterior: r.valorVendaAnterior, novoValorVenda: r.novoValorVenda, motivo: r.motivo })),
+    }));
+  });
+
+  app.patch<{
+    Params: { id: string };
+    Body: { comprador?: string | null; documentoComprador?: string | null; valorVenda?: string; mesOrigem?: number };
+  }>("/api/vendas/:id", async (req, reply) => {
+    const venda = await prisma.venda.findUnique({ where: { id: req.params.id } });
+    if (!venda) {
+      reply.code(404);
+      return { erro: "Venda não encontrada" };
+    }
+    if (!(await garantirAcesso(req, reply, venda.empreendimentoId))) return;
+    const resultado = await atualizarVenda(req.params.id, req.body ?? {});
+    if ("erro" in resultado) {
+      reply.code(400);
+      return { erro: resultado.erro };
+    }
+    if (req.body?.mesOrigem !== undefined || req.body?.valorVenda !== undefined) {
+      await rodarMotorParaCenario(venda.cenarioId);
+    }
+    return resultado.venda;
+  });
+
+  // Estoque agregado por status de Unidade (Fase 2, tela de Vendas) -- por
+  // empreendimento, nao por cenario: Unidade.status e compartilhado entre
+  // todos os cenarios do mesmo empreendimento (ver excluirCenario).
+  app.get<{ Params: { id: string } }>("/api/empreendimentos/:id/estoque", async (req, reply) => {
+    const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
+    if (!empreendimento) {
+      reply.code(404);
+      return { erro: "Empreendimento não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, empreendimento.id))) return;
+    return resumoEstoque(empreendimento.id);
+  });
+
   // Distrato (achado F7, docs/DECISOES.md): cancela uma venda. O motor ja
   // filtra vendas por status="ativa" (src/db/servicoMotor.ts), entao marcar
   // a venda como "distratada" e suficiente -- nenhuma rota de fluxo de
@@ -1418,6 +1566,11 @@ export async function buildApp() {
       recorrencia: (recorrencia as "unico" | "mensal") ?? "unico",
       grupoIndiceCorrecao: grupoIndiceCorrecao?.trim() || undefined,
     });
+    // Fase 2.2 — Custos: recalcula na hora, mesmo padrao de POST
+    // /api/cenarios/:cenarioId/vendas, para que o previsto (e, para
+    // incidencias percentuais, o DesembolsoCusto por mes) ja exista sem
+    // depender de uma chamada separada a /fluxo-caixa.
+    await rodarMotorParaCenario(cenario.id);
     reply.code(201);
     return custo;
   });
@@ -1432,6 +1585,11 @@ export async function buildApp() {
       reply.code(404);
       return { erro: "Custo não encontrado" };
     }
+    // Achado F31 (Fase 2.2, docs/DECISOES.md): faltava garantirAcesso aqui
+    // -- unica rota de exclusao de Custo sem checagem de vinculo, apesar de
+    // ja checar papel==="admin" (sem risco pratico hoje, ja que admin tem
+    // acesso universal, mas inconsistente com o resto das rotas de custo).
+    if (!(await garantirAcesso(req, reply, custo.empreendimentoId))) return;
     await excluirCusto(req.params.id);
     reply.code(204);
     return null;
@@ -1780,7 +1938,17 @@ export async function buildApp() {
       return prisma.custo.update({ where: { id: req.params.id }, data: { valorRealizado: valorRealizado.trim(), status: "realizado" } });
     }
 
-    return atualizarCusto(req.params.id, { valorPrevisto, percentual, competenciaMes, recorrencia, grupoIndiceCorrecao: grupoIndiceCorrecao?.trim() || undefined });
+    const atualizado = await atualizarCusto(req.params.id, {
+      valorPrevisto,
+      percentual,
+      competenciaMes,
+      recorrencia,
+      grupoIndiceCorrecao: grupoIndiceCorrecao?.trim() || undefined,
+    });
+    // Editar um campo do previsto muda o valor que o motor projeta -- mesma
+    // logica de recalcular na hora de POST /api/cenarios/:id/custos (Fase 2.2).
+    await rodarMotorParaCenario(custo.cenarioId);
+    return atualizado;
   });
 
   app.get<{ Params: { id: string } }>("/api/cenarios/:id/recebimentos", async (req, reply) => {
@@ -1797,6 +1965,10 @@ export async function buildApp() {
     });
     return recebimentos.map((r) => ({
       id: r.id,
+      // vendaId (Fase 2, tela de Vendas): campo aditivo -- permite a tela
+      // filtrar client-side "os recebimentos desta venda" sem precisar de
+      // uma rota nova, reaproveitando esta lista que ja existe.
+      vendaId: r.vendaId,
       unidadeNumero: r.venda.unidade.numero,
       modalidadeNome: r.modalidade.nome,
       mesCompetencia: r.mesCompetencia,
@@ -1896,6 +2068,107 @@ export async function buildApp() {
       });
     },
   );
+
+  // Visao gerencial de custos (Fase 2.2, docs/DECISOES.md — achado F31):
+  // previsto/realizado/saldo/desvio por custo, calculados aqui (nao no
+  // frontend) para nao duplicar regra financeira. O previsto total de CADA
+  // custo -- inclusive fixo -- vem da soma de resultado.desembolsos, a
+  // mesma saida que o motor ja calcula para o fluxo de caixa (nao um
+  // recalculo paralelo); o realizado usa Custo.valorRealizado para
+  // incidencia "fixo" (unico valor agregado) e a soma de
+  // DesembolsoCusto.valorRealizado para as demais (granular por mes).
+  app.get<{ Params: { id: string } }>("/api/cenarios/:id/custos-resumo", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+
+    const resultado = await rodarMotorParaCenario(cenario.id);
+    const previstoPorCusto = new Map<string, Decimal>();
+    for (const d of resultado.desembolsos) {
+      previstoPorCusto.set(d.custoId, (previstoPorCusto.get(d.custoId) ?? new Decimal(0)).plus(d.valor));
+    }
+
+    const [custos, desembolsos] = await Promise.all([
+      prisma.custo.findMany({ where: { cenarioId: cenario.id }, include: { categoria: true, tipologia: { select: { nome: true } } } }),
+      prisma.desembolsoCusto.findMany({ where: { custo: { cenarioId: cenario.id } }, select: { custoId: true, valorRealizado: true, status: true } }),
+    ]);
+    const realizadoPercentualPorCusto = new Map<string, Decimal>();
+    for (const d of desembolsos) {
+      if (d.status === "realizado" && d.valorRealizado) {
+        realizadoPercentualPorCusto.set(d.custoId, (realizadoPercentualPorCusto.get(d.custoId) ?? new Decimal(0)).plus(d.valorRealizado));
+      }
+    }
+
+    return custos.map((c) => {
+      const previsto = previstoPorCusto.get(c.id) ?? new Decimal(0);
+      const realizado =
+        c.categoria.tipoIncidencia === "fixo"
+          ? c.status === "realizado" && c.valorRealizado
+            ? new Decimal(c.valorRealizado)
+            : new Decimal(0)
+          : (realizadoPercentualPorCusto.get(c.id) ?? new Decimal(0));
+      const desvio = realizado.minus(previsto);
+      return {
+        id: c.id,
+        categoriaId: c.categoriaId,
+        categoriaNome: c.categoria.nome,
+        tipoIncidencia: c.categoria.tipoIncidencia as TipoIncidenciaCusto,
+        tipologiaId: c.tipologiaId,
+        tipologiaNome: c.tipologia?.nome ?? null,
+        recorrencia: c.recorrencia,
+        competenciaMes: c.competenciaMes,
+        status: c.status,
+        totalPrevisto: previsto.toFixed(2),
+        totalRealizado: realizado.toFixed(2),
+        saldoARealizar: previsto.minus(realizado).toFixed(2),
+        desvio: desvio.toFixed(2),
+        desvioPercentual: previsto.isZero() ? null : desvio.dividedBy(previsto).times(100).toFixed(2),
+      };
+    });
+  });
+
+  // Distribuicao mensal de um custo (Fase 2.2): filtra resultado.desembolsos
+  // -- ja calculado por rodarMotorParaCenario para o fluxo de caixa -- por
+  // custoId, sem nenhuma logica nova em src/core. Para custos de incidencia
+  // "fixo" o realizado continua sendo um unico valor agregado (limitacao
+  // real do modelo, achado F31): "granular" indica se ha realizado por mes
+  // (DesembolsoCusto, incidencias percentuais) ou nao.
+  app.get<{ Params: { id: string } }>("/api/custos/:id/distribuicao-mensal", async (req, reply) => {
+    const custo = await prisma.custo.findUnique({ where: { id: req.params.id }, include: { categoria: true } });
+    if (!custo) {
+      reply.code(404);
+      return { erro: "Custo não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, custo.empreendimentoId))) return;
+
+    const resultado = await rodarMotorParaCenario(custo.cenarioId);
+    const meses = resultado.desembolsos
+      .filter((d) => d.custoId === custo.id)
+      .map((d) => ({ mes: d.mes, valorPrevisto: d.valor.toString() }))
+      .sort((a, b) => a.mes - b.mes);
+
+    const granular = custo.categoria.tipoIncidencia !== "fixo";
+    const realizadoPorMes = granular
+      ? (await prisma.desembolsoCusto.findMany({ where: { custoId: custo.id }, orderBy: { mes: "asc" } })).map((d) => ({
+          mes: d.mes,
+          valorRealizado: d.valorRealizado,
+          status: d.status,
+          desembolsoId: d.id,
+        }))
+      : [];
+
+    return {
+      custoId: custo.id,
+      tipoIncidencia: custo.categoria.tipoIncidencia as TipoIncidenciaCusto,
+      recorrencia: custo.recorrencia,
+      granular,
+      meses,
+      realizadoPorMes,
+    };
+  });
 
   app.post<{ Params: { id: string }; Body: { itens?: { tipologiaId: string; mes: number; unidadesPrevistas: string }[] } }>(
     "/api/cenarios/:id/premissas-velocidade",

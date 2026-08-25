@@ -264,7 +264,13 @@ model ContrapartePermuta {
   valorAtribuido  String? // decimal-as-string, so para registro -- nao participa do motor
   createdAt       DateTime @default(now())
 
-  permuta Permuta @relation(fields: [permutaId], references: [id])
+  // onDelete: Cascade (fechamento/hardening da Fase 1, docs/DECISOES.md —
+  // achado F29): ContrapartePermuta so existe em funcao de uma Permuta,
+  // nunca tem sentido de negocio independente -- apagar a Permuta deve
+  // sempre apagar suas contrapartes junto, sem depender de codigo de
+  // aplicacao lembrar de fazer isso em todo caminho que apaga Permuta em
+  // lote (excluirEmpreendimento, por exemplo).
+  permuta Permuta @relation(fields: [permutaId], references: [id], onDelete: Cascade)
 
   @@map("contraparte_permuta")
 }
@@ -329,6 +335,11 @@ model Venda {
   valorVenda          String // decimal-as-string
   condicaoPagamentoId String
   status              String   @default("ativa") // ativa | distratada
+  // Cadastro nominal do comprador (Fase 2, tela de Vendas) -- mesmo espirito
+  // de Permuta.nomeContraparte: puramente informativo, nunca lido pelo
+  // motor financeiro (src/core nunca sabe quem comprou, so quanto e quando).
+  comprador           String?
+  documentoComprador  String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -462,7 +473,8 @@ model DesembolsoCusto {
   valorRealizado String?
   status         String  @default("previsto")
 
-  custo Custo @relation(fields: [custoId], references: [id])
+  // onDelete: Cascade — ver nota em DestinatarioComissao abaixo (achado F29).
+  custo Custo @relation(fields: [custoId], references: [id], onDelete: Cascade)
 
   @@unique([custoId, mes])
   @@map("desembolso_custo")
@@ -481,7 +493,18 @@ model DestinatarioComissao {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  custo Custo @relation(fields: [custoId], references: [id])
+  // onDelete: Cascade (fechamento/hardening da Fase 1, docs/DECISOES.md —
+  // achado F29): DestinatarioComissao/FaixaComissao/DesembolsoCusto so
+  // existem em funcao de um Custo, nunca tem sentido de negocio
+  // independente -- apagar o Custo deve sempre apagar as tres junto, sem
+  // depender de codigo de aplicacao lembrar de replicar deleteMany() em
+  // TODO caminho que apaga Custo em lote. Antes desta fatia, essa limpeza
+  // so existia em excluirCusto() (achado F13) -- excluirEmpreendimento() e
+  // excluirCenario() tambem apagam Custo em lote e nunca receberam a mesma
+  // limpeza para DestinatarioComissao, causando um erro 500 real e
+  // reproduzivel ao excluir um empreendimento/cenario com split nominal de
+  // comissao cadastrado (encontrado na auditoria tecnica da Fase 1).
+  custo Custo @relation(fields: [custoId], references: [id], onDelete: Cascade)
 
   @@map("destinatario_comissao")
 }
@@ -502,7 +525,8 @@ model FaixaComissao {
   percentual String // decimal-as-string, 0..1
   createdAt  DateTime @default(now())
 
-  custo Custo @relation(fields: [custoId], references: [id])
+  // onDelete: Cascade — ver nota em DestinatarioComissao acima (achado F29).
+  custo Custo @relation(fields: [custoId], references: [id], onDelete: Cascade)
 
   @@map("faixa_comissao")
 }

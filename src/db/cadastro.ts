@@ -50,18 +50,18 @@ export async function excluirEmpreendimento(id: string) {
   await prisma.premissaVelocidadeVendas.deleteMany({ where: { empreendimentoId: id } });
   await prisma.modalidadePagamento.deleteMany({ where: { condicaoPagamento: { empreendimentoId: id } } });
   await prisma.condicaoPagamento.deleteMany({ where: { empreendimentoId: id } });
-  // ContrapartePermuta (achado F24) referencia Permuta sem cascade -- mesmo
-  // padrao dos achados F10/F11/F13/F17/F21.
-  await prisma.contrapartePermuta.deleteMany({ where: { permuta: { empreendimentoId: id } } });
+  // ContrapartePermuta apaga sozinha via onDelete: Cascade no schema
+  // (achado F29, docs/DECISOES.md — fechamento/hardening da Fase 1).
   await prisma.permuta.deleteMany({ where: { empreendimentoId: id } });
   await prisma.unidade.deleteMany({ where: { empreendimentoId: id } });
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { empreendimentoId: id } });
   await prisma.indiceCorrecao.deleteMany({ where: { empreendimentoId: id } });
   await prisma.financiamentoProducao.deleteMany({ where: { empreendimentoId: id } });
-  // DesembolsoCusto (achado F21) e FaixaComissao (achado F28) referenciam
-  // Custo sem cascade -- mesmo padrao dos achados F10/F11/F13/F17.
-  await prisma.desembolsoCusto.deleteMany({ where: { custo: { empreendimentoId: id } } });
-  await prisma.faixaComissao.deleteMany({ where: { custo: { empreendimentoId: id } } });
+  // DestinatarioComissao/DesembolsoCusto/FaixaComissao apagam sozinhos via
+  // onDelete: Cascade no schema (achado F29) -- corrige o bug real
+  // encontrado na auditoria: excluir um empreendimento com split nominal
+  // de comissao cadastrado falhava por violacao de chave estrangeira,
+  // porque so excluirCusto() limpava DestinatarioComissao antes desta fatia.
   await prisma.custo.deleteMany({ where: { empreendimentoId: id } });
   await prisma.categoriaCusto.deleteMany({ where: { empreendimentoId: id } });
   await prisma.tipologia.deleteMany({ where: { empreendimentoId: id } });
@@ -118,10 +118,8 @@ export async function excluirCenario(id: string) {
     await prisma.unidade.updateMany({ where: { id: { in: unidadeIds } }, data: { status: "estoque" } });
   }
   await prisma.premissaVelocidadeVendas.deleteMany({ where: { cenarioId: id } });
-  // DesembolsoCusto (achado F21) e FaixaComissao (achado F28) referenciam
-  // Custo sem cascade -- mesmo padrao dos achados F10/F11/F13/F17.
-  await prisma.desembolsoCusto.deleteMany({ where: { custo: { cenarioId: id } } });
-  await prisma.faixaComissao.deleteMany({ where: { custo: { cenarioId: id } } });
+  // DestinatarioComissao/DesembolsoCusto/FaixaComissao apagam sozinhos via
+  // onDelete: Cascade no schema (achado F29, docs/DECISOES.md).
   await prisma.custo.deleteMany({ where: { cenarioId: id } });
   await prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { cenarioId: id } });
   await prisma.indiceCorrecao.deleteMany({ where: { cenarioId: id } });
@@ -292,13 +290,24 @@ export async function atualizarTipologia(id: string, input: AtualizarTipologiaIn
 /**
  * Apaga uma tipologia e suas unidades/condicoes de pagamento — mas apenas
  * se nenhuma unidade dela ja foi vendida ou reservada (regra: nunca apagar
- * dado que uma Venda referencia). Devolve null em caso de sucesso, ou uma
+ * dado que uma Venda referencia), e apenas se nenhum Custo esta escopado a
+ * ela (achado F29, docs/DECISOES.md — fechamento/hardening da Fase 1):
+ * Custo.tipologiaId (achado F11) e uma relacao OPCIONAL sem onDelete no
+ * schema, entao o padrao implicito do Prisma e SetNull, nao Restrict --
+ * sem este bloqueio, apagar a tipologia zerava silenciosamente o escopo do
+ * custo (de "so incide sobre esta tipologia" para "incide sobre todas"),
+ * mudando o valor calculado da comissao sem nenhum aviso. Mesmo espirito
+ * do bloqueio de unidade abaixo. Devolve null em caso de sucesso, ou uma
  * mensagem explicando por que nao foi possivel apagar.
  */
 export async function excluirTipologia(id: string): Promise<string | null> {
   const unidadeNaoDisponivel = await prisma.unidade.count({ where: { tipologiaId: id, status: { not: "estoque" } } });
   if (unidadeNaoDisponivel > 0) {
     return `Esta tipologia tem ${unidadeNaoDisponivel} unidade(s) vendida(s) ou reservada(s) — não é possível excluí-la sem antes excluir o cenário que gerou essas vendas.`;
+  }
+  const custoEscopado = await prisma.custo.count({ where: { tipologiaId: id } });
+  if (custoEscopado > 0) {
+    return `Esta tipologia tem ${custoEscopado} custo(s) escopado(s) a ela — não é possível excluí-la sem antes remover o escopo desses custos (ou excluí-los).`;
   }
   await prisma.modalidadePagamento.deleteMany({ where: { condicaoPagamento: { tipologiaId: id } } });
   await prisma.condicaoPagamento.deleteMany({ where: { tipologiaId: id } });
@@ -451,9 +460,8 @@ export async function atualizarPermuta(unidadeId: string, input: AtualizarPermut
 export async function desfazerPermuta(unidadeId: string): Promise<string | null> {
   const permuta = await prisma.permuta.findUnique({ where: { unidadeId } });
   if (!permuta) return "Esta unidade não tem permuta registrada";
-  // ContrapartePermuta (achado F24) referencia Permuta sem cascade -- mesmo
-  // padrao dos achados F10/F11/F13/F17/F21.
-  await prisma.contrapartePermuta.deleteMany({ where: { permutaId: permuta.id } });
+  // ContrapartePermuta apaga sozinha via onDelete: Cascade no schema
+  // (achado F29, docs/DECISOES.md).
   await prisma.permuta.delete({ where: { unidadeId } });
   await prisma.unidade.update({ where: { id: unidadeId }, data: { status: "estoque" } });
   return null;
@@ -512,6 +520,147 @@ export async function atualizarContrapartePermuta(
 
 export async function excluirContrapartePermuta(id: string) {
   await prisma.contrapartePermuta.delete({ where: { id } });
+}
+
+export interface RegistrarVendaInput {
+  cenarioId: string;
+  unidadeId: string;
+  condicaoPagamentoId: string;
+  /** mes relativo dentro do horizonte do cenario (1..horizonteProjecaoMeses) — o sistema nunca usa data de calendario, ver achado F27 */
+  mesOrigem: number;
+  /** decimal-as-string; sem informar, usa Unidade.precoVenda */
+  valorVenda?: string;
+  /** cadastro nominal puro (Fase 2, tela de Vendas) -- nunca lido pelo motor */
+  comprador?: string;
+  documentoComprador?: string;
+}
+
+/**
+ * Registra uma venda individual num cenario, escolhendo a unidade
+ * diretamente (Fase 2, tela de Vendas) -- diferente de
+ * gerarVendasDePremissaVelocidade() (Fase 1), que aloca unidades em lote a
+ * partir de uma premissa de velocidade, sem comprador nem escolha manual
+ * de unidade. As duas vias convergem no mesmo modelo (Venda) e no mesmo
+ * motor -- esta funcao nao duplica nenhuma regra financeira, so cria a
+ * linha; quem chama (a rota da API) decide se roda o motor em seguida.
+ */
+export async function registrarVenda(input: RegistrarVendaInput): Promise<{ erro: string } | { venda: Awaited<ReturnType<typeof prisma.venda.create>> }> {
+  const unidade = await prisma.unidade.findUnique({ where: { id: input.unidadeId } });
+  if (!unidade) return { erro: "Unidade não encontrada" };
+  if (unidade.status !== "estoque") {
+    return { erro: `Esta unidade está com status "${unidade.status}" — só é possível vender uma unidade em estoque` };
+  }
+  const cenario = await prisma.cenario.findUnique({ where: { id: input.cenarioId } });
+  if (!cenario) return { erro: "Cenário não encontrado" };
+  if (cenario.empreendimentoId !== unidade.empreendimentoId) {
+    return { erro: "Esta unidade não pertence ao empreendimento deste cenário" };
+  }
+  if (!Number.isInteger(input.mesOrigem) || input.mesOrigem < 1 || input.mesOrigem > cenario.horizonteProjecaoMeses) {
+    return { erro: `Mês da venda deve ser um inteiro entre 1 e ${cenario.horizonteProjecaoMeses} (horizonte do cenário)` };
+  }
+  const condicao = await prisma.condicaoPagamento.findUnique({ where: { id: input.condicaoPagamentoId } });
+  if (!condicao) return { erro: "Condição de pagamento não encontrada" };
+  if (condicao.tipologiaId && condicao.tipologiaId !== unidade.tipologiaId) {
+    return { erro: "Esta condição de pagamento é de outra tipologia — escolha uma condição cadastrada para a tipologia desta unidade (ou sem tipologia, válida para o empreendimento inteiro)" };
+  }
+  const valorVenda = input.valorVenda?.trim() || unidade.precoVenda;
+  if (!valorVenda) return { erro: "Valor da venda é obrigatório — esta unidade não tem preço padrão cadastrado" };
+
+  const venda = await prisma.venda.create({
+    data: {
+      empreendimentoId: unidade.empreendimentoId,
+      cenarioId: cenario.id,
+      unidadeId: unidade.id,
+      condicaoPagamentoId: condicao.id,
+      mesOrigem: input.mesOrigem,
+      valorVenda,
+      comprador: input.comprador?.trim() || undefined,
+      documentoComprador: input.documentoComprador?.trim() || undefined,
+      status: "ativa",
+    },
+  });
+  await prisma.unidade.update({ where: { id: unidade.id }, data: { status: "vendida" } });
+  return { venda };
+}
+
+export interface AtualizarVendaInput {
+  comprador?: string | null;
+  documentoComprador?: string | null;
+  valorVenda?: string;
+  mesOrigem?: number;
+}
+
+/**
+ * Edita os dados de uma venda ja registrada -- deliberadamente restrito a
+ * campos que nao mudam a alocacao de estoque (comprador, valor, mes).
+ * Trocar unidade ou condicao de pagamento depois de criada exigiria
+ * desfazer e refazer a venda (mesmo espirito de "nunca editar por baixo um
+ * vinculo estrutural", ja seguido por atualizarPermuta). Bloqueada para
+ * venda distratada -- nao faz sentido editar o valor de uma venda cancelada.
+ */
+export async function atualizarVenda(id: string, input: AtualizarVendaInput): Promise<{ erro: string } | { venda: Awaited<ReturnType<typeof prisma.venda.update>> }> {
+  const atual = await prisma.venda.findUnique({ where: { id } });
+  if (!atual) return { erro: "Venda não encontrada" };
+  if (atual.status === "distratada") return { erro: "Esta venda foi distratada — não é possível editá-la" };
+  if (input.mesOrigem !== undefined) {
+    const cenario = await prisma.cenario.findUniqueOrThrow({ where: { id: atual.cenarioId } });
+    if (!Number.isInteger(input.mesOrigem) || input.mesOrigem < 1 || input.mesOrigem > cenario.horizonteProjecaoMeses) {
+      return { erro: `Mês da venda deve ser um inteiro entre 1 e ${cenario.horizonteProjecaoMeses} (horizonte do cenário)` };
+    }
+  }
+  const venda = await prisma.venda.update({
+    where: { id },
+    data: {
+      comprador: input.comprador === undefined ? undefined : input.comprador?.trim() || null,
+      documentoComprador: input.documentoComprador === undefined ? undefined : input.documentoComprador?.trim() || null,
+      valorVenda: input.valorVenda?.trim() || undefined,
+      mesOrigem: input.mesOrigem,
+    },
+  });
+  return { venda };
+}
+
+/**
+ * Lista as vendas de um cenario, com o suficiente para a tela de Vendas
+ * (Fase 2): unidade/tipologia (o que foi vendido), condicao de pagamento
+ * (como recebe), distrato/renegociacoes se houver. Mesmo padrao de include
+ * ja usado em GET /api/tipologias/:id/unidades, so que agrupado por
+ * cenario inteiro em vez de por tipologia.
+ */
+export async function listarVendasDoCenario(cenarioId: string) {
+  return prisma.venda.findMany({
+    where: { cenarioId },
+    include: {
+      unidade: { include: { tipologia: { select: { id: true, nome: true } } } },
+      condicaoPagamento: { select: { id: true, nome: true } },
+      distrato: true,
+      renegociacoes: { orderBy: { createdAt: "asc" } },
+    },
+    orderBy: [{ mesOrigem: "asc" }, { createdAt: "asc" }],
+  });
+}
+
+/**
+ * Resumo do estoque de um empreendimento por status de Unidade (Fase 2,
+ * tela de Vendas) -- Unidade.status e compartilhado entre todos os
+ * cenarios do empreendimento (nunca por cenario, ver excluirCenario), por
+ * isso o resumo tambem e por empreendimento, nao por cenario. Usa os
+ * status ja existentes no schema (estoque/reservada/vendida/permutada/
+ * distratada/indisponivel) -- nenhum status novo foi inventado.
+ */
+export async function resumoEstoque(empreendimentoId: string) {
+  const contagens = await prisma.unidade.groupBy({
+    by: ["status"],
+    where: { empreendimentoId },
+    _count: { _all: true },
+  });
+  const porStatus: Record<string, number> = { estoque: 0, reservada: 0, vendida: 0, permutada: 0, distratada: 0, indisponivel: 0 };
+  let total = 0;
+  for (const c of contagens) {
+    porStatus[c.status] = c._count._all;
+    total += c._count._all;
+  }
+  return { total, porStatus };
 }
 
 export interface RegistrarDistratoInput {
@@ -865,14 +1014,11 @@ export async function atualizarCusto(id: string, input: AtualizarCustoInput) {
 }
 
 export async function excluirCusto(id: string) {
-  // Sem onDelete cascade no schema -- excluir um custo que tem
-  // destinatarios de comissao cadastrados (achado F13) falharia por
-  // violacao de chave estrangeira sem isso, mesmo padrao do bug corrigido
-  // em excluirCenario para derivadoDeCenarioId (achado F10). DesembolsoCusto
-  // (achado F21) e FaixaComissao (achado F28) sao o mesmo padrao de novo.
-  await prisma.destinatarioComissao.deleteMany({ where: { custoId: id } });
-  await prisma.desembolsoCusto.deleteMany({ where: { custoId: id } });
-  await prisma.faixaComissao.deleteMany({ where: { custoId: id } });
+  // DestinatarioComissao/DesembolsoCusto/FaixaComissao apagam sozinhos via
+  // onDelete: Cascade no schema (achado F29, docs/DECISOES.md —
+  // fechamento/hardening da Fase 1). Antes, essa limpeza era manual e só
+  // existia aqui — não em excluirEmpreendimento()/excluirCenario(), que
+  // também apagam Custo em lote, causando um erro real de FK.
   await prisma.custo.delete({ where: { id } });
 }
 

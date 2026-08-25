@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { EVENTO_SESSAO_EXPIRADA, fetchUsuarioAtual, logout, type Usuario } from "./api/client.js";
 import { Sidebar, type Pagina } from "./components/Sidebar.js";
 import { CadastroPage } from "./pages/CadastroPage.js";
+import { CustosPage } from "./pages/CustosPage.js";
 import { FluxoCaixaPage } from "./pages/FluxoCaixaPage.js";
 import { LoginPage } from "./pages/LoginPage.js";
 import { UsuariosPage } from "./pages/UsuariosPage.js";
+import { VendasPage } from "./pages/VendasPage.js";
 
 export default function App() {
   const [usuario, setUsuario] = useState<Usuario | null | undefined>(undefined);
@@ -59,6 +61,8 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         {pagina === "fluxo" && <FluxoCaixaPage />}
         {pagina === "cadastro" && <CadastroPage />}
+        {pagina === "vendas" && <VendasPage />}
+        {pagina === "custos" && <CustosPage />}
         {pagina === "usuarios" && usuario.papel === "admin" && <UsuariosPage usuarioAtual={usuario} />}
       </div>
     </div>
