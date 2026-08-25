@@ -1,8 +1,18 @@
 import { Decimal } from "decimal.js";
+import { calcularCurvaCronograma } from "../core/motorCronograma.js";
 import type { FinanciamentoInput } from "../core/motorFinanciamento.js";
 import { executarMotorFinanceiro, type EntradaMotorFinanceiro, type SaidaMotorFinanceiro } from "../core/motorFinanceiro.js";
 import { calcularSensibilidade, type EixoSensibilidade, type PontoSensibilidade } from "../core/motorSensibilidade.js";
-import type { CondicaoPagamento, CustoInput, PontoCronograma, PontoIndiceCorrecao, TipoDistribuicao, TipoIncidenciaCusto, VendaInput } from "../core/types.js";
+import type {
+  CondicaoPagamento,
+  CustoInput,
+  PontoCronograma,
+  PontoCurvaCronograma,
+  PontoIndiceCorrecao,
+  TipoDistribuicao,
+  TipoIncidenciaCusto,
+  VendaInput,
+} from "../core/types.js";
 import { prisma } from "./client.js";
 
 /**
@@ -118,6 +128,34 @@ export async function calcularSensibilidadeCenario(
 ): Promise<PontoSensibilidade[]> {
   const entrada = await montarEntradaMotor(cenarioId, opcoes);
   return calcularSensibilidade(entrada, eixo, variacoes);
+}
+
+/**
+ * Curva combinada do cronograma fisico-financeiro (Fase 2.3): para cada mes,
+ * o percentual de execucao fisica (e seu acumulado) lado a lado com o
+ * desembolso financeiro que aquele percentual gerou (e seu acumulado).
+ * Roda o motor (mesmo padrao de custos-resumo/distribuicao-mensal), busca o
+ * cronograma bruto do cenario e os ids dos Custo com
+ * categoria.tipoIncidencia="pct_execucao" -- mesmo filtro de
+ * persistirDesembolsosCusto, so que por "pct_execucao" em vez de "not fixo"
+ * -- para isolar, dentre todos os desembolsos do cenario, so os que a curva
+ * do cronograma realmente gerou. Nenhuma regra nova aqui, so traducao
+ * Prisma -> motor (calcularCurvaCronograma, em src/core).
+ */
+export async function montarCurvaCronogramaDoCenario(cenarioId: string): Promise<PontoCurvaCronograma[]> {
+  const resultado = await rodarMotorParaCenario(cenarioId);
+
+  const cronogramaDb = await prisma.cronogramaFisicoFinanceiro.findMany({ where: { cenarioId }, orderBy: { mes: "asc" } });
+  const cronograma: PontoCronograma[] = cronogramaDb.map((p) => ({ mes: p.mes, percentualExecucaoMensal: new Decimal(p.percentualExecucaoMensal) }));
+
+  const custosObra = await prisma.custo.findMany({
+    where: { cenarioId, categoria: { tipoIncidencia: "pct_execucao" } },
+    select: { id: true },
+  });
+  const idsObra = new Set(custosObra.map((c) => c.id));
+  const desembolsosObra = resultado.desembolsos.filter((d) => idsObra.has(d.custoId));
+
+  return calcularCurvaCronograma(cronograma, desembolsosObra);
 }
 
 async function persistirRecebimentos(cenarioId: string, resultado: SaidaMotorFinanceiro) {

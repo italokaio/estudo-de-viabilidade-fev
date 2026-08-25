@@ -73,7 +73,7 @@ import {
 import { prisma } from "../../src/db/client.js";
 import { confirmarConciliacao, montarCandidatosConciliacao, type ConfirmacaoConciliacao } from "../../src/db/conciliacao.js";
 import { gerarVendasDePremissaVelocidade } from "../../src/db/gerarVendas.js";
-import { calcularSensibilidadeCenario, rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
+import { calcularSensibilidadeCenario, montarCurvaCronogramaDoCenario, rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
 import { parseExtratoCSV, sugerirConciliacao } from "../../src/core/conciliacaoExtrato.js";
 import type { EixoSensibilidade } from "../../src/core/motorSensibilidade.js";
 import type { TipoIncidenciaCusto } from "../../src/core/types.js";
@@ -1776,6 +1776,32 @@ export async function buildApp() {
       }
     },
   );
+
+  // Curva combinada do cronograma fisico-financeiro (Fase 2.3): percentual
+  // fisico e acumulado lado a lado com o desembolso financeiro (e seu
+  // acumulado) que aquele percentual gerou nos Custo com
+  // tipoIncidencia="pct_execucao" do cenario. Toda a agregacao acontece em
+  // montarCurvaCronogramaDoCenario/calcularCurvaCronograma (src/db,
+  // src/core) -- esta rota so serializa Decimal -> string.
+  app.get<{ Params: { id: string } }>("/api/cenarios/:id/cronograma-curva", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+
+    const curva = await montarCurvaCronogramaDoCenario(cenario.id);
+    return {
+      pontos: curva.map((p) => ({
+        mes: p.mes,
+        percentualExecucaoMensal: p.percentualExecucaoMensal.toString(),
+        percentualAcumulado: p.percentualAcumulado.toString(),
+        desembolsoMensal: p.desembolsoMensal.toFixed(2),
+        desembolsoAcumulado: p.desembolsoAcumulado.toFixed(2),
+      })),
+    };
+  });
 
   // Indice de correcao monetaria (achado F6, docs/DECISOES.md): ao contrario
   // do cronograma, cada mes e independente (sem soma obrigatoria) -- upsert

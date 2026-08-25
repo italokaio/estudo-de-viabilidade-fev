@@ -137,3 +137,19 @@ export interface IndicadoresFluxo {
   saldoFinal: Decimal;
   vpl: Decimal;
 }
+
+/**
+ * Um mes da curva combinada do cronograma fisico-financeiro (Fase 2.3):
+ * percentual fisico e acumulado (de PontoCronograma) lado a lado com o
+ * desembolso financeiro que aquele percentual gerou (de DesembolsoMensal),
+ * ja acumulado tambem -- para responder "quanto da obra foi executado ate
+ * aqui" e "quanto foi desembolsado ate aqui" no mesmo mes, sem repetir esse
+ * calculo em nenhuma tela.
+ */
+export interface PontoCurvaCronograma {
+  mes: number;
+  percentualExecucaoMensal: Decimal;
+  percentualAcumulado: Decimal;
+  desembolsoMensal: Decimal;
+  desembolsoAcumulado: Decimal;
+}

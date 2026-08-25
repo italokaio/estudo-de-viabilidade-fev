@@ -366,6 +366,27 @@ export function criarCronograma(cenarioId: string, pontos: { mes: number; percen
   return postJson<{ criados: number }>(`/api/cenarios/${cenarioId}/cronograma`, { pontos });
 }
 
+/**
+ * Curva combinada do cronograma físico-financeiro (Fase 2.3): para cada mês,
+ * o percentual de execução física (e seu acumulado) lado a lado com o
+ * desembolso financeiro que aquele percentual gerou nos custos de obra (e
+ * seu acumulado) -- tudo calculado no backend (montarCurvaCronogramaDoCenario
+ * / calcularCurvaCronograma), a tela nunca soma valores sozinha.
+ */
+export interface PontoCurvaCronograma {
+  mes: number;
+  percentualExecucaoMensal: string;
+  percentualAcumulado: string;
+  desembolsoMensal: string;
+  desembolsoAcumulado: string;
+}
+
+export async function fetchCronogramaCurva(cenarioId: string): Promise<{ pontos: PontoCurvaCronograma[] }> {
+  const res = await apiFetch(`/api/cenarios/${cenarioId}/cronograma-curva`);
+  if (!res.ok) throw new Error(`Falha ao carregar curva do cronograma (${res.status})`);
+  return res.json();
+}
+
 export interface RecebimentoResumo {
   id: string;
   /** Fase 2.1 — tela de Vendas: filtra "os recebimentos desta venda" sem rota nova. */
