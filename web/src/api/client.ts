@@ -117,6 +117,67 @@ export async function fetchComparacaoCenarios(cenarioId: string): Promise<{ vers
   return res.json();
 }
 
+/**
+ * Comparação de N cenários do mesmo empreendimento, escolhidos livremente
+ * (Fase 2.4) — diferente de `fetchComparacaoCenarios` acima (achado F18),
+ * que só compara pai/filhos diretos por derivação. Todo indicador aqui vem
+ * pronto do backend (`montarComparacaoCenarios`, src/db/servicoMotor.ts) —
+ * a tela nunca soma valores sozinha.
+ */
+export interface PremissasResumoCenario {
+  horizonteProjecaoMeses: number;
+  limiteNecessidadeMaximaCapital: string | null;
+  velocidadeVendas: {
+    totalUnidadesPrevistas: string;
+    porTipologia: { tipologiaId: string; tipologiaNome: string; totalUnidadesPrevistas: string }[];
+  };
+  custos: {
+    categoriaId: string;
+    categoriaNome: string;
+    tipoIncidencia: TipoIncidenciaCusto;
+    tipologiaNome: string | null;
+    valorPrevisto: string | null;
+    percentual: string | null;
+  }[];
+  cronograma: { quantidadeMeses: number; mesInicio: number | null; mesFim: number | null } | null;
+  financiamento: { valorContratado: string; taxaJurosMensal: string; tipoAmortizacao: string; mesAmortizacao: number } | null;
+}
+
+export interface IndicadoresComparacaoCenario {
+  vgv: string;
+  totalRecebimentosPrevisto: string;
+  totalCustosPrevisto: string;
+  saldoFinal: string;
+  necessidadeMaximaCapital: string;
+  mesPico: number | null;
+  mesRecuperacao: number | null;
+  vpl: string;
+}
+
+export interface PontoFluxoComparacao {
+  mes: number;
+  entradas: string;
+  saidas: string;
+  fluxoMensal: string;
+  fluxoAcumulado: string;
+}
+
+export interface ComparacaoCenario {
+  id: string;
+  nome: string;
+  tipo: string;
+  derivadoDeNome: string | null;
+  indicadores: IndicadoresComparacaoCenario;
+  fluxoMensal: PontoFluxoComparacao[];
+  premissas: PremissasResumoCenario;
+}
+
+export async function fetchComparacaoCenariosMultiplos(empreendimentoId: string, cenarioIds: string[]): Promise<{ cenarios: ComparacaoCenario[] }> {
+  const res = await apiFetch(`/api/empreendimentos/${empreendimentoId}/cenarios/comparacao?ids=${cenarioIds.map(encodeURIComponent).join(",")}`);
+  if (!res.ok) throw new Error(`Falha ao comparar cenários (${res.status})`);
+  return res.json();
+}
+
 export type TipoDistribuicao = "unica_na_venda" | "nivelada" | "periodica" | "mes_fixo";
 
 export interface ModalidadeInput {

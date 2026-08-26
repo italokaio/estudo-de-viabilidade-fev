@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { EVENTO_SESSAO_EXPIRADA, fetchUsuarioAtual, logout, type Usuario } from "./api/client.js";
 import { Sidebar, type Pagina } from "./components/Sidebar.js";
 import { CadastroPage } from "./pages/CadastroPage.js";
+import { CenariosPage } from "./pages/CenariosPage.js";
 import { CronogramaPage } from "./pages/CronogramaPage.js";
 import { CustosPage } from "./pages/CustosPage.js";
 import { FluxoCaixaPage } from "./pages/FluxoCaixaPage.js";
@@ -65,6 +66,7 @@ export default function App() {
         {pagina === "vendas" && <VendasPage />}
         {pagina === "custos" && <CustosPage />}
         {pagina === "cronograma" && <CronogramaPage />}
+        {pagina === "cenarios" && <CenariosPage />}
         {pagina === "usuarios" && usuario.papel === "admin" && <UsuariosPage usuarioAtual={usuario} />}
       </div>
     </div>

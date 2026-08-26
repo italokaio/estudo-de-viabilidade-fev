@@ -1,6 +1,6 @@
 import type { Usuario } from "../api/client.js";
 
-export type Pagina = "fluxo" | "cadastro" | "vendas" | "custos" | "cronograma" | "usuarios";
+export type Pagina = "fluxo" | "cadastro" | "vendas" | "custos" | "cronograma" | "cenarios" | "usuarios";
 
 const navIcon = {
   fluxo: "M3 17l5-5 4 4 8-8",
@@ -105,7 +105,7 @@ export function Sidebar({
             <path d="M12 8v4l3 2" />
           </svg>
         </NavItem>
-        <NavItem label="Cenários">
+        <NavItem label="Cenários" active={pagina === "cenarios"} onClick={() => onNavegar("cenarios")}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d={navIcon.cenarios} strokeLinecap="round" />
           </svg>

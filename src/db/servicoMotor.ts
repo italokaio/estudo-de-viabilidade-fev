@@ -158,6 +158,162 @@ export async function montarCurvaCronogramaDoCenario(cenarioId: string): Promise
   return calcularCurvaCronograma(cronograma, desembolsosObra);
 }
 
+export interface PremissasResumoCenario {
+  horizonteProjecaoMeses: number;
+  limiteNecessidadeMaximaCapital: string | null;
+  velocidadeVendas: {
+    totalUnidadesPrevistas: string;
+    porTipologia: { tipologiaId: string; tipologiaNome: string; totalUnidadesPrevistas: string }[];
+  };
+  custos: {
+    categoriaId: string;
+    categoriaNome: string;
+    tipoIncidencia: TipoIncidenciaCusto;
+    tipologiaNome: string | null;
+    valorPrevisto: string | null;
+    percentual: string | null;
+  }[];
+  /** null quando o cenario nao tem cronograma cadastrado (Fase 2.3). */
+  cronograma: { quantidadeMeses: number; mesInicio: number | null; mesFim: number | null } | null;
+  financiamento: { valorContratado: string; taxaJurosMensal: string; tipoAmortizacao: string; mesAmortizacao: number } | null;
+}
+
+export interface IndicadoresComparacaoCenario {
+  /** soma de Venda.valorVenda (status="ativa") -- nao existe em SaidaMotorFinanceiro, e uma soma direta, nao uma regra do motor. */
+  vgv: string;
+  totalRecebimentosPrevisto: string;
+  totalCustosPrevisto: string;
+  saldoFinal: string;
+  necessidadeMaximaCapital: string;
+  mesPico: number | null;
+  mesRecuperacao: number | null;
+  vpl: string;
+}
+
+export interface ComparacaoCenario {
+  id: string;
+  nome: string;
+  tipo: string;
+  derivadoDeNome: string | null;
+  indicadores: IndicadoresComparacaoCenario;
+  fluxoMensal: { mes: number; entradas: string; saidas: string; fluxoMensal: string; fluxoAcumulado: string }[];
+  premissas: PremissasResumoCenario;
+}
+
+/**
+ * Comparacao de N cenarios do MESMO empreendimento (Fase 2.4), diferente
+ * da comparacao de 1 nivel por derivacao (achado F18, GET
+ * /cenarios/:id/comparacao) -- aqui o chamador escolhe livremente quais
+ * cenarios comparar, nao so pai/filhos diretos. `cenarioIds` que nao
+ * pertencam a `empreendimentoId` sao silenciosamente ignorados (nunca
+ * cruza empreendimentos, regra R12) -- o resultado pode ter menos itens
+ * que `cenarioIds.length`. Roda o motor (rodarMotorParaCenario, ja
+ * existente, sem nenhuma mudanca) para cada cenario; todo o resto e soma
+ * direta de dados ja existentes no banco/motor -- nenhuma regra
+ * financeira nova (VGV, por exemplo, nao existe em SaidaMotorFinanceiro,
+ * mas e so soma de Venda.valorVenda, nao um calculo novo).
+ */
+export async function montarComparacaoCenarios(empreendimentoId: string, cenarioIds: string[]): Promise<ComparacaoCenario[]> {
+  const cenarios = await prisma.cenario.findMany({
+    where: { id: { in: cenarioIds }, empreendimentoId },
+    include: { derivadoDe: { select: { nome: true } } },
+  });
+
+  return Promise.all(
+    cenarios.map(async (cenario) => {
+      const resultado = await rodarMotorParaCenario(cenario.id);
+
+      const vendas = await prisma.venda.findMany({ where: { cenarioId: cenario.id, status: "ativa" }, select: { valorVenda: true } });
+      const vgv = vendas.reduce((acc, v) => acc.plus(v.valorVenda), new Decimal(0));
+      const totalRecebimentosPrevisto = resultado.recebimentos.reduce((acc, r) => acc.plus(r.valorPrevisto), new Decimal(0));
+      const totalCustosPrevisto = resultado.desembolsos.reduce((acc, d) => acc.plus(d.valor), new Decimal(0));
+
+      const premissasVelocidadeDb = await prisma.premissaVelocidadeVendas.findMany({
+        where: { cenarioId: cenario.id },
+        include: { tipologia: { select: { nome: true } } },
+      });
+      const porTipologiaMap = new Map<string, { tipologiaNome: string; total: Decimal }>();
+      for (const p of premissasVelocidadeDb) {
+        const atual = porTipologiaMap.get(p.tipologiaId) ?? { tipologiaNome: p.tipologia.nome, total: new Decimal(0) };
+        atual.total = atual.total.plus(p.unidadesPrevistas);
+        porTipologiaMap.set(p.tipologiaId, atual);
+      }
+      const totalUnidadesPrevistas = [...porTipologiaMap.values()].reduce((acc, t) => acc.plus(t.total), new Decimal(0));
+
+      const custosDb = await prisma.custo.findMany({
+        where: { cenarioId: cenario.id },
+        include: { categoria: true, tipologia: { select: { nome: true } } },
+      });
+
+      const cronogramaDb = await prisma.cronogramaFisicoFinanceiro.findMany({ where: { cenarioId: cenario.id }, orderBy: { mes: "asc" } });
+      const mesesComExecucao = cronogramaDb.filter((p) => !new Decimal(p.percentualExecucaoMensal).isZero());
+      const cronogramaResumo =
+        cronogramaDb.length > 0
+          ? {
+              quantidadeMeses: cronogramaDb.length,
+              mesInicio: mesesComExecucao.length > 0 ? Math.min(...mesesComExecucao.map((p) => p.mes)) : null,
+              mesFim: mesesComExecucao.length > 0 ? Math.max(...mesesComExecucao.map((p) => p.mes)) : null,
+            }
+          : null;
+
+      const financiamentoDb = await prisma.financiamentoProducao.findUnique({ where: { cenarioId: cenario.id } });
+
+      return {
+        id: cenario.id,
+        nome: cenario.nome,
+        tipo: cenario.tipo,
+        derivadoDeNome: cenario.derivadoDe?.nome ?? null,
+        indicadores: {
+          vgv: vgv.toFixed(2),
+          totalRecebimentosPrevisto: totalRecebimentosPrevisto.toFixed(2),
+          totalCustosPrevisto: totalCustosPrevisto.toFixed(2),
+          saldoFinal: resultado.indicadores.saldoFinal.toFixed(2),
+          necessidadeMaximaCapital: resultado.indicadores.necessidadeMaximaCapital.toFixed(2),
+          mesPico: resultado.indicadores.mesPico,
+          mesRecuperacao: resultado.indicadores.mesRecuperacao,
+          vpl: resultado.indicadores.vpl.toFixed(2),
+        },
+        fluxoMensal: resultado.fluxo.map((f) => ({
+          mes: f.mes,
+          entradas: f.entradas.toFixed(2),
+          saidas: f.saidas.toFixed(2),
+          fluxoMensal: f.fluxoMensal.toFixed(2),
+          fluxoAcumulado: f.fluxoAcumulado.toFixed(2),
+        })),
+        premissas: {
+          horizonteProjecaoMeses: cenario.horizonteProjecaoMeses,
+          limiteNecessidadeMaximaCapital: cenario.limiteNecessidadeMaximaCapital,
+          velocidadeVendas: {
+            totalUnidadesPrevistas: totalUnidadesPrevistas.toFixed(2),
+            porTipologia: [...porTipologiaMap.entries()].map(([tipologiaId, t]) => ({
+              tipologiaId,
+              tipologiaNome: t.tipologiaNome,
+              totalUnidadesPrevistas: t.total.toFixed(2),
+            })),
+          },
+          custos: custosDb.map((c) => ({
+            categoriaId: c.categoriaId,
+            categoriaNome: c.categoria.nome,
+            tipoIncidencia: c.categoria.tipoIncidencia as TipoIncidenciaCusto,
+            tipologiaNome: c.tipologia?.nome ?? null,
+            valorPrevisto: c.valorPrevisto,
+            percentual: c.percentual,
+          })),
+          cronograma: cronogramaResumo,
+          financiamento: financiamentoDb
+            ? {
+                valorContratado: financiamentoDb.valorContratado,
+                taxaJurosMensal: financiamentoDb.taxaJurosMensal,
+                tipoAmortizacao: financiamentoDb.tipoAmortizacao,
+                mesAmortizacao: financiamentoDb.mesAmortizacao,
+              }
+            : null,
+        },
+      };
+    }),
+  );
+}
+
 async function persistirRecebimentos(cenarioId: string, resultado: SaidaMotorFinanceiro) {
   const vendaIds = (await prisma.venda.findMany({ where: { cenarioId }, select: { id: true } })).map((v) => v.id);
 

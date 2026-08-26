@@ -73,7 +73,7 @@ import {
 import { prisma } from "../../src/db/client.js";
 import { confirmarConciliacao, montarCandidatosConciliacao, type ConfirmacaoConciliacao } from "../../src/db/conciliacao.js";
 import { gerarVendasDePremissaVelocidade } from "../../src/db/gerarVendas.js";
-import { calcularSensibilidadeCenario, montarCurvaCronogramaDoCenario, rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
+import { calcularSensibilidadeCenario, montarComparacaoCenarios, montarCurvaCronogramaDoCenario, rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
 import { parseExtratoCSV, sugerirConciliacao } from "../../src/core/conciliacaoExtrato.js";
 import type { EixoSensibilidade } from "../../src/core/motorSensibilidade.js";
 import type { TipoIncidenciaCusto } from "../../src/core/types.js";
@@ -2413,6 +2413,36 @@ export async function buildApp() {
     );
 
     return { versoes };
+  });
+
+  // Comparacao de N cenarios do mesmo empreendimento, escolhidos livremente
+  // pelo usuario (Fase 2.4) -- diferente da comparacao de 1 nivel por
+  // derivacao acima (achado F18): aqui nao ha restricao de
+  // pai/filho-direto, o chamador escolhe qualquer subconjunto de cenarios
+  // do mesmo empreendimento. Toda a agregacao (VGV, recebimentos, custos,
+  // fluxo mensal, resumo de premissas) acontece em
+  // montarComparacaoCenarios (src/db/servicoMotor.ts) -- esta rota so
+  // parseia a querystring e delega. IDs que nao pertencam a este
+  // empreendimento sao silenciosamente ignorados (R12).
+  app.get<{ Params: { id: string }; Querystring: { ids?: string } }>("/api/empreendimentos/:id/cenarios/comparacao", async (req, reply) => {
+    const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
+    if (!empreendimento) {
+      reply.code(404);
+      return { erro: "Empreendimento não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, empreendimento.id))) return;
+
+    const cenarioIds = (req.query.ids ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0);
+    if (cenarioIds.length === 0) {
+      reply.code(400);
+      return { erro: "Informe ao menos um cenário em ?ids=" };
+    }
+
+    const cenarios = await montarComparacaoCenarios(empreendimento.id, cenarioIds);
+    return { cenarios };
   });
 
   return app;
