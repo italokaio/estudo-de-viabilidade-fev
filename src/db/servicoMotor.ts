@@ -213,6 +213,79 @@ export interface ComparacaoCenario {
  * financeira nova (VGV, por exemplo, nao existe em SaidaMotorFinanceiro,
  * mas e so soma de Venda.valorVenda, nao um calculo novo).
  */
+/**
+ * Resumo de premissas de um cenario (Fase 2.4, extraido nesta forma na
+ * Fase 2.5 para ser reaproveitado tambem pelo relatorio de viabilidade,
+ * docs/DECISOES.md) -- so soma/le dados ja existentes (velocidade de
+ * vendas, custos, cronograma, financiamento), nenhuma regra financeira
+ * nova.
+ */
+export async function montarPremissasResumoCenario(cenario: {
+  id: string;
+  horizonteProjecaoMeses: number;
+  limiteNecessidadeMaximaCapital: string | null;
+}): Promise<PremissasResumoCenario> {
+  const premissasVelocidadeDb = await prisma.premissaVelocidadeVendas.findMany({
+    where: { cenarioId: cenario.id },
+    include: { tipologia: { select: { nome: true } } },
+  });
+  const porTipologiaMap = new Map<string, { tipologiaNome: string; total: Decimal }>();
+  for (const p of premissasVelocidadeDb) {
+    const atual = porTipologiaMap.get(p.tipologiaId) ?? { tipologiaNome: p.tipologia.nome, total: new Decimal(0) };
+    atual.total = atual.total.plus(p.unidadesPrevistas);
+    porTipologiaMap.set(p.tipologiaId, atual);
+  }
+  const totalUnidadesPrevistas = [...porTipologiaMap.values()].reduce((acc, t) => acc.plus(t.total), new Decimal(0));
+
+  const custosDb = await prisma.custo.findMany({
+    where: { cenarioId: cenario.id },
+    include: { categoria: true, tipologia: { select: { nome: true } } },
+  });
+
+  const cronogramaDb = await prisma.cronogramaFisicoFinanceiro.findMany({ where: { cenarioId: cenario.id }, orderBy: { mes: "asc" } });
+  const mesesComExecucao = cronogramaDb.filter((p) => !new Decimal(p.percentualExecucaoMensal).isZero());
+  const cronogramaResumo =
+    cronogramaDb.length > 0
+      ? {
+          quantidadeMeses: cronogramaDb.length,
+          mesInicio: mesesComExecucao.length > 0 ? Math.min(...mesesComExecucao.map((p) => p.mes)) : null,
+          mesFim: mesesComExecucao.length > 0 ? Math.max(...mesesComExecucao.map((p) => p.mes)) : null,
+        }
+      : null;
+
+  const financiamentoDb = await prisma.financiamentoProducao.findUnique({ where: { cenarioId: cenario.id } });
+
+  return {
+    horizonteProjecaoMeses: cenario.horizonteProjecaoMeses,
+    limiteNecessidadeMaximaCapital: cenario.limiteNecessidadeMaximaCapital,
+    velocidadeVendas: {
+      totalUnidadesPrevistas: totalUnidadesPrevistas.toFixed(2),
+      porTipologia: [...porTipologiaMap.entries()].map(([tipologiaId, t]) => ({
+        tipologiaId,
+        tipologiaNome: t.tipologiaNome,
+        totalUnidadesPrevistas: t.total.toFixed(2),
+      })),
+    },
+    custos: custosDb.map((c) => ({
+      categoriaId: c.categoriaId,
+      categoriaNome: c.categoria.nome,
+      tipoIncidencia: c.categoria.tipoIncidencia as TipoIncidenciaCusto,
+      tipologiaNome: c.tipologia?.nome ?? null,
+      valorPrevisto: c.valorPrevisto,
+      percentual: c.percentual,
+    })),
+    cronograma: cronogramaResumo,
+    financiamento: financiamentoDb
+      ? {
+          valorContratado: financiamentoDb.valorContratado,
+          taxaJurosMensal: financiamentoDb.taxaJurosMensal,
+          tipoAmortizacao: financiamentoDb.tipoAmortizacao,
+          mesAmortizacao: financiamentoDb.mesAmortizacao,
+        }
+      : null,
+  };
+}
+
 export async function montarComparacaoCenarios(empreendimentoId: string, cenarioIds: string[]): Promise<ComparacaoCenario[]> {
   const cenarios = await prisma.cenario.findMany({
     where: { id: { in: cenarioIds }, empreendimentoId },
@@ -228,35 +301,7 @@ export async function montarComparacaoCenarios(empreendimentoId: string, cenario
       const totalRecebimentosPrevisto = resultado.recebimentos.reduce((acc, r) => acc.plus(r.valorPrevisto), new Decimal(0));
       const totalCustosPrevisto = resultado.desembolsos.reduce((acc, d) => acc.plus(d.valor), new Decimal(0));
 
-      const premissasVelocidadeDb = await prisma.premissaVelocidadeVendas.findMany({
-        where: { cenarioId: cenario.id },
-        include: { tipologia: { select: { nome: true } } },
-      });
-      const porTipologiaMap = new Map<string, { tipologiaNome: string; total: Decimal }>();
-      for (const p of premissasVelocidadeDb) {
-        const atual = porTipologiaMap.get(p.tipologiaId) ?? { tipologiaNome: p.tipologia.nome, total: new Decimal(0) };
-        atual.total = atual.total.plus(p.unidadesPrevistas);
-        porTipologiaMap.set(p.tipologiaId, atual);
-      }
-      const totalUnidadesPrevistas = [...porTipologiaMap.values()].reduce((acc, t) => acc.plus(t.total), new Decimal(0));
-
-      const custosDb = await prisma.custo.findMany({
-        where: { cenarioId: cenario.id },
-        include: { categoria: true, tipologia: { select: { nome: true } } },
-      });
-
-      const cronogramaDb = await prisma.cronogramaFisicoFinanceiro.findMany({ where: { cenarioId: cenario.id }, orderBy: { mes: "asc" } });
-      const mesesComExecucao = cronogramaDb.filter((p) => !new Decimal(p.percentualExecucaoMensal).isZero());
-      const cronogramaResumo =
-        cronogramaDb.length > 0
-          ? {
-              quantidadeMeses: cronogramaDb.length,
-              mesInicio: mesesComExecucao.length > 0 ? Math.min(...mesesComExecucao.map((p) => p.mes)) : null,
-              mesFim: mesesComExecucao.length > 0 ? Math.max(...mesesComExecucao.map((p) => p.mes)) : null,
-            }
-          : null;
-
-      const financiamentoDb = await prisma.financiamentoProducao.findUnique({ where: { cenarioId: cenario.id } });
+      const premissas = await montarPremissasResumoCenario(cenario);
 
       return {
         id: cenario.id,
@@ -280,38 +325,82 @@ export async function montarComparacaoCenarios(empreendimentoId: string, cenario
           fluxoMensal: f.fluxoMensal.toFixed(2),
           fluxoAcumulado: f.fluxoAcumulado.toFixed(2),
         })),
-        premissas: {
-          horizonteProjecaoMeses: cenario.horizonteProjecaoMeses,
-          limiteNecessidadeMaximaCapital: cenario.limiteNecessidadeMaximaCapital,
-          velocidadeVendas: {
-            totalUnidadesPrevistas: totalUnidadesPrevistas.toFixed(2),
-            porTipologia: [...porTipologiaMap.entries()].map(([tipologiaId, t]) => ({
-              tipologiaId,
-              tipologiaNome: t.tipologiaNome,
-              totalUnidadesPrevistas: t.total.toFixed(2),
-            })),
-          },
-          custos: custosDb.map((c) => ({
-            categoriaId: c.categoriaId,
-            categoriaNome: c.categoria.nome,
-            tipoIncidencia: c.categoria.tipoIncidencia as TipoIncidenciaCusto,
-            tipologiaNome: c.tipologia?.nome ?? null,
-            valorPrevisto: c.valorPrevisto,
-            percentual: c.percentual,
-          })),
-          cronograma: cronogramaResumo,
-          financiamento: financiamentoDb
-            ? {
-                valorContratado: financiamentoDb.valorContratado,
-                taxaJurosMensal: financiamentoDb.taxaJurosMensal,
-                tipoAmortizacao: financiamentoDb.tipoAmortizacao,
-                mesAmortizacao: financiamentoDb.mesAmortizacao,
-              }
-            : null,
-        },
+        premissas,
       };
     }),
   );
+}
+
+export interface CustoResumoGerencial {
+  id: string;
+  categoriaId: string;
+  categoriaNome: string;
+  tipoIncidencia: TipoIncidenciaCusto;
+  tipologiaId: string | null;
+  tipologiaNome: string | null;
+  recorrencia: string;
+  competenciaMes: number | null;
+  status: string;
+  totalPrevisto: string;
+  totalRealizado: string;
+  saldoARealizar: string;
+  desvio: string;
+  desvioPercentual: string | null;
+}
+
+/**
+ * Visao gerencial de custos (Fase 2.2, achado F31) -- extraida da rota
+ * GET /cenarios/:id/custos-resumo nesta forma na Fase 2.5 para ser
+ * reaproveitada tambem pelo relatorio de viabilidade (docs/DECISOES.md).
+ * Mesmo comportamento de antes da extracao: o previsto de cada custo vem
+ * da soma de resultado.desembolsos (nunca um recalculo paralelo), o
+ * realizado usa Custo.valorRealizado para incidencia "fixo" e a soma de
+ * DesembolsoCusto.valorRealizado para as demais.
+ */
+export async function montarCustosResumoDoCenario(cenarioId: string): Promise<CustoResumoGerencial[]> {
+  const resultado = await rodarMotorParaCenario(cenarioId);
+  const previstoPorCusto = new Map<string, Decimal>();
+  for (const d of resultado.desembolsos) {
+    previstoPorCusto.set(d.custoId, (previstoPorCusto.get(d.custoId) ?? new Decimal(0)).plus(d.valor));
+  }
+
+  const [custos, desembolsos] = await Promise.all([
+    prisma.custo.findMany({ where: { cenarioId }, include: { categoria: true, tipologia: { select: { nome: true } } } }),
+    prisma.desembolsoCusto.findMany({ where: { custo: { cenarioId } }, select: { custoId: true, valorRealizado: true, status: true } }),
+  ]);
+  const realizadoPercentualPorCusto = new Map<string, Decimal>();
+  for (const d of desembolsos) {
+    if (d.status === "realizado" && d.valorRealizado) {
+      realizadoPercentualPorCusto.set(d.custoId, (realizadoPercentualPorCusto.get(d.custoId) ?? new Decimal(0)).plus(d.valorRealizado));
+    }
+  }
+
+  return custos.map((c) => {
+    const previsto = previstoPorCusto.get(c.id) ?? new Decimal(0);
+    const realizado =
+      c.categoria.tipoIncidencia === "fixo"
+        ? c.status === "realizado" && c.valorRealizado
+          ? new Decimal(c.valorRealizado)
+          : new Decimal(0)
+        : (realizadoPercentualPorCusto.get(c.id) ?? new Decimal(0));
+    const desvio = realizado.minus(previsto);
+    return {
+      id: c.id,
+      categoriaId: c.categoriaId,
+      categoriaNome: c.categoria.nome,
+      tipoIncidencia: c.categoria.tipoIncidencia as TipoIncidenciaCusto,
+      tipologiaId: c.tipologiaId,
+      tipologiaNome: c.tipologia?.nome ?? null,
+      recorrencia: c.recorrencia,
+      competenciaMes: c.competenciaMes,
+      status: c.status,
+      totalPrevisto: previsto.toFixed(2),
+      totalRealizado: realizado.toFixed(2),
+      saldoARealizar: previsto.minus(realizado).toFixed(2),
+      desvio: desvio.toFixed(2),
+      desvioPercentual: previsto.isZero() ? null : desvio.dividedBy(previsto).times(100).toFixed(2),
+    };
+  });
 }
 
 async function persistirRecebimentos(cenarioId: string, resultado: SaidaMotorFinanceiro) {

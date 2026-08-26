@@ -66,7 +66,7 @@ export function UsuariosPage({ usuarioAtual }: { usuarioAtual: Usuario }) {
         <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 18px", boxShadow: "var(--shadow-sm)" }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-primary)", marginBottom: 4 }}>Todos os usuários</div>
           <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginBottom: 12 }}>
-            "Admin" vê todos os empreendimentos sempre. "Usuário" só vê os que forem vinculados abaixo, em "Acesso".
+            "Admin" vê todos os empreendimentos sempre. "Usuário" e "Stakeholder" só veem os que forem vinculados abaixo, em "Acesso" — Stakeholder nunca pode ter acesso de edição.
           </div>
           {carregando ? (
             <div style={{ fontSize: 13, color: "var(--ink-muted)" }}>Carregando…</div>
@@ -140,7 +140,7 @@ function LinhaUsuario({
           </span>
         </td>
         <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-          {usuario.papel === "usuario" && (
+          {(usuario.papel === "usuario" || usuario.papel === "stakeholder") && (
             <Button variant="secondary" onClick={onToggleExpandir} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
               {expandido ? "Fechar" : "Acesso"}
             </Button>
@@ -158,7 +158,7 @@ function LinhaUsuario({
       {expandido && (
         <tr>
           <td colSpan={4} style={{ paddingBottom: 12 }}>
-            <AcessoEmpreendimentos usuarioId={usuario.id} onErro={onErro} />
+            <AcessoEmpreendimentos usuarioId={usuario.id} papelUsuario={usuario.papel} onErro={onErro} />
           </td>
         </tr>
       )}
@@ -226,11 +226,15 @@ function RedefinirSenhaForm({ usuarioId, onErro }: { usuarioId: string; onErro: 
   );
 }
 
-function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErro: (msg: string) => void }) {
+function AcessoEmpreendimentos({ usuarioId, papelUsuario, onErro }: { usuarioId: string; papelUsuario: Papel; onErro: (msg: string) => void }) {
+  const ehStakeholder = papelUsuario === "stakeholder";
   const [vinculados, setVinculados] = useState<EmpreendimentoVinculado[]>([]);
   const [todos, setTodos] = useState<EmpreendimentoResumo[]>([]);
   const [novosIds, setNovosIds] = useState<string[]>([]);
-  const [novoPapel, setNovoPapel] = useState<PapelVinculo>("edicao");
+  // Stakeholder nunca pode ter vínculo "edicao" -- o backend já recusa
+  // (POST /api/usuarios/:id/empreendimentos), este default só evita o
+  // usuário escolher uma opção que sabe que vai ser rejeitada.
+  const [novoPapel, setNovoPapel] = useState<PapelVinculo>(ehStakeholder ? "leitura" : "edicao");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [trocandoPapel, setTrocandoPapel] = useState<string | null>(null);
@@ -283,6 +287,7 @@ function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErr
   // papel oposto -- vincularUsuarioEmpreendimento e um upsert, entao isso
   // atualiza o vinculo existente em vez de criar um segundo.
   async function alternarPapel(v: EmpreendimentoVinculado) {
+    if (ehStakeholder) return; // Stakeholder so tem "leitura" -- nada para alternar.
     setTrocandoPapel(v.id);
     try {
       await vincularEmpreendimentos(usuarioId, [v.id], v.papel === "edicao" ? "leitura" : "edicao");
@@ -322,13 +327,13 @@ function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErr
               <button
                 type="button"
                 onClick={() => alternarPapel(v)}
-                disabled={trocandoPapel === v.id}
-                title={v.papel === "edicao" ? "Edição — clique para tornar somente leitura" : "Leitura — clique para permitir edição"}
+                disabled={trocandoPapel === v.id || ehStakeholder}
+                title={ehStakeholder ? "Stakeholder só tem acesso de leitura" : v.papel === "edicao" ? "Edição — clique para tornar somente leitura" : "Leitura — clique para permitir edição"}
                 style={{
                   border: "none",
                   background: v.papel === "leitura" ? "var(--status-warning-soft-bg)" : "transparent",
                   color: v.papel === "leitura" ? "var(--status-warning-text)" : "var(--ink-muted)",
-                  cursor: "pointer",
+                  cursor: ehStakeholder ? "default" : "pointer",
                   fontSize: 10.5,
                   fontWeight: 700,
                   textTransform: "uppercase",
@@ -377,9 +382,10 @@ function AcessoEmpreendimentos({ usuarioId, onErro }: { usuarioId: string; onErr
             <select
               value={novoPapel}
               onChange={(e) => setNovoPapel(e.target.value as PapelVinculo)}
+              disabled={ehStakeholder}
               style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
             >
-              <option value="edicao">Edição</option>
+              {!ehStakeholder && <option value="edicao">Edição</option>}
               <option value="leitura">Leitura</option>
             </select>
           </label>
@@ -431,6 +437,7 @@ function NovoUsuarioForm({ onCriado, onErro }: { onCriado: () => void; onErro: (
             style={{ fontFamily: "var(--font-ui)", fontSize: 13.5, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
           >
             <option value="usuario">Usuário</option>
+            <option value="stakeholder">Stakeholder</option>
             <option value="admin">Admin</option>
           </select>
         </label>

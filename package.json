@@ -21,6 +21,8 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^26.2.0",
+    "@types/pdfkit": "^0.17.6",
+    "pdf-parse": "^2.4.5",
     "prisma": "^6.19.3",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
@@ -29,7 +31,9 @@
   "dependencies": {
     "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.3",
-    "decimal.js": "^10.6.0"
+    "decimal.js": "^10.6.0",
+    "exceljs": "^4.4.0",
+    "pdfkit": "^0.20.1"
   },
   "allowScripts": {
     "esbuild@0.28.2": true,

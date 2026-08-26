@@ -860,7 +860,8 @@ export function excluirFinanciamento(cenarioId: string) {
   return del(`/api/cenarios/${cenarioId}/financiamento`);
 }
 
-export type Papel = "admin" | "usuario";
+/** "stakeholder" (Fase 2.5, docs/DECISOES.md): visualização apenas, por empreendimento -- nunca pode ter vínculo "edicao" (validado no backend). */
+export type Papel = "admin" | "usuario" | "stakeholder";
 
 export interface Usuario {
   id: string;
@@ -938,4 +939,40 @@ export function vincularEmpreendimentos(usuarioId: string, empreendimentoIds: st
 
 export function desvincularEmpreendimento(usuarioId: string, empreendimentoId: string) {
   return del(`/api/usuarios/${usuarioId}/empreendimentos/${empreendimentoId}`);
+}
+
+/**
+ * Fase 2.5 — Relatórios (PDF/Excel): as rotas devolvem o arquivo binário
+ * direto (não JSON) -- `baixarRelatorio` busca via fetch (cookie de sessão
+ * já vai junto, mesmo padrão de `apiFetch`), monta um blob e dispara o
+ * download por um link temporário, sem sair da SPA.
+ */
+async function baixarRelatorio(url: string, nomeArquivoPadrao: string): Promise<void> {
+  const res = await apiFetch(url);
+  if (!res.ok) {
+    const erro = await res.json().catch(() => ({ erro: `Falha ao gerar relatório (${res.status})` }));
+    throw new Error(erro.erro ?? `Falha ao gerar relatório (${res.status})`);
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const nomeArquivo = /filename="([^"]+)"/.exec(disposition)?.[1] ?? nomeArquivoPadrao;
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = nomeArquivo;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+export type FormatoRelatorio = "pdf" | "xlsx";
+
+export function baixarRelatorioViabilidade(cenarioId: string, formato: FormatoRelatorio): Promise<void> {
+  return baixarRelatorio(`/api/cenarios/${cenarioId}/relatorios/viabilidade.${formato}`, `relatorio-viabilidade.${formato}`);
+}
+
+export function baixarRelatorioComparativo(empreendimentoId: string, cenarioIds: string[], formato: FormatoRelatorio): Promise<void> {
+  const ids = cenarioIds.map(encodeURIComponent).join(",");
+  return baixarRelatorio(`/api/empreendimentos/${empreendimentoId}/relatorios/comparacao.${formato}?ids=${ids}`, `relatorio-comparativo.${formato}`);
 }

@@ -641,6 +641,20 @@ export async function listarVendasDoCenario(cenarioId: string) {
 }
 
 /**
+ * Recebimentos projetados de um cenario, com o contexto necessario pra
+ * exibir a lista (numero da unidade, nome da modalidade) -- extraida da
+ * rota GET /cenarios/:id/recebimentos nesta forma na Fase 2.5 para ser
+ * reaproveitada tambem pelo relatorio de viabilidade (docs/DECISOES.md).
+ */
+export async function listarRecebimentosDoCenario(cenarioId: string) {
+  return prisma.recebimentoProjetado.findMany({
+    where: { venda: { cenarioId } },
+    include: { venda: { include: { unidade: { select: { numero: true } } } }, modalidade: { select: { nome: true } } },
+    orderBy: [{ mesCompetencia: "asc" }],
+  });
+}
+
+/**
  * Resumo do estoque de um empreendimento por status de Unidade (Fase 2,
  * tela de Vendas) -- Unidade.status e compartilhado entre todos os
  * cenarios do empreendimento (nunca por cenario, ver excluirCenario), por

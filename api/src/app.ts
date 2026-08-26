@@ -48,6 +48,7 @@ import {
   excluirFinanciamento,
   excluirPontoIndiceCorrecao,
   excluirTipologia,
+  listarRecebimentosDoCenario,
   listarVendasDoCenario,
   registrarDistrato,
   registrarPermuta,
@@ -73,7 +74,17 @@ import {
 import { prisma } from "../../src/db/client.js";
 import { confirmarConciliacao, montarCandidatosConciliacao, type ConfirmacaoConciliacao } from "../../src/db/conciliacao.js";
 import { gerarVendasDePremissaVelocidade } from "../../src/db/gerarVendas.js";
-import { calcularSensibilidadeCenario, montarComparacaoCenarios, montarCurvaCronogramaDoCenario, rodarMotorParaCenario } from "../../src/db/servicoMotor.js";
+import {
+  calcularSensibilidadeCenario,
+  montarComparacaoCenarios,
+  montarCurvaCronogramaDoCenario,
+  montarCustosResumoDoCenario,
+  montarPremissasResumoCenario,
+  rodarMotorParaCenario,
+} from "../../src/db/servicoMotor.js";
+import { montarDadosRelatorioComparativo, montarDadosRelatorioViabilidade } from "../../src/relatorios/dados.js";
+import { gerarExcelComparativo, gerarExcelViabilidade } from "../../src/relatorios/excel.js";
+import { gerarPdfComparativo, gerarPdfViabilidade } from "../../src/relatorios/pdf.js";
 import { parseExtratoCSV, sugerirConciliacao } from "../../src/core/conciliacaoExtrato.js";
 import type { EixoSensibilidade } from "../../src/core/motorSensibilidade.js";
 import type { TipoIncidenciaCusto } from "../../src/core/types.js";
@@ -223,12 +234,12 @@ export async function buildApp() {
       reply.code(400);
       return { erro: "Email, nome e senha (mínimo 6 caracteres) são obrigatórios" };
     }
-    if (papel !== undefined && papel !== "admin" && papel !== "usuario") {
+    if (papel !== undefined && papel !== "admin" && papel !== "usuario" && papel !== "stakeholder") {
       reply.code(400);
-      return { erro: "Papel deve ser 'admin' ou 'usuario'" };
+      return { erro: "Papel deve ser 'admin', 'usuario' ou 'stakeholder'" };
     }
     try {
-      const usuario = await criarUsuario({ email: email.trim(), nome: nome.trim(), senha, papel: papel as "admin" | "usuario" | undefined });
+      const usuario = await criarUsuario({ email: email.trim(), nome: nome.trim(), senha, papel: papel as "admin" | "usuario" | "stakeholder" | undefined });
       reply.code(201);
       return usuario;
     } catch (e: any) {
@@ -320,6 +331,14 @@ export async function buildApp() {
         reply.code(404);
         return { erro: "Usuário não encontrado" };
       }
+      // Stakeholder (Fase 2.5, docs/DECISOES.md): so pode ter vinculo de
+      // leitura -- nunca edicao. Verificado aqui, no unico ponto que grava
+      // EmpreendimentoUsuario.papel, para nao depender de nenhuma tela
+      // respeitar essa regra sozinha.
+      if (usuario.papel === "stakeholder" && papel === "edicao") {
+        reply.code(400);
+        return { erro: "Stakeholder só pode ter acesso de leitura" };
+      }
       const empreendimentos = await prisma.empreendimento.findMany({ where: { id: { in: ids } }, select: { id: true } });
       const idsEncontrados = new Set(empreendimentos.map((e) => e.id));
       const idsInexistentes = ids.filter((id) => !idsEncontrados.has(id));
@@ -359,6 +378,14 @@ export async function buildApp() {
   });
 
   app.post<{ Body: { nome?: string; incorporador?: string; endereco?: string } }>("/api/empreendimentos", async (req, reply) => {
+    // Stakeholder (Fase 2.5, docs/DECISOES.md): visualizacao apenas -- nunca
+    // cria nada, nem o proprio empreendimento que o vincularia
+    // automaticamente a si mesmo com edicao (fluxo abaixo, pensado para
+    // "usuario" antes desta fatia).
+    if (req.usuario!.papel === "stakeholder") {
+      reply.code(403);
+      return { erro: "Stakeholder não pode criar empreendimentos" };
+    }
     const { nome, incorporador, endereco } = req.body ?? {};
     if (!nome || !nome.trim()) {
       reply.code(400);
@@ -1984,11 +2011,7 @@ export async function buildApp() {
       return { erro: "Cenário não encontrado" };
     }
     if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
-    const recebimentos = await prisma.recebimentoProjetado.findMany({
-      where: { venda: { cenarioId: req.params.id } },
-      include: { venda: { include: { unidade: { select: { numero: true } } } }, modalidade: { select: { nome: true } } },
-      orderBy: [{ mesCompetencia: "asc" }],
-    });
+    const recebimentos = await listarRecebimentosDoCenario(req.params.id);
     return recebimentos.map((r) => ({
       id: r.id,
       // vendaId (Fase 2, tela de Vendas): campo aditivo -- permite a tela
@@ -2111,49 +2134,7 @@ export async function buildApp() {
     }
     if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
 
-    const resultado = await rodarMotorParaCenario(cenario.id);
-    const previstoPorCusto = new Map<string, Decimal>();
-    for (const d of resultado.desembolsos) {
-      previstoPorCusto.set(d.custoId, (previstoPorCusto.get(d.custoId) ?? new Decimal(0)).plus(d.valor));
-    }
-
-    const [custos, desembolsos] = await Promise.all([
-      prisma.custo.findMany({ where: { cenarioId: cenario.id }, include: { categoria: true, tipologia: { select: { nome: true } } } }),
-      prisma.desembolsoCusto.findMany({ where: { custo: { cenarioId: cenario.id } }, select: { custoId: true, valorRealizado: true, status: true } }),
-    ]);
-    const realizadoPercentualPorCusto = new Map<string, Decimal>();
-    for (const d of desembolsos) {
-      if (d.status === "realizado" && d.valorRealizado) {
-        realizadoPercentualPorCusto.set(d.custoId, (realizadoPercentualPorCusto.get(d.custoId) ?? new Decimal(0)).plus(d.valorRealizado));
-      }
-    }
-
-    return custos.map((c) => {
-      const previsto = previstoPorCusto.get(c.id) ?? new Decimal(0);
-      const realizado =
-        c.categoria.tipoIncidencia === "fixo"
-          ? c.status === "realizado" && c.valorRealizado
-            ? new Decimal(c.valorRealizado)
-            : new Decimal(0)
-          : (realizadoPercentualPorCusto.get(c.id) ?? new Decimal(0));
-      const desvio = realizado.minus(previsto);
-      return {
-        id: c.id,
-        categoriaId: c.categoriaId,
-        categoriaNome: c.categoria.nome,
-        tipoIncidencia: c.categoria.tipoIncidencia as TipoIncidenciaCusto,
-        tipologiaId: c.tipologiaId,
-        tipologiaNome: c.tipologia?.nome ?? null,
-        recorrencia: c.recorrencia,
-        competenciaMes: c.competenciaMes,
-        status: c.status,
-        totalPrevisto: previsto.toFixed(2),
-        totalRealizado: realizado.toFixed(2),
-        saldoARealizar: previsto.minus(realizado).toFixed(2),
-        desvio: desvio.toFixed(2),
-        desvioPercentual: previsto.isZero() ? null : desvio.dividedBy(previsto).times(100).toFixed(2),
-      };
-    });
+    return montarCustosResumoDoCenario(cenario.id);
   });
 
   // Distribuicao mensal de um custo (Fase 2.2): filtra resultado.desembolsos
@@ -2443,6 +2424,99 @@ export async function buildApp() {
 
     const cenarios = await montarComparacaoCenarios(empreendimento.id, cenarioIds);
     return { cenarios };
+  });
+
+  // Fase 2.5 — Relatorios (PDF/Excel), fonte unica de verdade
+  // (docs/DECISOES.md, achado F34): montarDadosRelatorioViabilidade/
+  // montarDadosRelatorioComparativo so agregam o que o motor/banco ja
+  // produzem; gerarPdf*/gerarExcel* so formatam, nenhum calculo novo.
+  // Leitura apenas -- Stakeholder (vinculo sempre "leitura") tem acesso
+  // aos relatorios de qualquer empreendimento vinculado, como qualquer
+  // outra rota GET.
+  function parseIdsCsv(valor: string | undefined): string[] {
+    return (valor ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0);
+  }
+  function nomeArquivoBase(...partes: string[]): string {
+    return partes
+      .join("-")
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-zA-Z0-9-]+/g, "-")
+      .replace(/-+/g, "-")
+      .toLowerCase();
+  }
+
+  app.get<{ Params: { id: string } }>("/api/cenarios/:id/relatorios/viabilidade.pdf", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id }, include: { empreendimento: { select: { nome: true } } } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+
+    const dados = await montarDadosRelatorioViabilidade(cenario.id);
+    const pdf = await gerarPdfViabilidade(dados);
+    reply.header("Content-Disposition", `attachment; filename="relatorio-viabilidade-${nomeArquivoBase(cenario.empreendimento.nome, cenario.nome)}.pdf"`);
+    reply.type("application/pdf");
+    return pdf;
+  });
+
+  app.get<{ Params: { id: string } }>("/api/cenarios/:id/relatorios/viabilidade.xlsx", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id }, include: { empreendimento: { select: { nome: true } } } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+
+    const dados = await montarDadosRelatorioViabilidade(cenario.id);
+    const excel = await gerarExcelViabilidade(dados);
+    reply.header("Content-Disposition", `attachment; filename="relatorio-viabilidade-${nomeArquivoBase(cenario.empreendimento.nome, cenario.nome)}.xlsx"`);
+    reply.type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    return excel;
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { ids?: string } }>("/api/empreendimentos/:id/relatorios/comparacao.pdf", async (req, reply) => {
+    const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
+    if (!empreendimento) {
+      reply.code(404);
+      return { erro: "Empreendimento não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, empreendimento.id))) return;
+    const cenarioIds = parseIdsCsv(req.query.ids);
+    if (cenarioIds.length === 0) {
+      reply.code(400);
+      return { erro: "Informe ao menos um cenário em ?ids=" };
+    }
+
+    const dados = await montarDadosRelatorioComparativo(empreendimento.id, cenarioIds);
+    const pdf = await gerarPdfComparativo(dados);
+    reply.header("Content-Disposition", `attachment; filename="relatorio-comparativo-${nomeArquivoBase(empreendimento.nome)}.pdf"`);
+    reply.type("application/pdf");
+    return pdf;
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { ids?: string } }>("/api/empreendimentos/:id/relatorios/comparacao.xlsx", async (req, reply) => {
+    const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
+    if (!empreendimento) {
+      reply.code(404);
+      return { erro: "Empreendimento não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, empreendimento.id))) return;
+    const cenarioIds = parseIdsCsv(req.query.ids);
+    if (cenarioIds.length === 0) {
+      reply.code(400);
+      return { erro: "Informe ao menos um cenário em ?ids=" };
+    }
+
+    const dados = await montarDadosRelatorioComparativo(empreendimento.id, cenarioIds);
+    const excel = await gerarExcelComparativo(dados);
+    reply.header("Content-Disposition", `attachment; filename="relatorio-comparativo-${nomeArquivoBase(empreendimento.nome)}.xlsx"`);
+    reply.type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    return excel;
   });
 
   return app;

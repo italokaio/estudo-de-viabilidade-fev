@@ -7,6 +7,7 @@ import { CronogramaPage } from "./pages/CronogramaPage.js";
 import { CustosPage } from "./pages/CustosPage.js";
 import { FluxoCaixaPage } from "./pages/FluxoCaixaPage.js";
 import { LoginPage } from "./pages/LoginPage.js";
+import { RelatoriosPage } from "./pages/RelatoriosPage.js";
 import { UsuariosPage } from "./pages/UsuariosPage.js";
 import { VendasPage } from "./pages/VendasPage.js";
 
@@ -67,6 +68,7 @@ export default function App() {
         {pagina === "custos" && <CustosPage />}
         {pagina === "cronograma" && <CronogramaPage />}
         {pagina === "cenarios" && <CenariosPage />}
+        {pagina === "relatorios" && <RelatoriosPage />}
         {pagina === "usuarios" && usuario.papel === "admin" && <UsuariosPage usuarioAtual={usuario} />}
       </div>
     </div>

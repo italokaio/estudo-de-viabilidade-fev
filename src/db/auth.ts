@@ -15,7 +15,16 @@ export interface CriarUsuarioInput {
   email: string;
   nome: string;
   senha: string;
-  papel?: "admin" | "usuario";
+  /**
+   * "stakeholder" (Fase 2.5, docs/DECISOES.md): visualização apenas,
+   * empreendimento por empreendimento, concedida explicitamente por um
+   * admin via EmpreendimentoUsuario -- nunca "edicao" (validado em
+   * api/src/app.ts, POST /api/usuarios/:id/empreendimentos). Nenhuma
+   * verificação de acesso deste arquivo trata "stakeholder" como "admin"
+   * -- nivelAcessoEmpreendimento abaixo só reconhece a string exata
+   * "admin" como bypass total.
+   */
+  papel?: "admin" | "usuario" | "stakeholder";
 }
 
 export async function criarUsuario(input: CriarUsuarioInput) {

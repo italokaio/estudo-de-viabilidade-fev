@@ -26,14 +26,17 @@ datasource db {
  * resto do sistema preferir estado explicito no banco a esperteza).
  * papel: "admin" (acesso completo a TODOS os empreendimentos, incluindo
  * excluir) | "usuario" (visualiza e cadastra, nao exclui, e só nos
- * empreendimentos vinculados via EmpreendimentoUsuario — ver esse modelo).
+ * empreendimentos vinculados via EmpreendimentoUsuario — ver esse modelo) |
+ * "stakeholder" (Fase 2.5 — visualizacao apenas, so nos empreendimentos
+ * vinculados, e o vinculo nunca pode ser "edicao" — validado em
+ * api/src/app.ts, POST /api/usuarios/:id/empreendimentos).
  */
 model Usuario {
   id         String   @id @default(cuid())
   email      String   @unique
   nome       String
   senhaHash  String
-  papel      String   @default("usuario") // admin | usuario
+  papel      String   @default("usuario") // admin | usuario | stakeholder
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
