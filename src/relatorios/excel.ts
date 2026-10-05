@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import type { DadosRelatorioComparativo, DadosRelatorioViabilidade } from "./dados.js";
+import { formatarPercentualMensal, formatarPercentualUmaCasa, NOTA_PAYBACK_DESCONTADO_ANTES_DO_SIMPLES, precisaNotaPaybackDescontado, resumirRecebimentosPorMes, resumirVendasPorTipologia, ROTULO_PAPEL_CUSTO } from "./resumo.js";
 
 const FMT_MOEDA = '"R$" #,##0.00';
 const FMT_PERCENTUAL = "0.00%";
@@ -29,7 +30,7 @@ function adicionarTabela(sheet: ExcelJS.Worksheet, cabecalho: string[], linhas: 
  * cadastrado). Toda célula vem direto de `DadosRelatorioViabilidade` --
  * nenhum cálculo acontece aqui, só formatação.
  */
-export async function gerarExcelViabilidade(dados: DadosRelatorioViabilidade): Promise<Buffer> {
+export async function gerarExcelViabilidade(dados: DadosRelatorioViabilidade, opcoes: { resumido?: boolean } = {}): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Firmus — ERP de Viabilidade";
   wb.created = new Date(dados.geradoEm);
@@ -47,15 +48,27 @@ export async function gerarExcelViabilidade(dados: DadosRelatorioViabilidade): P
     [26, 22],
   );
   // linhas monetárias adicionadas separadamente para aplicar numFmt por célula
-  const linhasResumo: [string, number][] = [
-    ["VGV", numero(dados.resumoExecutivo.vgv)],
+  const linhasResumo: [string, number | string][] = [
+    ["VGV (inclui permuta)", numero(dados.resumoExecutivo.vgv)],
+    ["VGV permutado (incluído no VGV)", numero(dados.resumoExecutivo.vgvPermutado)],
+    ["VGV líquido (bruto menos comissão e permuta)", numero(dados.resumoExecutivo.vgvLiquido)],
     ["Unidades", dados.resumoExecutivo.quantidadeUnidades],
-    ["Unidades vendidas", dados.resumoExecutivo.unidadesVendidas],
+    ...(dados.resumoExecutivo.unidadesProjetadas > 0
+      ? ([
+          ["Unidades vendidas (reais)", dados.resumoExecutivo.unidadesVendidas],
+          ["Unidades projetadas (premissa de velocidade)", dados.resumoExecutivo.unidadesProjetadas],
+          ["VGV real", numero(dados.resumoExecutivo.vgvReal)],
+          ["VGV projetado", numero(dados.resumoExecutivo.vgvProjetado)],
+        ] as [string, number | string][])
+      : ([["Unidades vendidas", dados.resumoExecutivo.unidadesVendidas]] as [string, number | string][])),
     ["Recebimentos previstos", numero(dados.resumoExecutivo.totalRecebimentosPrevisto)],
-    ["Custos previstos", numero(dados.resumoExecutivo.totalCustosPrevisto)],
+    ["Custos previstos (inclui terreno por permuta)", numero(dados.resumoExecutivo.totalCustosPrevisto)],
     ["Fluxo líquido (saldo final)", numero(dados.resumoExecutivo.saldoFinal)],
     ["Necessidade máxima de capital", numero(dados.resumoExecutivo.necessidadeMaximaCapital)],
-    ["VPL", numero(dados.resumoExecutivo.vpl)],
+    ["Taxa de desconto (a.m.)", formatarPercentualMensal(dados.resumoExecutivo.taxaDescontoMensal)],
+    [`VPL (${formatarPercentualMensal(dados.resumoExecutivo.taxaDescontoMensal)} a.m.)`, numero(dados.resumoExecutivo.vpl)],
+    ["TIR (a.m.)", dados.resumoExecutivo.tir !== null ? formatarPercentualMensal(dados.resumoExecutivo.tir) : "não aplicável"],
+    ["Resultado (margem líquida)", dados.resumoExecutivo.margemLiquida !== null ? formatarPercentualUmaCasa(dados.resumoExecutivo.margemLiquida) : "não aplicável"],
   ];
   for (const [rotulo, valor] of linhasResumo) {
     const row = resumo.addRow([rotulo, valor]);
@@ -82,6 +95,7 @@ export async function gerarExcelViabilidade(dados: DadosRelatorioViabilidade): P
     estilizarCabecalho(cab);
     for (const t of dados.premissas.velocidadeVendas.porTipologia) premissas.addRow([t.tipologiaNome, Number(t.totalUnidadesPrevistas)]);
   }
+  for (const aviso of dados.premissas.avisos) premissas.addRow([`AVISO: ${aviso}`]);
   if (dados.premissas.financiamento) {
     premissas.addRow([]);
     const cab = premissas.addRow(["Financiamento", "Valor"]);
@@ -107,7 +121,41 @@ export async function gerarExcelViabilidade(dados: DadosRelatorioViabilidade): P
   unidadesSheet.addRow(["Total", dados.produto.estoque.total]);
   unidadesSheet.columns.forEach((c) => (c.width = 24));
 
-  if (dados.vendas.length > 0) {
+  if (dados.premissas.vendas.projetadas > 0) {
+    const projetadasSheet = wb.addWorksheet("Vendas projetadas");
+    const cab = projetadasSheet.addRow(["Tipologia", "Unidades projetadas", "VGV projetado", "Ticket médio"]);
+    estilizarCabecalho(cab);
+    for (const l of dados.premissas.vendas.projetadasPorTipologia) {
+      const row = projetadasSheet.addRow([l.tipologiaNome, l.unidades, numero(l.vgv), l.ticketMedio ? numero(l.ticketMedio) : null]);
+      row.getCell(3).numFmt = FMT_MOEDA;
+      row.getCell(4).numFmt = FMT_MOEDA;
+    }
+    const unidades = dados.resumoExecutivo.unidadesProjetadas;
+    const total = projetadasSheet.addRow(["Total", unidades, numero(dados.resumoExecutivo.vgvProjetado), unidades > 0 ? numero((Number(dados.resumoExecutivo.vgvProjetado) / unidades).toFixed(2)) : null]);
+    total.font = { bold: true };
+    total.getCell(3).numFmt = FMT_MOEDA;
+    total.getCell(4).numFmt = FMT_MOEDA;
+    projetadasSheet.columns.forEach((c) => (c.width = 22));
+  }
+
+  if (opcoes.resumido) {
+    const vendasResumo = resumirVendasPorTipologia(dados.vendas);
+    if (vendasResumo.linhas.length > 0) {
+      const vendasSheet = wb.addWorksheet("Vendas por tipologia");
+      const cab = vendasSheet.addRow(["Tipologia", "Unidades vendidas", "VGV vendido", "Ticket médio"]);
+      estilizarCabecalho(cab);
+      for (const l of vendasResumo.linhas) {
+        const row = vendasSheet.addRow([l.tipologiaNome, l.unidadesVendidas, numero(l.vgvVendido), l.ticketMedio ? numero(l.ticketMedio) : null]);
+        row.getCell(3).numFmt = FMT_MOEDA;
+        row.getCell(4).numFmt = FMT_MOEDA;
+      }
+      const total = vendasSheet.addRow(["Total", vendasResumo.total.unidadesVendidas, numero(vendasResumo.total.vgvVendido), vendasResumo.total.ticketMedio ? numero(vendasResumo.total.ticketMedio) : null]);
+      total.font = { bold: true };
+      total.getCell(3).numFmt = FMT_MOEDA;
+      total.getCell(4).numFmt = FMT_MOEDA;
+      vendasSheet.columns.forEach((c) => (c.width = 22));
+    }
+  } else if (dados.vendas.length > 0) {
     const vendasSheet = wb.addWorksheet("Vendas");
     const cab = vendasSheet.addRow(["Unidade", "Tipologia", "Comprador", "Mês", "Valor", "Condição de pagamento", "Status"]);
     estilizarCabecalho(cab);
@@ -118,7 +166,22 @@ export async function gerarExcelViabilidade(dados: DadosRelatorioViabilidade): P
     vendasSheet.columns.forEach((c) => (c.width = 18));
   }
 
-  if (dados.recebimentos.length > 0) {
+  if (opcoes.resumido) {
+    const recebimentosResumo = resumirRecebimentosPorMes(dados.recebimentos, dados.cenario.horizonteProjecaoMeses);
+    const recSheet = wb.addWorksheet("Recebimentos por mês");
+    const cab = recSheet.addRow(["Mês", "Total previsto", "Total realizado"]);
+    estilizarCabecalho(cab);
+    for (const l of recebimentosResumo.linhas) {
+      const row = recSheet.addRow([l.mes, numero(l.totalPrevisto), numero(l.totalRealizado)]);
+      row.getCell(2).numFmt = FMT_MOEDA;
+      row.getCell(3).numFmt = FMT_MOEDA;
+    }
+    const total = recSheet.addRow(["Total", numero(recebimentosResumo.total.totalPrevisto), numero(recebimentosResumo.total.totalRealizado)]);
+    total.font = { bold: true };
+    total.getCell(2).numFmt = FMT_MOEDA;
+    total.getCell(3).numFmt = FMT_MOEDA;
+    recSheet.columns.forEach((c) => (c.width = 18));
+  } else if (dados.recebimentos.length > 0) {
     const recSheet = wb.addWorksheet("Recebimentos");
     const cab = recSheet.addRow(["Unidade", "Modalidade", "Mês", "Valor previsto", "Valor realizado", "Status"]);
     estilizarCabecalho(cab);
@@ -132,7 +195,7 @@ export async function gerarExcelViabilidade(dados: DadosRelatorioViabilidade): P
 
   if (dados.custos.length > 0) {
     const custosSheet = wb.addWorksheet("Custos");
-    const cab = custosSheet.addRow(["Categoria", "Tipo de incidência", "Tipologia", "Recorrência", "Status", "Previsto", "Realizado", "Saldo a realizar", "Desvio", "Desvio %"]);
+    const cab = custosSheet.addRow(["Categoria", "Tipo de incidência", "Tipologia", "Recorrência", "Status", "Previsto", "Realizado", "Saldo a realizar", "Desvio", "Desvio %", "Papel"]);
     estilizarCabecalho(cab);
     for (const c of dados.custos) {
       const row = custosSheet.addRow([
@@ -146,6 +209,7 @@ export async function gerarExcelViabilidade(dados: DadosRelatorioViabilidade): P
         numero(c.saldoARealizar),
         numero(c.desvio),
         c.desvioPercentual ? Number(c.desvioPercentual) / 100 : null,
+        ROTULO_PAPEL_CUSTO[c.papel] ?? c.papel,
       ]);
       [6, 7, 8, 9].forEach((i) => (row.getCell(i).numFmt = FMT_MOEDA));
       if (row.getCell(10).value !== null) row.getCell(10).numFmt = FMT_PERCENTUAL;
@@ -169,7 +233,7 @@ export async function gerarExcelViabilidade(dados: DadosRelatorioViabilidade): P
 
   const fluxoSheet = wb.addWorksheet("Fluxo de Caixa");
   const temFinanciamento = dados.financiamento.length > 0;
-  const cabFluxo = ["Mês", "Entradas", "Saídas", "Fluxo mensal", "Saldo acumulado"];
+  const cabFluxo = ["Mês", "Entradas (inclui liberação do financiamento)", "Saídas", "Fluxo mensal", "Saldo acumulado"];
   if (temFinanciamento) cabFluxo.push("Liberação financiamento", "Amortização financiamento", "Saldo devedor");
   const cabF = fluxoSheet.addRow(cabFluxo);
   estilizarCabecalho(cabF);
@@ -184,6 +248,7 @@ export async function gerarExcelViabilidade(dados: DadosRelatorioViabilidade): P
     for (let i = 2; i <= linha.length; i++) row.getCell(i).numFmt = FMT_MOEDA;
   }
   fluxoSheet.columns.forEach((c) => (c.width = 18));
+  fluxoSheet.getColumn(2).width = 40;
 
   const necessidadeSheet = wb.addWorksheet("Necessidade de Capital");
   adicionarTabela(necessidadeSheet, ["Indicador", "Valor"], []);
@@ -191,12 +256,16 @@ export async function gerarExcelViabilidade(dados: DadosRelatorioViabilidade): P
     ["Necessidade máxima de capital", numero(dados.resumoExecutivo.necessidadeMaximaCapital)],
     ["Mês do pico", dados.resumoExecutivo.mesPico ?? "—"],
     ["Mês de recuperação", dados.resumoExecutivo.mesRecuperacao ?? "—"],
+    ["Mês de recuperação (descontado)", dados.resumoExecutivo.mesRecuperacaoDescontado ?? "não recupera no horizonte"],
     ["Saldo final", numero(dados.resumoExecutivo.saldoFinal)],
     ["VPL", numero(dados.resumoExecutivo.vpl)],
   ];
   for (const [rotulo, valor] of linhasNecessidade) {
     const row = necessidadeSheet.addRow([rotulo, valor]);
     if (typeof valor === "number") row.getCell(2).numFmt = FMT_MOEDA;
+  }
+  if (precisaNotaPaybackDescontado(dados.resumoExecutivo.mesRecuperacao, dados.resumoExecutivo.mesRecuperacaoDescontado)) {
+    necessidadeSheet.addRow([NOTA_PAYBACK_DESCONTADO_ANTES_DO_SIMPLES]);
   }
   necessidadeSheet.columns.forEach((c) => (c.width = 30));
 
@@ -219,12 +288,15 @@ export async function gerarExcelComparativo(dados: DadosRelatorioComparativo): P
   const cabResumo = resumo.addRow(["Indicador", ...dados.cenarios.map((c) => c.nome)]);
   estilizarCabecalho(cabResumo);
   const linhasIndicadores: { rotulo: string; acessor: (c: (typeof dados.cenarios)[number]) => string; moeda: boolean }[] = [
-    { rotulo: "VGV", acessor: (c) => c.indicadores.vgv, moeda: true },
+    { rotulo: "VGV (inclui permuta)", acessor: (c) => c.indicadores.vgv, moeda: true },
     { rotulo: "Recebimentos previstos", acessor: (c) => c.indicadores.totalRecebimentosPrevisto, moeda: true },
-    { rotulo: "Custos previstos", acessor: (c) => c.indicadores.totalCustosPrevisto, moeda: true },
+    { rotulo: "Custos previstos (inclui terreno por permuta)", acessor: (c) => c.indicadores.totalCustosPrevisto, moeda: true },
     { rotulo: "Fluxo líquido (saldo final)", acessor: (c) => c.indicadores.saldoFinal, moeda: true },
     { rotulo: "Necessidade máxima de capital", acessor: (c) => c.indicadores.necessidadeMaximaCapital, moeda: true },
     { rotulo: "VPL", acessor: (c) => c.indicadores.vpl, moeda: true },
+    { rotulo: "Taxa de desconto (a.m.)", acessor: (c) => formatarPercentualMensal(c.indicadores.taxaDescontoMensal), moeda: false },
+    { rotulo: "TIR (a.m.)", acessor: (c) => (c.indicadores.tir !== null ? formatarPercentualMensal(c.indicadores.tir) : "não aplicável"), moeda: false },
+    { rotulo: "Resultado (margem líquida)", acessor: (c) => (c.indicadores.margemLiquida !== null ? formatarPercentualUmaCasa(c.indicadores.margemLiquida) : "não aplicável"), moeda: false },
   ];
   for (const linha of linhasIndicadores) {
     const row = resumo.addRow([linha.rotulo, ...dados.cenarios.map((c) => numero(linha.acessor(c)))]);
@@ -232,21 +304,27 @@ export async function gerarExcelComparativo(dados: DadosRelatorioComparativo): P
   }
   resumo.addRow(["Mês do pico", ...dados.cenarios.map((c) => c.indicadores.mesPico ?? "—")]);
   resumo.addRow(["Mês de recuperação", ...dados.cenarios.map((c) => c.indicadores.mesRecuperacao ?? "—")]);
+  resumo.addRow(["Mês de recuperação (descontado)", ...dados.cenarios.map((c) => c.indicadores.mesRecuperacaoDescontado ?? "não recupera no horizonte")]);
+  if (dados.cenarios.some((c) => precisaNotaPaybackDescontado(c.indicadores.mesRecuperacao, c.indicadores.mesRecuperacaoDescontado))) {
+    resumo.addRow([NOTA_PAYBACK_DESCONTADO_ANTES_DO_SIMPLES]);
+  }
+  resumo.addRow(["VGV líquido", ...dados.cenarios.map((c) => numero(c.indicadores.vgvLiquido))]);
   resumo.columns.forEach((c) => (c.width = 22));
 
   const premissas = wb.addWorksheet("Premissas");
-  const cabPrem = premissas.addRow(["Cenário", "Horizonte (meses)", "Limite de risco", "Velocidade de vendas (total)", "Financiamento contratado"]);
+  const cabPrem = premissas.addRow(["Cenário", "Horizonte (meses)", "Limite de risco", "Vendas reais / projetadas", "Financiamento contratado"]);
   estilizarCabecalho(cabPrem);
   for (const c of dados.cenarios) {
     const row = premissas.addRow([
       c.nome,
       c.premissas.horizonteProjecaoMeses,
       c.premissas.limiteNecessidadeMaximaCapital ? `${(Number(c.premissas.limiteNecessidadeMaximaCapital) * 100).toFixed(1)}%` : "padrão (30%)",
-      Number(c.premissas.velocidadeVendas.totalUnidadesPrevistas),
+      `${c.premissas.vendas.reais} / ${c.premissas.vendas.projetadas}`,
       c.premissas.financiamento ? numero(c.premissas.financiamento.valorContratado) : 0,
     ]);
     if (c.premissas.financiamento) row.getCell(5).numFmt = FMT_MOEDA;
   }
+  for (const c of dados.cenarios) for (const aviso of c.premissas.avisos) premissas.addRow([`AVISO: ${c.nome}: ${aviso}`]);
   premissas.addRow([]);
   const cabCustos = premissas.addRow(["Cenário", "Categoria de custo", "Tipo de incidência", "Tipologia", "Valor previsto", "Percentual"]);
   estilizarCabecalho(cabCustos);
@@ -267,7 +345,7 @@ export async function gerarExcelComparativo(dados: DadosRelatorioComparativo): P
   premissas.columns.forEach((c) => (c.width = 22));
 
   const fluxoSheet = wb.addWorksheet("Fluxo de Caixa");
-  const cabFluxo = fluxoSheet.addRow(["Cenário", "Mês", "Entradas", "Saídas", "Fluxo mensal", "Saldo acumulado"]);
+  const cabFluxo = fluxoSheet.addRow(["Cenário", "Mês", "Entradas (inclui liberação do financiamento)", "Saídas", "Fluxo mensal", "Saldo acumulado"]);
   estilizarCabecalho(cabFluxo);
   for (const c of dados.cenarios) {
     for (const f of c.fluxoMensal) {
@@ -276,6 +354,7 @@ export async function gerarExcelComparativo(dados: DadosRelatorioComparativo): P
     }
   }
   fluxoSheet.columns.forEach((c) => (c.width = 18));
+  fluxoSheet.getColumn(3).width = 40;
 
   const necessidadeSheet = wb.addWorksheet("Necessidade de Capital");
   const cabNec = necessidadeSheet.addRow(["Cenário", "Necessidade máxima", "Mês do pico", "Mês de recuperação", "Saldo final", "VPL"]);

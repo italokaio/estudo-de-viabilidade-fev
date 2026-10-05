@@ -107,7 +107,7 @@ describe("API — relatórios (Fase 2.5)", () => {
     const resumo = wb.getWorksheet("Resumo")!;
     const necessidadeMaximaLinha = resumo.getRows(1, resumo.rowCount)!.find((r) => r.getCell(1).value === "Necessidade máxima de capital")!;
     expect(Number(necessidadeMaximaLinha.getCell(2).value)).toBeCloseTo(Number(fluxoOficial.indicadores.necessidadeMaximaCapital), 2);
-    const vplLinha = resumo.getRows(1, resumo.rowCount)!.find((r) => r.getCell(1).value === "VPL")!;
+    const vplLinha = resumo.getRows(1, resumo.rowCount)!.find((r) => String(r.getCell(1).value).startsWith("VPL"))!;
     expect(Number(vplLinha.getCell(2).value)).toBeCloseTo(Number(fluxoOficial.indicadores.vpl), 2);
 
     const fluxoSheet = wb.getWorksheet("Fluxo de Caixa")!;

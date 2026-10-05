@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 import type { DadosRelatorioComparativo, DadosRelatorioViabilidade } from "./dados.js";
 import type { ComparacaoCenario } from "../db/servicoMotor.js";
+import { formatarPercentualMensal, formatarPercentualUmaCasa, NOTA_PAYBACK_DESCONTADO_ANTES_DO_SIMPLES, precisaNotaPaybackDescontado, resumirRecebimentosPorMes, resumirVendasPorTipologia } from "./resumo.js";
 
 /**
  * Fase 2.5 — PDF do relatório de viabilidade/comparativo. Desenho vetorial
@@ -240,7 +241,7 @@ function desenharGraficoFluxo(doc: PDFKit.PDFDocument, cursor: Cursor, pontos: {
   });
 
   let xLegendaFluxo = x0 + padEsq;
-  xLegendaFluxo = desenharItemLegenda(doc, xLegendaFluxo, y0 + ALTURA - 8, PALETA[0]!, "Entradas");
+  xLegendaFluxo = desenharItemLegenda(doc, xLegendaFluxo, y0 + ALTURA - 8, PALETA[0]!, "Entradas (inclui liberação do financiamento)");
   xLegendaFluxo = desenharItemLegenda(doc, xLegendaFluxo, y0 + ALTURA - 8, COR_MUTED, "Saídas");
   desenharItemLegenda(doc, xLegendaFluxo, y0 + ALTURA - 8, PALETA[1]!, "Saldo acumulado");
   doc.fillColor(COR_TEXTO);
@@ -317,13 +318,13 @@ function finalizarDocumento(doc: PDFKit.PDFDocument): Promise<Buffer> {
   });
 }
 
-export async function gerarPdfViabilidade(dados: DadosRelatorioViabilidade): Promise<Buffer> {
+export async function gerarPdfViabilidade(dados: DadosRelatorioViabilidade, opcoes: { resumido?: boolean } = {}): Promise<Buffer> {
   const doc = new PDFDocument({ size: "A4", margins: { top: 20, bottom: 20, left: MARGEM_LATERAL, right: MARGEM_LATERAL }, bufferPages: true, autoFirstPage: false });
   registrarCabecalhoCorrente(doc, dados.empreendimento.nome, `Cenário: ${dados.cenario.nome}`);
 
   doc.addPage();
   desenharCapa(doc, {
-    tituloRelatorio: "Relatório de Viabilidade",
+    tituloRelatorio: opcoes.resumido ? "Relatório de Viabilidade — Resumido" : "Relatório de Viabilidade",
     empreendimento: dados.empreendimento.nome,
     identificacao: dados.empreendimento.incorporador ?? undefined,
     cenario: `${dados.cenario.nome} (${dados.cenario.tipo})${dados.cenario.derivadoDeNome ? ` — derivado de ${dados.cenario.derivadoDeNome}` : ""}`,
@@ -335,19 +336,34 @@ export async function gerarPdfViabilidade(dados: DadosRelatorioViabilidade): Pro
 
   escreverTituloSecao(doc, cursor, "Resumo Executivo");
   escreverChaveValor(doc, cursor, [
-    ["VGV", formatarMoeda(dados.resumoExecutivo.vgv)],
+    ["VGV (inclui permuta)", formatarMoeda(dados.resumoExecutivo.vgv)],
+    ["VGV permutado (incluído no VGV)", formatarMoeda(dados.resumoExecutivo.vgvPermutado)],
+    ["VGV líquido (bruto menos comissão e permuta)", formatarMoeda(dados.resumoExecutivo.vgvLiquido)],
     ["Unidades", String(dados.resumoExecutivo.quantidadeUnidades)],
-    ["Unidades vendidas", String(dados.resumoExecutivo.unidadesVendidas)],
+    ...(dados.resumoExecutivo.unidadesProjetadas > 0
+      ? ([
+          ["Unidades vendidas (reais)", String(dados.resumoExecutivo.unidadesVendidas)],
+          ["Unidades projetadas (premissa de velocidade)", String(dados.resumoExecutivo.unidadesProjetadas)],
+          ["VGV real", formatarMoeda(dados.resumoExecutivo.vgvReal)],
+          ["VGV projetado", formatarMoeda(dados.resumoExecutivo.vgvProjetado)],
+        ] as [string, string][])
+      : ([["Unidades vendidas", String(dados.resumoExecutivo.unidadesVendidas)]] as [string, string][])),
     ["Recebimentos previstos", formatarMoeda(dados.resumoExecutivo.totalRecebimentosPrevisto)],
-    ["Custos previstos", formatarMoeda(dados.resumoExecutivo.totalCustosPrevisto)],
+    ["Custos previstos (inclui terreno por permuta)", formatarMoeda(dados.resumoExecutivo.totalCustosPrevisto)],
     ["Fluxo líquido (saldo final)", formatarMoeda(dados.resumoExecutivo.saldoFinal)],
     ["Necessidade máxima de capital", formatarMoeda(dados.resumoExecutivo.necessidadeMaximaCapital)],
     ["Mês do pico", dados.resumoExecutivo.mesPico !== null ? `Mês ${dados.resumoExecutivo.mesPico}` : "—"],
     ["Mês de recuperação", dados.resumoExecutivo.mesRecuperacao !== null ? `Mês ${dados.resumoExecutivo.mesRecuperacao}` : "—"],
-    ["VPL", formatarMoeda(dados.resumoExecutivo.vpl)],
+    ["Mês de recuperação (descontado)", dados.resumoExecutivo.mesRecuperacaoDescontado !== null ? `Mês ${dados.resumoExecutivo.mesRecuperacaoDescontado}` : "não recupera no horizonte"],
+    [`VPL (${formatarPercentualMensal(dados.resumoExecutivo.taxaDescontoMensal)} a.m.)`, formatarMoeda(dados.resumoExecutivo.vpl)],
+    ["TIR (a.m.)", dados.resumoExecutivo.tir !== null ? formatarPercentualMensal(dados.resumoExecutivo.tir) : "não aplicável"],
+    ["Resultado (margem líquida)", dados.resumoExecutivo.margemLiquida !== null ? formatarPercentualUmaCasa(dados.resumoExecutivo.margemLiquida) : "não aplicável"],
   ]);
   if (dados.alertas.length > 0) {
     for (const a of dados.alertas) escreverParagrafo(doc, cursor, `${a.severidade === "critico" ? "[ALERTA] " : "- "}${a.mensagem}`);
+  }
+  if (precisaNotaPaybackDescontado(dados.resumoExecutivo.mesRecuperacao, dados.resumoExecutivo.mesRecuperacaoDescontado)) {
+    escreverParagrafo(doc, cursor, NOTA_PAYBACK_DESCONTADO_ANTES_DO_SIMPLES);
   }
 
   escreverTituloSecao(doc, cursor, "Premissas");
@@ -370,6 +386,10 @@ export async function gerarPdfViabilidade(dados: DadosRelatorioViabilidade): Pro
       dados.premissas.velocidadeVendas.porTipologia.map((t) => [t.tipologiaNome, t.totalUnidadesPrevistas]),
     );
   }
+  for (const aviso of dados.premissas.avisos) escreverParagrafo(doc, cursor, `[AVISO] ${aviso}`);
+  if (dados.premissas.vendas.projetadas > 0) {
+    escreverChaveValor(doc, cursor, [["Unidades vendidas (reais) / projetadas", `${dados.premissas.vendas.reais} / ${dados.premissas.vendas.projetadas}`]]);
+  }
   if (dados.premissas.financiamento) {
     escreverChaveValor(doc, cursor, [
       ["Financiamento — valor contratado", formatarMoeda(dados.premissas.financiamento.valorContratado)],
@@ -390,9 +410,28 @@ export async function gerarPdfViabilidade(dados: DadosRelatorioViabilidade): Pro
     ],
     dados.produto.tipologias.map((t) => [t.nome, t.areaPrivativaPadrao ? `${t.areaPrivativaPadrao} m²` : "—", t.precoUnitarioPadrao ? formatarMoeda(t.precoUnitarioPadrao) : "—", String(t.quantidadeUnidades)]),
   );
-  escreverParagrafo(doc, cursor, `Estoque: ${Object.entries(dados.produto.estoque.porStatus).map(([s, q]) => `${s} ${q}`).join("  -  ")}  -  total ${dados.produto.estoque.total}`);
+  escreverParagrafo(doc, cursor, `Estoque${dados.resumoExecutivo.unidadesProjetadas > 0 ? " do empreendimento (inclui vendas reais de todos os cenários)" : ""}: ${Object.entries(dados.produto.estoque.porStatus).map(([s, q]) => `${s} ${q}`).join("  -  ")}  -  total ${dados.produto.estoque.total}`);
 
-  if (dados.vendas.length > 0) {
+  if (opcoes.resumido) {
+    const vendasResumo = resumirVendasPorTipologia(dados.vendas);
+    if (vendasResumo.linhas.length > 0) {
+      escreverTituloSecao(doc, cursor, "Vendas — resumo por tipologia");
+      desenharTabela(
+        doc,
+        cursor,
+        [
+          { titulo: "Tipologia", largura: LARGURA_UTIL * 0.4 },
+          { titulo: "Unidades vendidas", largura: LARGURA_UTIL * 0.2, alinhar: "right" },
+          { titulo: "VGV vendido", largura: LARGURA_UTIL * 0.2, alinhar: "right" },
+          { titulo: "Ticket médio", largura: LARGURA_UTIL * 0.2, alinhar: "right" },
+        ],
+        [
+          ...vendasResumo.linhas.map((l) => [l.tipologiaNome, String(l.unidadesVendidas), formatarMoeda(l.vgvVendido), l.ticketMedio ? formatarMoeda(l.ticketMedio) : "—"]),
+          ["Total", String(vendasResumo.total.unidadesVendidas), formatarMoeda(vendasResumo.total.vgvVendido), vendasResumo.total.ticketMedio ? formatarMoeda(vendasResumo.total.ticketMedio) : "—"],
+        ],
+      );
+    }
+  } else if (dados.vendas.length > 0) {
     escreverTituloSecao(doc, cursor, "Vendas");
     desenharTabela(
       doc,
@@ -409,7 +448,43 @@ export async function gerarPdfViabilidade(dados: DadosRelatorioViabilidade): Pro
     );
   }
 
-  if (dados.recebimentos.length > 0) {
+  if (dados.premissas.vendas.projetadas > 0) {
+    const unidades = dados.resumoExecutivo.unidadesProjetadas;
+    const ticketTotal = unidades > 0 ? (Number(dados.resumoExecutivo.vgvProjetado) / unidades).toFixed(2) : null;
+    escreverTituloSecao(doc, cursor, "Vendas projetadas (premissa de velocidade)");
+    desenharTabela(
+      doc,
+      cursor,
+      [
+        { titulo: "Tipologia", largura: LARGURA_UTIL * 0.4 },
+        { titulo: "Unidades projetadas", largura: LARGURA_UTIL * 0.2, alinhar: "right" },
+        { titulo: "VGV projetado", largura: LARGURA_UTIL * 0.2, alinhar: "right" },
+        { titulo: "Ticket médio", largura: LARGURA_UTIL * 0.2, alinhar: "right" },
+      ],
+      [
+        ...dados.premissas.vendas.projetadasPorTipologia.map((l) => [l.tipologiaNome, String(l.unidades), formatarMoeda(l.vgv), l.ticketMedio ? formatarMoeda(l.ticketMedio) : "—"]),
+        ["Total", String(unidades), formatarMoeda(dados.resumoExecutivo.vgvProjetado), ticketTotal ? formatarMoeda(ticketTotal) : "—"],
+      ],
+    );
+  }
+
+  if (opcoes.resumido) {
+    const recebimentosResumo = resumirRecebimentosPorMes(dados.recebimentos, dados.cenario.horizonteProjecaoMeses);
+    escreverTituloSecao(doc, cursor, "Recebimentos Projetados — resumo mensal");
+    desenharTabela(
+      doc,
+      cursor,
+      [
+        { titulo: "Mês", largura: LARGURA_UTIL * 0.2, alinhar: "right" },
+        { titulo: "Total previsto", largura: LARGURA_UTIL * 0.4, alinhar: "right" },
+        { titulo: "Total realizado", largura: LARGURA_UTIL * 0.4, alinhar: "right" },
+      ],
+      [
+        ...recebimentosResumo.linhas.map((l) => [String(l.mes), formatarMoeda(l.totalPrevisto), formatarMoeda(l.totalRealizado)]),
+        ["Total", formatarMoeda(recebimentosResumo.total.totalPrevisto), formatarMoeda(recebimentosResumo.total.totalRealizado)],
+      ],
+    );
+  } else if (dados.recebimentos.length > 0) {
     escreverTituloSecao(doc, cursor, "Recebimentos Projetados");
     desenharTabela(
       doc,
@@ -426,20 +501,23 @@ export async function gerarPdfViabilidade(dados: DadosRelatorioViabilidade): Pro
     );
   }
 
-  if (dados.custos.length > 0) {
+  const custosOperacionais = dados.custos.filter((c) => c.papel !== "tributo");
+  const tributos = dados.custos.filter((c) => c.papel === "tributo");
+  const colunasCustos = [
+    { titulo: "Categoria", largura: LARGURA_UTIL * 0.25 },
+    { titulo: "Incidência", largura: LARGURA_UTIL * 0.2 },
+    { titulo: "Previsto", largura: LARGURA_UTIL * 0.18, alinhar: "right" as const },
+    { titulo: "Realizado", largura: LARGURA_UTIL * 0.18, alinhar: "right" as const },
+    { titulo: "Saldo", largura: LARGURA_UTIL * 0.19, alinhar: "right" as const },
+  ];
+  const linhaCusto = (c: DadosRelatorioViabilidade["custos"][number]) => [c.categoriaNome, c.tipoIncidencia, formatarMoeda(c.totalPrevisto), formatarMoeda(c.totalRealizado), formatarMoeda(c.saldoARealizar)];
+  if (custosOperacionais.length > 0) {
     escreverTituloSecao(doc, cursor, "Custos");
-    desenharTabela(
-      doc,
-      cursor,
-      [
-        { titulo: "Categoria", largura: LARGURA_UTIL * 0.25 },
-        { titulo: "Incidência", largura: LARGURA_UTIL * 0.2 },
-        { titulo: "Previsto", largura: LARGURA_UTIL * 0.18, alinhar: "right" },
-        { titulo: "Realizado", largura: LARGURA_UTIL * 0.18, alinhar: "right" },
-        { titulo: "Saldo", largura: LARGURA_UTIL * 0.19, alinhar: "right" },
-      ],
-      dados.custos.map((c) => [c.categoriaNome, c.tipoIncidencia, formatarMoeda(c.totalPrevisto), formatarMoeda(c.totalRealizado), formatarMoeda(c.saldoARealizar)]),
-    );
+    desenharTabela(doc, cursor, colunasCustos, custosOperacionais.map(linhaCusto));
+  }
+  if (tributos.length > 0) {
+    escreverTituloSecao(doc, cursor, "Tributos");
+    desenharTabela(doc, cursor, colunasCustos, tributos.map(linhaCusto));
   }
 
   if (dados.cronograma.length > 0) {
@@ -469,13 +547,14 @@ export async function gerarPdfViabilidade(dados: DadosRelatorioViabilidade): Pro
   }
 
   escreverTituloSecao(doc, cursor, "Fluxo de Caixa");
+  escreverParagrafo(doc, cursor, "* Entradas incluem a liberação do financiamento de produção (no Excel, em coluna separada 'Liberação financiamento').");
   desenharGraficoFluxo(doc, cursor, dados.fluxoCaixa);
   desenharTabela(
     doc,
     cursor,
     [
       { titulo: "Mês", largura: LARGURA_UTIL * 0.15, alinhar: "right" },
-      { titulo: "Entradas", largura: LARGURA_UTIL * 0.21, alinhar: "right" },
+      { titulo: "Entradas*", largura: LARGURA_UTIL * 0.21, alinhar: "right" },
       { titulo: "Saídas", largura: LARGURA_UTIL * 0.21, alinhar: "right" },
       { titulo: "Fluxo mensal", largura: LARGURA_UTIL * 0.21, alinhar: "right" },
       { titulo: "Saldo acumulado", largura: LARGURA_UTIL * 0.22, alinhar: "right" },
@@ -563,13 +642,19 @@ export async function gerarPdfComparativo(dados: DadosRelatorioComparativo): Pro
 
   escreverTituloSecao(doc, cursor, "Indicadores");
   const linhasIndicadores: { rotulo: string; acessor: (c: ComparacaoCenario) => string; moeda: boolean }[] = [
-    { rotulo: "VGV", acessor: (c) => c.indicadores.vgv, moeda: true },
+    { rotulo: "VGV (inclui permuta)", acessor: (c) => c.indicadores.vgv, moeda: true },
     { rotulo: "Recebimentos previstos", acessor: (c) => c.indicadores.totalRecebimentosPrevisto, moeda: true },
-    { rotulo: "Custos previstos", acessor: (c) => c.indicadores.totalCustosPrevisto, moeda: true },
+    { rotulo: "Custos previstos (inclui terreno por permuta)", acessor: (c) => c.indicadores.totalCustosPrevisto, moeda: true },
     { rotulo: "Fluxo líquido (saldo final)", acessor: (c) => c.indicadores.saldoFinal, moeda: true },
     { rotulo: "Necessidade máxima de capital", acessor: (c) => c.indicadores.necessidadeMaximaCapital, moeda: true },
     { rotulo: "Mês do pico", acessor: (c) => (c.indicadores.mesPico !== null ? `Mês ${c.indicadores.mesPico}` : "—"), moeda: false },
+    { rotulo: "Mês de recuperação", acessor: (c) => (c.indicadores.mesRecuperacao !== null ? `Mês ${c.indicadores.mesRecuperacao}` : "não recupera no horizonte"), moeda: false },
+    { rotulo: "Mês de recuperação (descontado)", acessor: (c) => (c.indicadores.mesRecuperacaoDescontado !== null ? `Mês ${c.indicadores.mesRecuperacaoDescontado}` : "não recupera no horizonte"), moeda: false },
+    { rotulo: "VGV líquido", acessor: (c) => c.indicadores.vgvLiquido, moeda: true },
     { rotulo: "VPL", acessor: (c) => c.indicadores.vpl, moeda: true },
+    { rotulo: "Taxa de desconto (a.m.)", acessor: (c) => formatarPercentualMensal(c.indicadores.taxaDescontoMensal), moeda: false },
+    { rotulo: "TIR (a.m.)", acessor: (c) => (c.indicadores.tir !== null ? formatarPercentualMensal(c.indicadores.tir) : "não aplicável"), moeda: false },
+    { rotulo: "Resultado (margem líquida)", acessor: (c) => (c.indicadores.margemLiquida !== null ? formatarPercentualUmaCasa(c.indicadores.margemLiquida) : "não aplicável"), moeda: false },
   ];
   desenharTabela(
     doc,
@@ -577,7 +662,9 @@ export async function gerarPdfComparativo(dados: DadosRelatorioComparativo): Pro
     [{ titulo: "Indicador", largura: LARGURA_UTIL * 0.3 }, ...dados.cenarios.map((c) => ({ titulo: c.nome, largura: (LARGURA_UTIL * 0.7) / dados.cenarios.length, alinhar: "right" as const }))],
     linhasIndicadores.map((l) => [l.rotulo, ...dados.cenarios.map((c) => (l.moeda ? formatarMoeda(l.acessor(c)) : l.acessor(c)))]),
   );
-  escreverParagrafo(doc, cursor, 'TIR e "Resultado" não aparecem porque o motor financeiro deste sistema não os calcula hoje.');
+  if (dados.cenarios.some((c) => precisaNotaPaybackDescontado(c.indicadores.mesRecuperacao, c.indicadores.mesRecuperacaoDescontado))) {
+    escreverParagrafo(doc, cursor, NOTA_PAYBACK_DESCONTADO_ANTES_DO_SIMPLES);
+  }
 
   escreverTituloSecao(doc, cursor, "Premissas");
   desenharTabela(
@@ -586,16 +673,18 @@ export async function gerarPdfComparativo(dados: DadosRelatorioComparativo): Pro
     [
       { titulo: "Cenário", largura: LARGURA_UTIL * 0.3 },
       { titulo: "Horizonte", largura: LARGURA_UTIL * 0.2, alinhar: "right" },
-      { titulo: "Velocidade de vendas", largura: LARGURA_UTIL * 0.25, alinhar: "right" },
+      { titulo: "Vendas (reais / projetadas)", largura: LARGURA_UTIL * 0.25, alinhar: "right" },
       { titulo: "Financiamento", largura: LARGURA_UTIL * 0.25, alinhar: "right" },
     ],
     dados.cenarios.map((c) => [
       c.nome,
       `${c.premissas.horizonteProjecaoMeses} meses`,
-      `${c.premissas.velocidadeVendas.totalUnidadesPrevistas} un.`,
+      `${c.premissas.vendas.reais} / ${c.premissas.vendas.projetadas} un.`,
       c.premissas.financiamento ? formatarMoeda(c.premissas.financiamento.valorContratado) : "sem financiamento",
     ]),
   );
+
+  for (const c of dados.cenarios) for (const aviso of c.premissas.avisos) escreverParagrafo(doc, cursor, `[AVISO] ${c.nome}: ${aviso}`);
 
   escreverTituloSecao(doc, cursor, "Fluxo de Caixa — Saldo Acumulado Comparado");
   desenharGraficoComparativo(doc, cursor, dados.cenarios);

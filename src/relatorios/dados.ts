@@ -1,11 +1,18 @@
 import { Decimal } from "decimal.js";
+import type { RecebimentoGerado } from "../core/types.js";
 import { prisma } from "../db/client.js";
 import { listarRecebimentosDoCenario, listarVendasDoCenario, resumoEstoque } from "../db/cadastro.js";
 import {
+  calcularVgvLiquido,
+  somarValorPermutas,
+  formatarTir,
+  taxaDescontoEfetiva,
   montarComparacaoCenarios,
   montarCurvaCronogramaDoCenario,
   montarCustosResumoDoCenario,
   montarPremissasResumoCenario,
+  montarVendasProjetadasDoCenario,
+  ehVendaProjetada,
   rodarMotorParaCenario,
   type ComparacaoCenario,
   type CustoResumoGerencial,
@@ -37,15 +44,24 @@ export interface DadosRelatorioViabilidade {
   };
   resumoExecutivo: {
     vgv: string;
+    vgvPermutado: string;
+    vgvLiquido: string;
     quantidadeUnidades: number;
     unidadesVendidas: number;
+    unidadesProjetadas: number;
+    vgvReal: string;
+    vgvProjetado: string;
     totalRecebimentosPrevisto: string;
     totalCustosPrevisto: string;
     saldoFinal: string;
     necessidadeMaximaCapital: string;
     mesPico: number | null;
     mesRecuperacao: number | null;
+    mesRecuperacaoDescontado: number | null;
     vpl: string;
+    taxaDescontoMensal: string;
+    tir: string | null;
+    margemLiquida: string | null;
   };
   premissas: PremissasResumoCenario;
   produto: {
@@ -88,11 +104,9 @@ export async function montarDadosRelatorioViabilidade(cenarioId: string): Promis
   // nunca em paralelo -- so as leituras puras abaixo (sem nenhum efeito
   // colateral de persistencia) podem rodar juntas com segurança.
   //
-  // taxaDescontoMensal="0.005" (0,5% a.m.) e a mesma taxa hardcoded ja
-  // usada por GET /fluxo-caixa e por montarComparacaoCenarios (Fase 2.4) --
-  // sem isso o VPL do relatorio divergiria do VPL oficial exibido no
-  // sistema, violando a fonte unica da verdade (docs/DECISOES.md, F34).
-  const resultado = await rodarMotorParaCenario(cenarioId, { taxaDescontoMensal: "0.005" });
+  // A taxa de desconto vem do proprio cenario (ver rodarMotorParaCenario), a mesma
+  // usada pelo fluxo de caixa e pela comparacao.
+  const resultado = await rodarMotorParaCenario(cenarioId);
   const custos = await montarCustosResumoDoCenario(cenarioId);
   const cronograma = await montarCurvaCronogramaDoCenario(cenarioId);
   const [premissas, vendasDb, recebimentosDb, estoque] = await Promise.all([
@@ -103,9 +117,12 @@ export async function montarDadosRelatorioViabilidade(cenarioId: string): Promis
   ]);
 
   const vendasAtivas = vendasDb.filter((v) => v.status === "ativa");
-  const vgv = vendasAtivas.reduce((acc, v) => acc.plus(v.valorVenda), new Decimal(0));
-  const totalRecebimentosPrevisto = resultado.recebimentos.reduce((acc, r) => acc.plus(r.valorPrevisto), new Decimal(0));
-  const totalCustosPrevisto = resultado.desembolsos.reduce((acc, d) => acc.plus(d.valor), new Decimal(0));
+  const vgvPermutado = await somarValorPermutas(empreendimento.id);
+  const projetadas = await montarVendasProjetadasDoCenario(cenarioId);
+  const vgvVendido = vendasAtivas.reduce((acc, v) => acc.plus(v.valorVenda), new Decimal(0)).plus(somarValoresVenda(projetadas));
+  const vgv = vgvVendido.plus(vgvPermutado);
+  const totalRecebimentosPrevisto = resultado.totalRecebimentosPrevisto;
+  const totalCustosPrevisto = resultado.desembolsos.reduce((acc, d) => acc.plus(d.valor), new Decimal(0)).plus(vgvPermutado);
 
   return {
     geradoEm: new Date().toISOString(),
@@ -130,15 +147,24 @@ export async function montarDadosRelatorioViabilidade(cenarioId: string): Promis
     },
     resumoExecutivo: {
       vgv: vgv.toFixed(2),
+      vgvPermutado: vgvPermutado.toFixed(2),
+      vgvLiquido: calcularVgvLiquido(vgv, custos, vgvPermutado).toFixed(2),
       quantidadeUnidades: estoque.total,
       unidadesVendidas: vendasAtivas.length,
+      unidadesProjetadas: projetadas.length,
+      vgvReal: vendasAtivas.reduce((acc, v) => acc.plus(v.valorVenda), new Decimal(0)).toFixed(2),
+      vgvProjetado: somarValoresVenda(projetadas).toFixed(2),
       totalRecebimentosPrevisto: totalRecebimentosPrevisto.toFixed(2),
       totalCustosPrevisto: totalCustosPrevisto.toFixed(2),
       saldoFinal: resultado.indicadores.saldoFinal.toFixed(2),
       necessidadeMaximaCapital: resultado.indicadores.necessidadeMaximaCapital.toFixed(2),
       mesPico: resultado.indicadores.mesPico,
       mesRecuperacao: resultado.indicadores.mesRecuperacao,
+      mesRecuperacaoDescontado: resultado.indicadores.mesRecuperacaoDescontado,
       vpl: resultado.indicadores.vpl.toFixed(2),
+      taxaDescontoMensal: taxaDescontoEfetiva(cenario),
+      tir: formatarTir(resultado.indicadores.tir),
+      margemLiquida: resultado.indicadores.margemLiquida?.toFixed(10) ?? null,
     },
     premissas,
     produto: {
@@ -160,14 +186,18 @@ export async function montarDadosRelatorioViabilidade(cenarioId: string): Promis
       condicaoPagamentoNome: v.condicaoPagamento.nome,
       status: v.status,
     })),
-    recebimentos: recebimentosDb.map((r) => ({
-      unidadeNumero: r.venda.unidade.numero,
-      modalidadeNome: r.modalidade.nome,
-      mesCompetencia: r.mesCompetencia,
-      valorPrevisto: new Decimal(r.valorPrevisto).toFixed(2),
-      valorRealizado: r.valorRealizado,
-      status: r.status,
-    })),
+    recebimentos: [
+      ...recebimentosDb.map((r) => ({
+        unidadeNumero: r.venda.unidade.numero,
+        modalidadeNome: r.modalidade.nome,
+        mesCompetencia: r.mesCompetencia,
+        valorPrevisto: r.valorPrevisto,
+        valorRealizado: r.valorRealizado,
+        status: r.status,
+      })),
+      ...(await recebimentosPreDistratoDetalhados(cenarioId, resultado.recebimentosPreDistrato)),
+      ...(await recebimentosProjetadosDetalhados(empreendimento.id, resultado.recebimentos)),
+    ],
     custos,
     cronograma: cronograma.map((p) => ({
       mes: p.mes,
@@ -192,6 +222,46 @@ export async function montarDadosRelatorioViabilidade(cenarioId: string): Promis
     })),
     alertas: resultado.alertas,
   };
+}
+
+/** Parcelas de vendas distratadas anteriores ao mes do distrato, com unidade e modalidade para o detalhe do relatorio. */
+function somarValoresVenda(vendas: { valorVenda: Decimal | string }[]): Decimal {
+  return vendas.reduce((acc, v) => acc.plus(v.valorVenda), new Decimal(0));
+}
+
+async function recebimentosProjetadosDetalhados(empreendimentoId: string, recebimentos: RecebimentoGerado[]): Promise<DadosRelatorioViabilidade["recebimentos"]> {
+  const projetados = recebimentos.filter((r) => ehVendaProjetada(r.vendaId));
+  if (projetados.length === 0) return [];
+  const nomesTipologia = new Map((await prisma.tipologia.findMany({ where: { empreendimentoId }, select: { id: true, nome: true } })).map((t) => [t.id, t.nome] as const));
+  const nomesModalidade = new Map(
+    (await prisma.modalidadePagamento.findMany({ where: { condicaoPagamento: { empreendimentoId } }, select: { id: true, nome: true } })).map((m) => [m.id, m.nome] as const),
+  );
+  return projetados.map((r) => ({
+    unidadeNumero: `Projetada (${nomesTipologia.get(r.vendaId.split(":")[1]!) ?? "tipologia"})`,
+    modalidadeNome: nomesModalidade.get(r.modalidadeId) ?? "",
+    mesCompetencia: r.mesCompetencia,
+    valorPrevisto: r.valorPrevisto.toFixed(10),
+    valorRealizado: null,
+    status: "previsto",
+  }));
+}
+
+async function recebimentosPreDistratoDetalhados(cenarioId: string, preDistrato: RecebimentoGerado[]): Promise<DadosRelatorioViabilidade["recebimentos"]> {
+  if (preDistrato.length === 0) return [];
+  const distratadas = await prisma.venda.findMany({
+    where: { cenarioId, status: "distratada" },
+    include: { unidade: { select: { numero: true } }, condicaoPagamento: { include: { modalidades: true } } },
+  });
+  const porVenda = new Map(distratadas.map((v) => [v.id, v]));
+  const nomeModalidade = new Map(distratadas.flatMap((v) => v.condicaoPagamento.modalidades.map((m) => [m.id, m.nome] as const)));
+  return preDistrato.map((r) => ({
+    unidadeNumero: porVenda.get(r.vendaId)?.unidade.numero ?? "",
+    modalidadeNome: nomeModalidade.get(r.modalidadeId) ?? "",
+    mesCompetencia: r.mesCompetencia,
+    valorPrevisto: r.valorPrevisto.toFixed(10),
+    valorRealizado: null,
+    status: "previsto",
+  }));
 }
 
 export interface DadosRelatorioComparativo {
