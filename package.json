@@ -15,6 +15,8 @@
     "import:testeB": "tsx src/import/importadorTesteB.ts",
     "import:testeC": "tsx src/import/importadorTesteC.ts",
     "seed:admin": "tsx src/import/seedAdmin.ts",
+    "seed:aguas-claras": "tsx src/import/seedAguasClaras.ts",
+    "verificar:aguas-claras": "tsx src/import/seedAguasClaras.ts --limpar",
     "typecheck": "tsc --noEmit"
   },
   "license": "UNLICENSED",
