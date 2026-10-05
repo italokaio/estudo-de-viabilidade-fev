@@ -256,7 +256,7 @@ describe("API — visão gerencial de custos (Fase 2.2)", () => {
     await app.inject({ method: "PATCH", url: `/api/custos/${custoId}`, payload: { percentual: "0.08" } });
     const desembolsos = await prisma.desembolsoCusto.findMany({ where: { custoId } });
     expect(desembolsos.length).toBe(1);
-    expect(desembolsos[0].valorPrevisto).toBe("96000"); // 8% de 1.200.000
+    expect(desembolsos[0]!.valorPrevisto).toBe("96000"); // 8% de 1.200.000
 
     // este sistema nunca persiste um MovimentoCaixa -- o fluxo de caixa e
     // sempre recalculado, nunca uma segunda fonte de verdade (achado F1).
