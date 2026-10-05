@@ -1,6 +1,9 @@
+import { PermissoesProvider, PermitidoEditar, PermitidoExcluir, nivelDoCenario } from "../permissoes";
 import { useEffect, useMemo, useState } from "react";
+import { useCenarioAtivo } from "../useCenarioAtivo";
 import {
   criarCronograma,
+  substituirCronograma,
   excluirCronograma,
   fetchCenarioDetalhe,
   fetchCronogramaCurva,
@@ -47,7 +50,7 @@ export function CronogramaPage() {
       .then((emps) => {
         setEmpreendimentos(emps);
         const primeiro = emps[0]?.cenarios[0]?.id ?? null;
-        setCenarioId(primeiro);
+        setCenarioId((atual) => atual ?? primeiro);
         if (!primeiro) setCarregando(false);
       })
       .catch((e) => {
@@ -56,17 +59,25 @@ export function CronogramaPage() {
       });
   }, []);
 
+  const ehCenarioAtual = useCenarioAtivo(cenarioId);
+
   function recarregar() {
     if (!cenarioId) return;
+    const alvo = cenarioId;
     setCarregando(true);
     Promise.all([fetchCronogramaCurva(cenarioId), fetchCenarioDetalhe(cenarioId)])
       .then(([curva, det]) => {
+        if (!ehCenarioAtual(alvo)) return;
         setPontos(curva.pontos);
         setCronogramaBruto(det.cronograma);
         setErro(null);
       })
-      .catch((e) => setErro(String(e.message ?? e)))
-      .finally(() => setCarregando(false));
+      .catch((e) => {
+        if (ehCenarioAtual(alvo)) setErro(String(e.message ?? e));
+      })
+      .finally(() => {
+        if (ehCenarioAtual(alvo)) setCarregando(false);
+      });
   }
 
   useEffect(() => {
@@ -86,8 +97,8 @@ export function CronogramaPage() {
     pontos.length > 0 ? pontos.reduce((maior, p) => (parseFloat(p.desembolsoMensal) > parseFloat(maior.desembolsoMensal) ? p : maior), pontos[0]!).mes : null;
   const valorTotalObra = pontos.length > 0 ? pontos[pontos.length - 1]!.desembolsoAcumulado : "0";
 
-  return (
-    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
+  return <PermissoesProvider nivel={nivelDoCenario(empreendimentos, cenarioId)}>(
+    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 12, color: "var(--ink-muted)", fontWeight: 600 }}>
@@ -160,7 +171,7 @@ export function CronogramaPage() {
         )}
       </div>
     </div>
-  );
+  )</PermissoesProvider>;
 }
 
 /**
@@ -226,11 +237,9 @@ function CronogramaFormSecao({
     e.preventDefault();
     setSalvando(true);
     try {
-      if (cronograma.length > 0) await excluirCronograma(cenarioId);
-      await criarCronograma(
-        cenarioId,
-        pontosForm.map((p) => ({ mes: Number(p.mes), percentualExecucaoMensal: p.percentualExecucaoMensal })),
-      );
+      const pontos = pontosForm.map((p) => ({ mes: Number(p.mes), percentualExecucaoMensal: p.percentualExecucaoMensal }));
+      if (cronograma.length > 0) await substituirCronograma(cenarioId, pontos);
+      else await criarCronograma(cenarioId, pontos);
       setEditando(false);
       onAtualizado();
     } catch (e: any) {
@@ -246,10 +255,10 @@ function CronogramaFormSecao({
         <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-primary)" }}>Cadastro do cronograma</div>
         {cronograma.length > 0 && !editando && (
           <div style={{ display: "flex", gap: 8 }}>
-            <Button variant="secondary" onClick={editar} style={{ padding: "4px 8px", fontSize: 11 }}>
+            <Button requer="editar" variant="secondary" onClick={editar} style={{ padding: "4px 8px", fontSize: 11 }}>
               Editar
             </Button>
-            <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+            <Button requer="excluir" variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
               {excluindo ? "Excluindo…" : "Excluir cronograma"}
             </Button>
           </div>
@@ -278,20 +287,20 @@ function CronogramaFormSecao({
                 />
               </div>
               {pontosForm.length > 1 && (
-                <Button type="button" variant="secondary" onClick={() => removerLinha(i)} style={{ padding: "8px 10px", fontSize: 12 }}>
+                <Button requer="editar" type="button" variant="secondary" onClick={() => removerLinha(i)} style={{ padding: "8px 10px", fontSize: 12 }}>
                   Remover
                 </Button>
               )}
             </div>
           ))}
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <Button type="button" variant="secondary" onClick={adicionarLinha} style={{ padding: "6px 10px", fontSize: 12 }}>
+            <Button requer="editar" type="button" variant="secondary" onClick={adicionarLinha} style={{ padding: "6px 10px", fontSize: 12 }}>
               + Mês
             </Button>
             <span style={{ fontSize: 12, fontWeight: 600, color: somaFecha ? "var(--status-good-text)" : "var(--status-warning-text)" }}>
               Soma: {(soma * 100).toFixed(1)}% {somaFecha ? "" : "(precisa fechar em 100%)"}
             </span>
-            <Button type="submit" disabled={salvando || !somaFecha}>
+            <Button requer="editar" type="submit" disabled={salvando || !somaFecha}>
               {salvando ? "Salvando…" : "Salvar cronograma"}
             </Button>
             {editando && (

@@ -1,3 +1,5 @@
+import type { NivelAcessoEmpreendimento } from "../permissoes";
+import type { ImpactoExclusao } from "../impactoExclusao";
 /**
  * Nome do evento global disparado quando qualquer chamada à API devolve
  * 401 fora do fluxo de login/verificação inicial (achado F14,
@@ -16,8 +18,10 @@ export const EVENTO_SESSAO_EXPIRADA = "sessao-expirada";
  * ainda") e /api/auth/login (credenciais erradas, já tratado inline pela
  * LoginPage).
  */
+const BASE_API = import.meta.env.VITE_API_URL ?? "";
+
 async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(url, init);
+  const res = await fetch(`${BASE_API}${url}`, { credentials: "include", ...init });
   if (res.status === 401 && url !== "/api/auth/me" && url !== "/api/auth/login") {
     window.dispatchEvent(new Event(EVENTO_SESSAO_EXPIRADA));
   }
@@ -27,6 +31,7 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
 export interface EmpreendimentoResumo {
   id: string;
   nome: string;
+  nivelAcesso: NivelAcessoEmpreendimento;
   cenarios: { id: string; nome: string; tipo: string; horizonteProjecaoMeses: number }[];
 }
 
@@ -94,8 +99,9 @@ export interface PontoSensibilidade {
   mesPico: number | null;
 }
 
-export async function fetchSensibilidade(cenarioId: string, eixo: EixoSensibilidade): Promise<PontoSensibilidade[]> {
-  const res = await apiFetch(`/api/cenarios/${cenarioId}/sensibilidade?eixo=${eixo}`);
+export async function fetchSensibilidade(cenarioId: string, eixo: EixoSensibilidade, variacoes?: string[]): Promise<PontoSensibilidade[]> {
+  const query = variacoes ? `&variacoes=${variacoes.map(encodeURIComponent).join(",")}` : "";
+  const res = await apiFetch(`/api/cenarios/${cenarioId}/sensibilidade?eixo=${eixo}${query}`);
   if (!res.ok) throw new Error(`Falha ao calcular sensibilidade (${res.status})`);
   return res.json();
 }
@@ -141,17 +147,25 @@ export interface PremissasResumoCenario {
   }[];
   cronograma: { quantidadeMeses: number; mesInicio: number | null; mesFim: number | null } | null;
   financiamento: { valorContratado: string; taxaJurosMensal: string; tipoAmortizacao: string; mesAmortizacao: number } | null;
+  vendas: { reais: number; projetadas: number };
+  avisos: string[];
 }
 
 export interface IndicadoresComparacaoCenario {
   vgv: string;
+  vgvPermutado: string;
+  vgvLiquido: string;
   totalRecebimentosPrevisto: string;
   totalCustosPrevisto: string;
   saldoFinal: string;
   necessidadeMaximaCapital: string;
   mesPico: number | null;
   mesRecuperacao: number | null;
+  mesRecuperacaoDescontado: number | null;
   vpl: string;
+  taxaDescontoMensal: string;
+  tir: string | null;
+  margemLiquida: string | null;
 }
 
 export interface PontoFluxoComparacao {
@@ -186,6 +200,7 @@ export interface ModalidadeInput {
   tipoDistribuicao: TipoDistribuicao;
   periodicidadeMeses?: number;
   mesFixo?: number;
+  mesFinal?: number;
 }
 
 export interface CondicaoPagamentoResumo {
@@ -197,6 +212,7 @@ export interface CondicaoPagamentoResumo {
     tipoDistribuicao: TipoDistribuicao;
     periodicidadeMeses: number | null;
     mesFixo: number | null;
+    mesFinal: number | null;
     repeticoesSobreTotal: number;
     geraEventoParcial: boolean;
   }[];
@@ -227,10 +243,13 @@ export type TipoIncidenciaCusto =
   | "pct_recebido_no_mes"
   | "faixas_vgv_acumulado";
 
+export type PapelCategoriaCusto = "custo" | "comissao_corretagem" | "tributo";
+
 export interface CategoriaCustoResumo {
   id: string;
   nome: string;
   tipoIncidencia: TipoIncidenciaCusto;
+  papel: PapelCategoriaCusto;
 }
 
 export type StatusValidacaoArea = "pendente" | "validado" | "conflitante";
@@ -249,6 +268,7 @@ export interface TerrenoResumo {
 export interface EmpreendimentoDetalhe {
   id: string;
   nome: string;
+  nivelAcesso: NivelAcessoEmpreendimento;
   incorporador: string | null;
   endereco: string | null;
   terrenos: TerrenoResumo[];
@@ -303,11 +323,13 @@ export interface CenarioDetalhe {
   tipo: string;
   horizonteProjecaoMeses: number;
   limiteNecessidadeMaximaCapital: string | null;
+  taxaDescontoMensal: string | null;
   dataMesUm: string | null;
   empreendimento: { id: string; nome: string };
   tipologiasDisponiveis: { id: string; nome: string }[];
   categoriasCustoDisponiveis: CategoriaCustoResumo[];
   premissasVelocidade: { id: string; tipologiaId: string; tipologiaNome: string; mes: number; unidadesPrevistas: string }[];
+  avisos: string[];
   custos: CustoResumo[];
   cronograma: { mes: number; percentualExecucaoMensal: string }[];
   indicesCorrecao: { grupo: string; mes: number; percentual: string }[];
@@ -393,18 +415,30 @@ export async function fetchCenarioDetalhe(id: string): Promise<CenarioDetalhe> {
   return res.json();
 }
 
+export function atualizarPrecoUnidade(id: string, input: { precoVenda: string }) {
+  return patchJson<{ id: string; precoVenda: string | null }>(`/api/unidades/${id}`, input);
+}
+
+export function atualizarPremissaVelocidade(cenarioId: string, premissaId: string, input: { unidadesPrevistas: string }) {
+  return patchJson<{ id: string; avisos: string[] }>(`/api/cenarios/${cenarioId}/premissas-velocidade/${premissaId}`, input);
+}
+
+export function excluirPremissaVelocidade(cenarioId: string, premissaId: string) {
+  return del(`/api/cenarios/${cenarioId}/premissas-velocidade/${premissaId}`);
+}
+
 export function criarPremissasVelocidade(
   cenarioId: string,
   itens: { tipologiaId: string; mes: number; unidadesPrevistas: string }[],
 ) {
-  return postJson<{ criadas: number }>(`/api/cenarios/${cenarioId}/premissas-velocidade`, { itens });
+  return postJson<{ criadas: number; avisos: string[] }>(`/api/cenarios/${cenarioId}/premissas-velocidade`, { itens });
 }
 
 export function gerarVendas(cenarioId: string) {
   return postJson<{ totalVendasCriadas: number }>(`/api/cenarios/${cenarioId}/gerar-vendas`, {});
 }
 
-export function criarCategoriaCusto(empreendimentoId: string, input: { nome: string; tipoIncidencia: TipoIncidenciaCusto }) {
+export function criarCategoriaCusto(empreendimentoId: string, input: { nome: string; tipoIncidencia: TipoIncidenciaCusto; papel?: PapelCategoriaCusto }) {
   return postJson<CategoriaCustoResumo>(`/api/empreendimentos/${empreendimentoId}/categorias-custo`, input);
 }
 
@@ -593,7 +627,7 @@ export interface DistribuicaoMensalCusto {
   tipoIncidencia: TipoIncidenciaCusto;
   recorrencia: string;
   granular: boolean;
-  meses: { mes: number; valorPrevisto: string }[];
+  meses: { mes: number; valorPrevisto: string; semBase: boolean }[];
   realizadoPorMes: { mes: number; valorRealizado: string | null; status: string; desembolsoId: string }[];
 }
 
@@ -674,7 +708,7 @@ export function excluirTipologia(id: string) {
 
 export function atualizarCenario(
   id: string,
-  input: { nome?: string; horizonteProjecaoMeses?: number; limiteNecessidadeMaximaCapital?: string | null; dataMesUm?: string | null },
+  input: { nome?: string; horizonteProjecaoMeses?: number; limiteNecessidadeMaximaCapital?: string | null; dataMesUm?: string | null; taxaDescontoMensal?: string | null },
 ) {
   return patchJson<CenarioResumo>(`/api/cenarios/${id}`, input);
 }
@@ -768,7 +802,7 @@ export function excluirContrapartePermuta(id: string) {
   return del(`/api/contrapartes-permuta/${id}`);
 }
 
-export function registrarDistrato(vendaId: string, input: { percentualRetencao?: string; motivo?: string }) {
+export function registrarDistrato(vendaId: string, input: { mesDistrato: number; percentualRetencao?: string; motivo?: string }) {
   return postJson<DistratoResumo>(`/api/vendas/${vendaId}/distrato`, input);
 }
 
@@ -788,7 +822,7 @@ export function excluirCondicaoPagamento(id: string) {
   return del(`/api/condicoes-pagamento/${id}`);
 }
 
-export function atualizarCategoriaCusto(id: string, input: { nome?: string; tipoIncidencia?: TipoIncidenciaCusto }) {
+export function atualizarCategoriaCusto(id: string, input: { nome?: string; tipoIncidencia?: TipoIncidenciaCusto; papel?: PapelCategoriaCusto }) {
   return patchJson<CategoriaCustoResumo>(`/api/categorias-custo/${id}`, input);
 }
 
@@ -835,6 +869,32 @@ export function atualizarFaixaComissao(id: string, input: { volumeAte?: string |
 
 export function excluirFaixaComissao(id: string) {
   return del(`/api/faixas-comissao/${id}`);
+}
+
+export function substituirCronograma(cenarioId: string, pontos: { mes: number; percentualExecucaoMensal: string }[]) {
+  return patchJson<{ pontos: number }>(`/api/cenarios/${cenarioId}/cronograma`, { pontos });
+}
+
+export async function fetchImpactoExclusaoCenario(id: string): Promise<ImpactoExclusao> {
+  const res = await apiFetch(`/api/cenarios/${id}/impacto-exclusao`);
+  if (!res.ok) throw new Error(`Falha ao consultar a exclusão do cenário (${res.status})`);
+  return res.json();
+}
+
+export async function fetchImpactoExclusaoEmpreendimento(id: string): Promise<ImpactoExclusao> {
+  const res = await apiFetch(`/api/empreendimentos/${id}/impacto-exclusao`);
+  if (!res.ok) throw new Error(`Falha ao consultar a exclusão do empreendimento (${res.status})`);
+  return res.json();
+}
+
+export async function fetchImpactoExclusaoVenda(id: string): Promise<{ premissaPassaraValer: boolean }> {
+  const res = await apiFetch(`/api/vendas/${id}/impacto-exclusao`);
+  if (!res.ok) throw new Error(`Falha ao consultar a exclusão da venda (${res.status})`);
+  return res.json();
+}
+
+export function excluirVenda(id: string) {
+  return del(`/api/vendas/${id}`);
 }
 
 export function excluirCronograma(cenarioId: string) {
@@ -905,6 +965,10 @@ export async function fetchUsuarios(): Promise<UsuarioResumo[]> {
   return res.json();
 }
 
+export function atualizarUsuario(id: string, input: { nome?: string; papel?: Papel }) {
+  return patchJson<{ id: string; nome: string; papel: Papel }>(`/api/usuarios/${id}`, input);
+}
+
 export function criarUsuario(input: { email: string; nome: string; senha: string; papel?: Papel }) {
   return postJson<UsuarioResumo>("/api/usuarios", input);
 }
@@ -968,8 +1032,10 @@ async function baixarRelatorio(url: string, nomeArquivoPadrao: string): Promise<
 
 export type FormatoRelatorio = "pdf" | "xlsx";
 
-export function baixarRelatorioViabilidade(cenarioId: string, formato: FormatoRelatorio): Promise<void> {
-  return baixarRelatorio(`/api/cenarios/${cenarioId}/relatorios/viabilidade.${formato}`, `relatorio-viabilidade.${formato}`);
+export function baixarRelatorioViabilidade(cenarioId: string, formato: FormatoRelatorio, resumido = false): Promise<void> {
+  const nomeBase = resumido ? "relatorio-viabilidade-resumido" : "relatorio-viabilidade";
+  const sufixo = resumido ? "-resumido" : "";
+  return baixarRelatorio(`/api/cenarios/${cenarioId}/relatorios/viabilidade${sufixo}.${formato}`, `${nomeBase}.${formato}`);
 }
 
 export function baixarRelatorioComparativo(empreendimentoId: string, cenarioIds: string[], formato: FormatoRelatorio): Promise<void> {

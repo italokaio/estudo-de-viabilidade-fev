@@ -1,6 +1,10 @@
+import { PermissoesProvider, PermitidoEditar, PermitidoExcluir, nivelDoCenario } from "../permissoes";
 import { useEffect, useMemo, useState } from "react";
+import { useCenarioAtivo } from "../useCenarioAtivo";
 import {
   atualizarVenda,
+  excluirVenda,
+  fetchImpactoExclusaoVenda,
   criarVenda,
   desfazerDistrato,
   fetchEmpreendimentoDetalhe,
@@ -65,7 +69,7 @@ export function VendasPage() {
       .then((emps) => {
         setEmpreendimentos(emps);
         const primeiro = emps[0]?.cenarios[0]?.id ?? null;
-        setCenarioId(primeiro);
+        setCenarioId((atual) => atual ?? primeiro);
         if (!primeiro) setCarregando(false);
       })
       .catch((e) => {
@@ -74,8 +78,11 @@ export function VendasPage() {
       });
   }, []);
 
+  const ehCenarioAtual = useCenarioAtivo(cenarioId);
+
   function recarregar() {
     if (!cenarioId || !empreendimentoId) return;
+    const alvo = cenarioId;
     setCarregando(true);
     Promise.all([
       fetchVendasDoCenario(cenarioId),
@@ -84,14 +91,19 @@ export function VendasPage() {
       fetchEmpreendimentoDetalhe(empreendimentoId),
     ])
       .then(([v, r, e, det]) => {
+        if (!ehCenarioAtual(alvo)) return;
         setVendas(v);
         setRecebimentos(r);
         setEstoque(e);
         setTipologias(det.tipologias);
         setErro(null);
       })
-      .catch((e) => setErro(String(e.message ?? e)))
-      .finally(() => setCarregando(false));
+      .catch((e) => {
+        if (ehCenarioAtual(alvo)) setErro(String(e.message ?? e));
+      })
+      .finally(() => {
+        if (ehCenarioAtual(alvo)) setCarregando(false);
+      });
   }
 
   useEffect(() => {
@@ -111,8 +123,8 @@ export function VendasPage() {
     recarregar();
   }, [cenarioId]);
 
-  return (
-    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
+  return <PermissoesProvider nivel={nivelDoCenario(empreendimentos, cenarioId)}>(
+    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 12, color: "var(--ink-muted)", fontWeight: 600 }}>
@@ -190,7 +202,7 @@ export function VendasPage() {
         )}
       </div>
     </div>
-  );
+  )</PermissoesProvider>;
 }
 
 function FormularioRegistrarVenda({
@@ -324,7 +336,7 @@ function FormularioRegistrarVenda({
         <div style={{ width: 90 }}>
           <TextField label="Mês" type="number" min={1} max={horizonteMeses} value={mesOrigem} onChange={(e) => setMesOrigem(e.target.value)} required />
         </div>
-        <Button type="submit" disabled={salvando || !unidadeId || !condicaoPagamentoId}>
+        <Button requer="editar" type="submit" disabled={salvando || !unidadeId || !condicaoPagamentoId}>
           {salvando ? "Salvando…" : "Registrar venda"}
         </Button>
       </form>
@@ -370,8 +382,33 @@ function LinhaVenda({
 
   async function distratar() {
     if (!window.confirm(`Distratar a venda da unidade ${venda.unidade.numero}?`)) return;
+    const mes = Number(window.prompt("Em qual mês do cenário o distrato acontece? (número inteiro, a partir de 1)", "1"));
+    if (!Number.isInteger(mes) || mes < 1) {
+      onErro("Informe um mês inteiro, a partir de 1.");
+      return;
+    }
     try {
-      await registrarDistrato(venda.id, {});
+      await registrarDistrato(venda.id, { mesDistrato: mes });
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    }
+  }
+
+  async function excluirVendaLancada() {
+    let avisoProjecao = "";
+    try {
+      const impacto = await fetchImpactoExclusaoVenda(venda.id);
+      if (impacto.premissaPassaraValer) {
+        avisoProjecao = " A premissa de velocidade passará a valer para esta tipologia e o VGV do cenário deve mudar.";
+      }
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+      return;
+    }
+    if (!window.confirm(`Excluir a venda da unidade ${venda.unidade.numero}? A unidade volta ao estoque e os recebimentos previstos desta venda serão removidos.${avisoProjecao}`)) return;
+    try {
+      await excluirVenda(venda.id);
       onAtualizado();
     } catch (e: any) {
       onErro(String(e.message ?? e));
@@ -429,21 +466,29 @@ function LinhaVenda({
           </Button>{" "}
           {!distratada && (
             <>
-              <Button variant="secondary" onClick={() => setEditando((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
+              <Button requer="editar" variant="secondary" onClick={() => setEditando((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
                 Editar
               </Button>{" "}
-              <Button variant="secondary" onClick={() => setMostrarRenegociar((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
+              <Button requer="editar" variant="secondary" onClick={() => setMostrarRenegociar((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
                 Renegociar
               </Button>{" "}
-              <Button variant="secondary" onClick={distratar} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+              <Button requer="editar" variant="secondary" onClick={distratar} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
                 Distratar
               </Button>
             </>
           )}
           {distratada && (
-            <Button variant="secondary" onClick={desfazer} style={{ padding: "3px 8px", fontSize: 11 }}>
+            <Button requer="excluir" variant="secondary" onClick={desfazer} style={{ padding: "3px 8px", fontSize: 11 }}>
               Desfazer distrato
             </Button>
+          )}
+          {!distratada && (
+            <>
+              {" "}
+              <Button requer="excluir" variant="secondary" onClick={excluirVendaLancada} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+                Excluir
+              </Button>
+            </>
           )}
         </td>
       </tr>
@@ -457,7 +502,7 @@ function LinhaVenda({
               <div style={{ width: 140 }}>
                 <TextField label="Valor" value={valorVenda} onChange={(e) => setValorVenda(e.target.value)} required />
               </div>
-              <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
+              <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
                 {salvando ? "Salvando…" : "Salvar"}
               </Button>
               <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
@@ -477,7 +522,7 @@ function LinhaVenda({
               <div style={{ width: 220 }}>
                 <TextField label="Motivo (opcional)" value={motivoRenegociacao} onChange={(e) => setMotivoRenegociacao(e.target.value)} />
               </div>
-              <Button type="submit" style={{ padding: "6px 10px", fontSize: 12 }}>
+              <Button requer="editar" type="submit" style={{ padding: "6px 10px", fontSize: 12 }}>
                 Confirmar renegociação
               </Button>
               <Button type="button" variant="secondary" onClick={() => setMostrarRenegociar(false)} style={{ padding: "6px 10px", fontSize: 12 }}>

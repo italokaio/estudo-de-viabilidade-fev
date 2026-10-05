@@ -30,8 +30,8 @@ vi.mock("../api/client.js", async () => {
 });
 
 const empreendimentos: client.EmpreendimentoResumo[] = [
-  { id: "emp1", nome: "Recanto das Aroeiras", cenarios: [{ id: "cen1", nome: "Cenário Principal", tipo: "base", horizonteProjecaoMeses: 12 }] },
-  { id: "emp2", nome: "Torres Alto Padrão", cenarios: [{ id: "cen2", nome: "Cenário Torres", tipo: "base", horizonteProjecaoMeses: 10 }] },
+  { id: "emp1", nome: "Recanto das Aroeiras", nivelAcesso: "admin", cenarios: [{ id: "cen1", nome: "Cenário Principal", tipo: "base", horizonteProjecaoMeses: 12 }] },
+  { id: "emp2", nome: "Torres Alto Padrão", nivelAcesso: "admin", cenarios: [{ id: "cen2", nome: "Cenário Torres", tipo: "base", horizonteProjecaoMeses: 10 }] },
 ];
 
 function cenarioResumo(overrides: Partial<client.CenarioResumo> = {}): client.CenarioResumo {
@@ -63,13 +63,19 @@ function comparacaoCenario(overrides: Partial<client.ComparacaoCenario> = {}): c
     derivadoDeNome: null,
     indicadores: {
       vgv: "1000000.00",
+      vgvPermutado: "0.00",
+      vgvLiquido: "1000000.00",
       totalRecebimentosPrevisto: "1000000.00",
       totalCustosPrevisto: "50000.00",
       saldoFinal: "950000.00",
       necessidadeMaximaCapital: "0.00",
       mesPico: null,
       mesRecuperacao: 1,
+      mesRecuperacaoDescontado: 1,
       vpl: "940000.00",
+      taxaDescontoMensal: "0.005",
+      tir: null,
+      margemLiquida: "0.95",
     },
     fluxoMensal: [{ mes: 1, entradas: "1000000.00", saidas: "50000.00", fluxoMensal: "950000.00", fluxoAcumulado: "950000.00" }],
     premissas: {
@@ -79,6 +85,8 @@ function comparacaoCenario(overrides: Partial<client.ComparacaoCenario> = {}): c
       custos: [{ categoriaId: "cat1", categoriaNome: "Comissão", tipoIncidencia: "pct_vgv_vendido_no_mes", tipologiaNome: null, valorPrevisto: null, percentual: "0.05" }],
       cronograma: null,
       financiamento: null,
+      vendas: { reais: 0, projetadas: 5 },
+      avisos: [],
     },
     ...overrides,
   };
@@ -122,10 +130,10 @@ describe("CenariosPage", () => {
     fireEvent.click(botaoComparar);
 
     await waitFor(() => expect(client.fetchComparacaoCenariosMultiplos).toHaveBeenCalledWith("emp1", expect.arrayContaining(["cen1", "cen1b"])));
-    expect(await screen.findByText("VGV")).toBeInTheDocument();
+    expect(await screen.findByText("VGV (inclui permuta)")).toBeInTheDocument();
     expect(screen.getAllByText("R$ 1.000.000,00").length).toBeGreaterThan(0);
     expect(screen.getByText("R$ 20.000,00")).toBeInTheDocument();
-    expect(screen.getByText(/TIR e "Resultado" não aparecem/)).toBeInTheDocument();
+    expect(screen.getByText(/Resultado \(margem líquida\) = saldo final/)).toBeInTheDocument();
   });
 
   it("mostra o erro do backend quando a comparação falha", async () => {

@@ -26,11 +26,9 @@ export function LoginPage({ onEntrar, avisoSessaoExpirada }: { onEntrar: (usuari
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "var(--bg)" }}>
       <div style={{ width: 340, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "28px 26px", boxShadow: "var(--shadow-md)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 22 }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <path d="M4 18L10 9L14 14L20 5" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span style={{ fontWeight: 800, fontSize: 16, color: "var(--ink-primary)" }}>Viabilidade</span>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 22 }}>
+          <img src="/brand/firmus-viabilidade-light.png" alt="Firmus Viabilidade" className="brand-logo-light" style={{ height: 44, width: "auto" }} />
+          <img src="/brand/firmus-viabilidade-dark.png" alt="Firmus Viabilidade" className="brand-logo-dark" style={{ height: 44, width: "auto" }} />
         </div>
 
         {avisoSessaoExpirada && (

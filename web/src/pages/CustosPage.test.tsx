@@ -31,8 +31,8 @@ vi.mock("../api/client.js", async () => {
 });
 
 const empreendimentos: client.EmpreendimentoResumo[] = [
-  { id: "emp1", nome: "Recanto das Aroeiras", cenarios: [{ id: "cen1", nome: "Base", tipo: "base", horizonteProjecaoMeses: 12 }] },
-  { id: "emp2", nome: "Torres Alto Padrão", cenarios: [{ id: "cen2", nome: "Base", tipo: "base", horizonteProjecaoMeses: 10 }] },
+  { id: "emp1", nome: "Recanto das Aroeiras", nivelAcesso: "admin", cenarios: [{ id: "cen1", nome: "Base", tipo: "base", horizonteProjecaoMeses: 12 }] },
+  { id: "emp2", nome: "Torres Alto Padrão", nivelAcesso: "admin", cenarios: [{ id: "cen2", nome: "Base", tipo: "base", horizonteProjecaoMeses: 10 }] },
 ];
 
 function custoMock(overrides: Partial<client.CustoResumoGerencial> = {}): client.CustoResumoGerencial {

@@ -1,6 +1,6 @@
 import type { Usuario } from "../api/client.js";
 
-export type Pagina = "fluxo" | "cadastro" | "vendas" | "custos" | "cronograma" | "cenarios" | "relatorios" | "usuarios";
+export type Pagina = "fluxo" | "cadastro" | "vendas" | "custos" | "cronograma" | "cenarios" | "sensibilidade" | "conciliacao" | "relatorios" | "usuarios";
 
 const navIcon = {
   fluxo: "M3 17l5-5 4 4 8-8",
@@ -71,11 +71,9 @@ export function Sidebar({
         height: "100%",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 8px 22px" }}>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-          <path d="M4 18L10 9L14 14L20 5" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <span style={{ fontWeight: 800, fontSize: 14, color: "var(--ink-primary)" }}>Viabilidade</span>
+      <div style={{ display: "flex", alignItems: "center", padding: "4px 8px 22px" }}>
+        <img src="/brand/viabilidade-mark-light.png" alt="Viabilidade" className="brand-logo-light" style={{ height: 30, width: "auto" }} />
+        <img src="/brand/viabilidade-mark-dark.png" alt="Viabilidade" className="brand-logo-dark" style={{ height: 30, width: "auto" }} />
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
@@ -108,6 +106,16 @@ export function Sidebar({
         <NavItem label="Cenários" active={pagina === "cenarios"} onClick={() => onNavegar("cenarios")}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d={navIcon.cenarios} strokeLinecap="round" />
+          </svg>
+        </NavItem>
+        <NavItem label="Sensibilidade" active={pagina === "sensibilidade"} onClick={() => onNavegar("sensibilidade")}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M4 19V5M4 19h16M7 15l4-4 3 3 5-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </NavItem>
+        <NavItem label="Conciliação" active={pagina === "conciliacao"} onClick={() => onNavegar("conciliacao")}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M7 4h7l4 4v12H7zM14 4v4h4M10 13l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </NavItem>
         <NavItem label="Relatórios" active={pagina === "relatorios"} onClick={() => onNavegar("relatorios")}>

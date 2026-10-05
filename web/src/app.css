@@ -21,3 +21,26 @@ button {
 .fluxo-row:hover td {
   background: var(--surface-2);
 }
+
+/* Marca — troca automática conforme o tema, mesma convenção de design/tokens.css */
+.brand-logo-dark {
+  display: none;
+}
+.brand-logo-light {
+  display: block;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .brand-logo-light {
+    display: none;
+  }
+  :root:not([data-theme="light"]) .brand-logo-dark {
+    display: block;
+  }
+}
+:root[data-theme="dark"] .brand-logo-light {
+  display: none;
+}
+:root[data-theme="dark"] .brand-logo-dark {
+  display: block;
+}

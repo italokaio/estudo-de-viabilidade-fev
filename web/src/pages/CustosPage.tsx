@@ -1,4 +1,6 @@
+import { PermissoesProvider, PermitidoEditar, PermitidoExcluir, nivelDoCenario } from "../permissoes";
 import { useEffect, useMemo, useState } from "react";
+import { useCenarioAtivo } from "../useCenarioAtivo";
 import {
   atualizarCusto,
   criarCusto,
@@ -82,7 +84,7 @@ export function CustosPage() {
       .then((emps) => {
         setEmpreendimentos(emps);
         const primeiro = emps[0]?.cenarios[0]?.id ?? null;
-        setCenarioId(primeiro);
+        setCenarioId((atual) => atual ?? primeiro);
         if (!primeiro) setCarregando(false);
       })
       .catch((e) => {
@@ -91,19 +93,27 @@ export function CustosPage() {
       });
   }, []);
 
+  const ehCenarioAtual = useCenarioAtivo(cenarioId);
+
   function recarregar() {
     if (!cenarioId) return;
+    const alvo = cenarioId;
     setCarregando(true);
     Promise.all([fetchCustosResumo(cenarioId), fetchCenarioDetalhe(cenarioId)])
       .then(([r, det]) => {
+        if (!ehCenarioAtual(alvo)) return;
         setResumo(r);
         setCategoriasDisponiveis(det.categoriasCustoDisponiveis);
         setTipologiasDisponiveis(det.tipologiasDisponiveis);
         setGruposIndiceCorrecao(Array.from(new Set(["padrao", ...det.indicesCorrecao.map((i) => i.grupo)])));
         setErro(null);
       })
-      .catch((e) => setErro(String(e.message ?? e)))
-      .finally(() => setCarregando(false));
+      .catch((e) => {
+        if (ehCenarioAtual(alvo)) setErro(String(e.message ?? e));
+      })
+      .finally(() => {
+        if (ehCenarioAtual(alvo)) setCarregando(false);
+      });
   }
 
   useEffect(() => {
@@ -155,8 +165,8 @@ export function CustosPage() {
       }))
     : [{ categoriaId: "__todos__", categoriaNome: "", itens: ordenados }];
 
-  return (
-    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
+  return <PermissoesProvider nivel={nivelDoCenario(empreendimentos, cenarioId)}>(
+    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 12, color: "var(--ink-muted)", fontWeight: 600 }}>
@@ -277,7 +287,7 @@ export function CustosPage() {
         )}
       </div>
     </div>
-  );
+  )</PermissoesProvider>;
 }
 
 function FormularioNovoCusto({
@@ -398,7 +408,7 @@ function FormularioNovoCusto({
             ))}
           </datalist>
         </div>
-        <Button type="submit" disabled={salvando}>
+        <Button requer="editar" type="submit" disabled={salvando}>
           {salvando ? "Salvando…" : "Lançar custo"}
         </Button>
       </form>
@@ -468,14 +478,14 @@ function LinhaCustoGerencial({
             Distribuição
           </Button>{" "}
           {ehFixo && (
-            <Button variant="secondary" onClick={() => setMarcandoRealizado((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
+            <Button requer="editar" variant="secondary" onClick={() => setMarcandoRealizado((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
               {custo.status === "realizado" ? "Realizado ✓" : "Marcar realizado"}
             </Button>
           )}{" "}
-          <Button variant="secondary" onClick={() => setEditando((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
+          <Button requer="editar" variant="secondary" onClick={() => setEditando((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
             Editar
           </Button>{" "}
-          <Button variant="secondary" onClick={excluir} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+          <Button requer="excluir" variant="secondary" onClick={excluir} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
             Excluir
           </Button>
         </td>
@@ -546,6 +556,7 @@ function LinhaCustoGerencial({
                           key={m.mes}
                           mes={m.mes}
                           valorPrevisto={m.valorPrevisto}
+                          semBase={m.semBase}
                           granular={distribuicao.granular}
                           item={item ?? null}
                           onAtualizado={() => {
@@ -570,6 +581,7 @@ function LinhaCustoGerencial({
 function LinhaMesDistribuicao({
   mes,
   valorPrevisto,
+  semBase,
   granular,
   item,
   onAtualizado,
@@ -577,6 +589,7 @@ function LinhaMesDistribuicao({
 }: {
   mes: number;
   valorPrevisto: string;
+  semBase: boolean;
   granular: boolean;
   item: { mes: number; valorRealizado: string | null; status: string; desembolsoId: string } | null;
   onAtualizado: () => void;
@@ -608,7 +621,10 @@ function LinhaMesDistribuicao({
   }
 
   async function estornar() {
-    if (!window.confirm("Estornar este desembolso? Ele volta a ficar como previsto.")) return;
+    const pergunta = semBase
+      ? "Estornar este desembolso? Ele não tem mais base de cálculo, então a linha será removida."
+      : "Estornar este desembolso? Ele volta a ficar como previsto.";
+    if (!window.confirm(pergunta)) return;
     try {
       await estornarDesembolsoCustoRealizado(item!.desembolsoId);
       onAtualizado();
@@ -620,14 +636,17 @@ function LinhaMesDistribuicao({
   return (
     <tr>
       <td>{mes}</td>
-      <td style={{ textAlign: "right" }}>{formatBRL(valorPrevisto)}</td>
+      <td style={{ textAlign: "right" }}>
+        {formatBRL(valorPrevisto)}
+        {semBase && <div style={{ fontSize: 10.5, color: "var(--ink-muted)" }}>sem base — previsto removido</div>}
+      </td>
       <td style={{ textAlign: "right" }}>
         {editando ? (
           <form onSubmit={registrar} style={{ display: "flex", gap: 5, justifyContent: "flex-end", alignItems: "center" }}>
             <div style={{ width: 100 }}>
               <TextField label="" value={valor} onChange={(e) => setValor(e.target.value)} required />
             </div>
-            <Button type="submit" style={{ padding: "3px 7px", fontSize: 10.5 }}>
+            <Button requer="editar" type="submit" style={{ padding: "3px 7px", fontSize: 10.5 }}>
               OK
             </Button>
           </form>
@@ -639,12 +658,12 @@ function LinhaMesDistribuicao({
       </td>
       <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
         {!editando && jaPago && (
-          <Button variant="secondary" onClick={estornar} style={{ padding: "3px 7px", fontSize: 10.5, color: "var(--status-critical-text)" }}>
+          <Button requer="editar" variant="secondary" onClick={estornar} style={{ padding: "3px 7px", fontSize: 10.5, color: "var(--status-critical-text)" }}>
             Estornar
           </Button>
         )}
         {!editando && !jaPago && (
-          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 7px", fontSize: 10.5 }}>
+          <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 7px", fontSize: 10.5 }}>
             Marcar pago
           </Button>
         )}
@@ -686,11 +705,11 @@ function MarcarRealizadoFixo({ custo, onSalvo, onErro }: { custo: CustoResumoGer
       <div style={{ width: 140 }}>
         <TextField label="Valor realizado" value={valor} onChange={(e) => setValor(e.target.value)} required />
       </div>
-      <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
+      <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
         {salvando ? "Salvando…" : "Confirmar"}
       </Button>
       {jaPago && (
-        <Button type="button" variant="secondary" onClick={estornar} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+        <Button requer="editar" type="button" variant="secondary" onClick={estornar} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
           Estornar
         </Button>
       )}
@@ -773,7 +792,7 @@ function EditarCustoForm({
           </label>
         </>
       )}
-      <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
+      <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
         {salvando ? "Salvando…" : "Salvar"}
       </Button>
       <Button type="button" variant="secondary" onClick={onCancelar} style={{ padding: "6px 10px", fontSize: 12 }}>

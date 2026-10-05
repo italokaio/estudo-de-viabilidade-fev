@@ -21,7 +21,7 @@ vi.mock("../api/client.js", async () => {
 });
 
 const empreendimentos: client.EmpreendimentoResumo[] = [
-  { id: "emp1", nome: "Recanto das Aroeiras", cenarios: [{ id: "cen1", nome: "Base", tipo: "base", horizonteProjecaoMeses: 12 }] },
+  { id: "emp1", nome: "Recanto das Aroeiras", nivelAcesso: "admin", cenarios: [{ id: "cen1", nome: "Base", tipo: "base", horizonteProjecaoMeses: 12 }] },
 ];
 
 function detalhe(): any {
@@ -60,7 +60,7 @@ describe("RelatoriosPage", () => {
     // teste rodando juntos), o encadeamento de dois efeitos assincronos
     // (fetchEmpreendimentos -> fetchEmpreendimentoDetalhe) pode passar de
     // 1s por contencao de CPU, mesmo cada chamada sendo mockada e rapida.
-    await waitFor(() => expect(client.baixarRelatorioViabilidade).toHaveBeenCalledWith("cen1", "pdf"), { timeout: 5000 });
+    await waitFor(() => expect(client.baixarRelatorioViabilidade).toHaveBeenCalledWith("cen1", "pdf", false), { timeout: 5000 });
   });
 
   it("gera relatório comparativo em Excel para os cenários marcados", async () => {

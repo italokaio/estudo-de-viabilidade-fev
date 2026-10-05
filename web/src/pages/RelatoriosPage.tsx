@@ -21,7 +21,7 @@ const inputSelectStyle: React.CSSProperties = {
   padding: "8px 10px",
 };
 
-type TipoRelatorio = "viabilidade" | "comparativo";
+type TipoRelatorio = "viabilidade" | "viabilidade-resumido" | "comparativo";
 
 /**
  * Fase 2.5 — módulo de Relatórios: seleção de empreendimento/cenário(s)/
@@ -88,12 +88,12 @@ export function RelatoriosPage() {
     setErro(null);
     setGerando(true);
     try {
-      if (tipo === "viabilidade") {
-        if (!cenarioId) return;
-        await baixarRelatorioViabilidade(cenarioId, formato);
-      } else {
+      if (tipo === "comparativo") {
         if (!empreendimentoId || cenariosSelecionados.size === 0) return;
         await baixarRelatorioComparativo(empreendimentoId, [...cenariosSelecionados], formato);
+      } else {
+        if (!cenarioId) return;
+        await baixarRelatorioViabilidade(cenarioId, formato, tipo === "viabilidade-resumido");
       }
     } catch (e: any) {
       setErro(String(e.message ?? e));
@@ -102,7 +102,7 @@ export function RelatoriosPage() {
     }
   }
 
-  const podeGerar = tipo === "viabilidade" ? Boolean(cenarioId) : cenariosSelecionados.size > 0;
+  const podeGerar = tipo === "comparativo" ? cenariosSelecionados.size > 0 : Boolean(cenarioId);
 
   return (
     <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
@@ -136,13 +136,14 @@ export function RelatoriosPage() {
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "22px 24px", boxShadow: "var(--shadow-sm)", display: "flex", flexDirection: "column", gap: 18, maxWidth: 640 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)", marginBottom: 8 }}>Tipo de relatório</div>
-          <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <OpcaoTipo rotulo="Viabilidade" descricao="Um cenário — capa, premissas, produto, vendas, recebimentos, custos, cronograma, fluxo de caixa e necessidade de capital." selecionado={tipo === "viabilidade"} onClick={() => setTipo("viabilidade")} />
+            <OpcaoTipo rotulo="Viabilidade Resumido" descricao="Um cenário, versão enxuta para apresentações rápidas: vendas e recebimentos resumidos por tipologia e por mês." selecionado={tipo === "viabilidade-resumido"} onClick={() => setTipo("viabilidade-resumido")} />
             <OpcaoTipo rotulo="Comparativo de Cenários" descricao="Vários cenários do mesmo empreendimento — indicadores, premissas, fluxo de caixa e necessidade de capital lado a lado." selecionado={tipo === "comparativo"} onClick={() => setTipo("comparativo")} />
           </div>
         </div>
 
-        {detalhe && tipo === "viabilidade" && (
+        {detalhe && tipo !== "comparativo" && (
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Cenário</span>
             <select value={cenarioId} onChange={(e) => setCenarioId(e.target.value)} style={inputSelectStyle}>

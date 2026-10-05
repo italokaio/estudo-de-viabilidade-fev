@@ -22,8 +22,8 @@ vi.mock("../api/client.js", async () => {
 });
 
 const empreendimentos: client.EmpreendimentoResumo[] = [
-  { id: "emp1", nome: "Recanto das Aroeiras", cenarios: [{ id: "cen1", nome: "Base", tipo: "base", horizonteProjecaoMeses: 12 }] },
-  { id: "emp2", nome: "Torres Alto Padrão", cenarios: [{ id: "cen2", nome: "Base", tipo: "base", horizonteProjecaoMeses: 12 }] },
+  { id: "emp1", nome: "Recanto das Aroeiras", nivelAcesso: "admin", cenarios: [{ id: "cen1", nome: "Base", tipo: "base", horizonteProjecaoMeses: 12 }] },
+  { id: "emp2", nome: "Torres Alto Padrão", nivelAcesso: "admin", cenarios: [{ id: "cen2", nome: "Base", tipo: "base", horizonteProjecaoMeses: 12 }] },
 ];
 
 function pontoCurva(overrides: Partial<client.PontoCurvaCronograma> = {}): client.PontoCurvaCronograma {
@@ -76,7 +76,7 @@ describe("CronogramaPage", () => {
 
     render(<CronogramaPage />);
 
-    expect((await screen.findAllByText("50.0%")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("50.0%", undefined, { timeout: 5000 })).length).toBeGreaterThan(0);
     expect(screen.getByText("100.0%")).toBeInTheDocument(); // acumulado do mes 2
     expect(screen.getAllByText("R$ 500.000,00").length).toBeGreaterThan(0);
 

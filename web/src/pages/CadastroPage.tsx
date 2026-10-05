@@ -1,3 +1,5 @@
+import { PermissoesProvider, PermitidoEditar, PermitidoExcluir, nivelDoEmpreendimento } from "../permissoes";
+import { textoImpactoExclusao } from "../impactoExclusao";
 import { useEffect, useState } from "react";
 import {
   atualizarCategoriaCusto,
@@ -12,11 +14,15 @@ import {
   criarCondicaoPagamento,
   criarContrapartePermuta,
   criarCronograma,
+  substituirCronograma,
   criarCusto,
   criarDestinatarioComissao,
   criarFaixaComissao,
   criarEmpreendimento,
+  atualizarPrecoUnidade,
+  atualizarPremissaVelocidade,
   criarPremissasVelocidade,
+  excluirPremissaVelocidade,
   criarTerreno,
   criarTipologia,
   atualizarPermuta,
@@ -31,6 +37,8 @@ import {
   excluirCategoriaCusto,
   duplicarCenario,
   excluirCenario,
+  fetchImpactoExclusaoCenario,
+  fetchImpactoExclusaoEmpreendimento,
   excluirCondicaoPagamento,
   excluirContrapartePermuta,
   excluirCronograma,
@@ -58,9 +66,12 @@ import {
   type StatusValidacaoArea,
   type TipoAmortizacao,
   type TipoDistribuicao,
+  type PapelCategoriaCusto,
   type TipoIncidenciaCusto,
   type TipoIncrementoAndar,
   type UnidadeResumo,
+  atualizarContrapartePermuta,
+  atualizarFaixaComissao,
 } from "../api/client.js";
 import { Button } from "../components/Button.js";
 import { TextField } from "../components/TextField.js";
@@ -111,8 +122,8 @@ export function CadastroPage() {
     setSelecionadoId(emps[0]?.id ?? null);
   }
 
-  return (
-    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
+  return <PermissoesProvider nivel={nivelDoEmpreendimento(empreendimentos, selecionadoId)}>(
+    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 12, color: "var(--ink-muted)", fontWeight: 600 }}>Empreendimento · Tipologia · Unidade</div>
@@ -148,7 +159,7 @@ export function CadastroPage() {
         )}
       </div>
     </div>
-  );
+  )</PermissoesProvider>;
 }
 
 function Painel({ titulo, children }: { titulo: string; children: React.ReactNode }) {
@@ -236,7 +247,7 @@ function ListaEmpreendimentos({
           <TextField label="Nome" value={nome} onChange={(e) => setNome(e.target.value)} required />
           <TextField label="Incorporador" value={incorporador} onChange={(e) => setIncorporador(e.target.value)} />
           <TextField label="Endereço" value={endereco} onChange={(e) => setEndereco(e.target.value)} />
-          <Button type="submit" disabled={salvando || !nome.trim()}>
+          <Button requer="criarEmpreendimento" type="submit" disabled={salvando || !nome.trim()}>
             {salvando ? "Salvando…" : "Criar empreendimento"}
           </Button>
         </form>
@@ -296,7 +307,7 @@ function DetalheEmpreendimento({
             <div style={{ fontSize: 13, color: "var(--ink-muted)" }}>Nenhum cenário cadastrado ainda.</div>
           )}
           {detalhe.cenarios.map((c) => (
-            <CartaoCenario key={c.id} cenarioResumo={c} onAtualizado={onAtualizado} onErro={onErro} />
+            <CartaoCenario key={c.id} empreendimentoId={detalhe.id} cenarioResumo={c} onAtualizado={onAtualizado} onErro={onErro} />
           ))}
         </div>
 
@@ -484,7 +495,7 @@ function LinhaTerreno({
           areaObservacao={areaObservacao}
           setAreaObservacao={setAreaObservacao}
         />
-        <Button type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+        <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
           {salvando ? "Salvando…" : "Salvar"}
         </Button>
         <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "8px 12px", fontSize: 12.5 }}>
@@ -512,10 +523,10 @@ function LinhaTerreno({
         {terreno.areaObservacao && <div style={{ fontSize: 12, color: "var(--ink-muted)", marginTop: 4 }}>{terreno.areaObservacao}</div>}
       </div>
       <div style={{ display: "flex", gap: 6, flex: "none" }}>
-        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+        <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
           Editar
         </Button>
-        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+        <Button requer="excluir" variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
           {excluindo ? "…" : "Excluir"}
         </Button>
       </div>
@@ -580,7 +591,7 @@ function NovoTerrenoForm({
         areaObservacao={areaObservacao}
         setAreaObservacao={setAreaObservacao}
       />
-      <Button type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+      <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
         {salvando ? "Salvando…" : "Adicionar matrícula"}
       </Button>
     </form>
@@ -620,7 +631,14 @@ function EmpreendimentoHeader({
   }
 
   async function excluir() {
-    if (!window.confirm(`Excluir "${detalhe.nome}" e tudo cadastrado nele (tipologias, unidades, cenários, vendas)? Esta ação não pode ser desfeita.`)) return;
+    let impacto;
+    try {
+      impacto = await fetchImpactoExclusaoEmpreendimento(detalhe.id);
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+      return;
+    }
+    if (!window.confirm(`Excluir "${detalhe.nome}" e tudo cadastrado nele (tipologias, unidades, cenários, vendas)? ${textoImpactoExclusao(impacto)} Esta ação não pode ser desfeita.`)) return;
     setExcluindo(true);
     try {
       await onExcluido();
@@ -638,7 +656,7 @@ function EmpreendimentoHeader({
           <TextField label="Incorporador" value={incorporador} onChange={(e) => setIncorporador(e.target.value)} />
           <TextField label="Endereço" value={endereco} onChange={(e) => setEndereco(e.target.value)} />
           <div style={{ display: "flex", gap: 8 }}>
-            <Button type="submit" disabled={salvando || !nome.trim()}>
+            <Button requer="editar" type="submit" disabled={salvando || !nome.trim()}>
               {salvando ? "Salvando…" : "Salvar"}
             </Button>
             <Button type="button" variant="secondary" onClick={() => setEditando(false)}>
@@ -655,10 +673,10 @@ function EmpreendimentoHeader({
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-primary)", marginBottom: 12 }}>{detalhe.nome}</div>
         <div style={{ display: "flex", gap: 8 }}>
-          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+          <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
             Editar
           </Button>
-          <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+          <Button requer="excluir" variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
             {excluindo ? "Excluindo…" : "Excluir"}
           </Button>
         </div>
@@ -721,7 +739,7 @@ function NovoCenarioForm({
       <div style={{ width: 130 }}>
         <TextField label="Horizonte (meses)" type="number" min={1} value={horizonteProjecaoMeses} onChange={(e) => setHorizonteProjecaoMeses(e.target.value)} placeholder="40" required />
       </div>
-      <Button type="submit" disabled={salvando || !nome.trim()}>
+      <Button requer="editar" type="submit" disabled={salvando || !nome.trim()}>
         {salvando ? "Salvando…" : "Adicionar"}
       </Button>
     </form>
@@ -729,10 +747,12 @@ function NovoCenarioForm({
 }
 
 function CartaoCenario({
+  empreendimentoId,
   cenarioResumo,
   onAtualizado,
   onErro,
 }: {
+  empreendimentoId: string;
   cenarioResumo: EmpreendimentoDetalhe["cenarios"][number];
   onAtualizado: () => void;
   onErro: (msg: string) => void;
@@ -743,6 +763,9 @@ function CartaoCenario({
   const [mes, setMes] = useState("");
   const [unidadesPrevistas, setUnidadesPrevistas] = useState("");
   const [salvandoPremissa, setSalvandoPremissa] = useState(false);
+  const [premissaEditandoId, setPremissaEditandoId] = useState<string | null>(null);
+  const [unidadesEdicaoPremissa, setUnidadesEdicaoPremissa] = useState("");
+  const [salvandoEdicaoPremissa, setSalvandoEdicaoPremissa] = useState(false);
   const [gerando, setGerando] = useState(false);
   const [resultadoGeracao, setResultadoGeracao] = useState<string | null>(null);
   const [editando, setEditando] = useState(false);
@@ -783,7 +806,14 @@ function CartaoCenario({
   }
 
   async function excluir() {
-    if (!window.confirm(`Excluir o cenário "${cenarioResumo.nome}"? As vendas geradas neste cenário serão apagadas e as unidades voltam para o estoque.`)) return;
+    let impacto;
+    try {
+      impacto = await fetchImpactoExclusaoCenario(cenarioResumo.id);
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+      return;
+    }
+    if (!window.confirm(`Excluir o cenário "${cenarioResumo.nome}"? As vendas geradas neste cenário serão apagadas e as unidades voltam para o estoque. ${textoImpactoExclusao(impacto)} Esta ação não pode ser desfeita.`)) return;
     setExcluindo(true);
     try {
       await excluirCenario(cenarioResumo.id);
@@ -806,6 +836,29 @@ function CartaoCenario({
   useEffect(() => {
     if (expandido && !detalhe) recarregar();
   }, [expandido]);
+
+  async function salvarEdicaoPremissa(premissaId: string) {
+    setSalvandoEdicaoPremissa(true);
+    try {
+      await atualizarPremissaVelocidade(cenarioResumo.id, premissaId, { unidadesPrevistas: unidadesEdicaoPremissa });
+      setPremissaEditandoId(null);
+      recarregar();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvandoEdicaoPremissa(false);
+    }
+  }
+
+  async function excluirPremissa(p: { id: string; tipologiaNome: string; mes: number; unidadesPrevistas: string }) {
+    if (!window.confirm(`Excluir a premissa de ${p.unidadesPrevistas} unidade(s) de ${p.tipologiaNome} no mês ${p.mes}?`)) return;
+    try {
+      await excluirPremissaVelocidade(cenarioResumo.id, p.id);
+      recarregar();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    }
+  }
 
   async function adicionarPremissa(e: React.FormEvent) {
     e.preventDefault();
@@ -847,7 +900,7 @@ function CartaoCenario({
           <div style={{ width: 130 }}>
             <TextField label="Horizonte (meses)" type="number" min={1} value={horizonteEdicao} onChange={(e) => setHorizonteEdicao(e.target.value)} required />
           </div>
-          <Button type="submit" disabled={salvandoEdicao || !nomeEdicao.trim()}>
+          <Button requer="editar" type="submit" disabled={salvandoEdicao || !nomeEdicao.trim()}>
             {salvandoEdicao ? "Salvando…" : "Salvar"}
           </Button>
           <Button type="button" variant="secondary" onClick={() => setEditando(false)}>
@@ -868,7 +921,7 @@ function CartaoCenario({
           <div style={{ flex: 1, minWidth: 140 }}>
             <TextField label="Nome do novo cenário" value={nomeDuplicacao} onChange={(e) => setNomeDuplicacao(e.target.value)} required />
           </div>
-          <Button type="submit" disabled={salvandoDuplicacao || !nomeDuplicacao.trim()}>
+          <Button requer="editar" type="submit" disabled={salvandoDuplicacao || !nomeDuplicacao.trim()}>
             {salvandoDuplicacao ? "Duplicando…" : "Confirmar"}
           </Button>
           <Button type="button" variant="secondary" onClick={() => setDuplicando(false)}>
@@ -910,13 +963,13 @@ function CartaoCenario({
           <Button variant="secondary" onClick={() => setExpandido((v) => !v)} style={{ padding: "6px 10px", fontSize: 12 }}>
             {expandido ? "Fechar" : "Detalhes do cenário"}
           </Button>
-          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+          <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
             Editar
           </Button>
-          <Button variant="secondary" onClick={() => setDuplicando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+          <Button requer="editar" variant="secondary" onClick={() => setDuplicando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
             Duplicar
           </Button>
-          <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+          <Button requer="excluir" variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
             {excluindo ? "Excluindo…" : "Excluir"}
           </Button>
         </div>
@@ -939,6 +992,7 @@ function CartaoCenario({
                         <th style={{ fontWeight: 600, paddingBottom: 4 }}>Tipologia</th>
                         <th style={{ fontWeight: 600, paddingBottom: 4 }}>Mês</th>
                         <th style={{ fontWeight: 600, paddingBottom: 4 }}>Unidades</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody style={{ font: "var(--text-mono-body)" }}>
@@ -946,7 +1000,46 @@ function CartaoCenario({
                         <tr key={p.id}>
                           <td style={{ padding: "2px 0" }}>{p.tipologiaNome}</td>
                           <td>{p.mes}</td>
-                          <td>{p.unidadesPrevistas}</td>
+                          <td>
+                            {premissaEditandoId === p.id ? (
+                              <input
+                                value={unidadesEdicaoPremissa}
+                                onChange={(e) => setUnidadesEdicaoPremissa(e.target.value)}
+                                inputMode="decimal"
+                                style={{ width: 80, font: "inherit", padding: "2px 6px", border: "1px solid var(--border)", borderRadius: 6 }}
+                              />
+                            ) : (
+                              p.unidadesPrevistas
+                            )}
+                          </td>
+                          <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                            {premissaEditandoId === p.id ? (
+                              <>
+                                <Button requer="editar" onClick={() => salvarEdicaoPremissa(p.id)} disabled={salvandoEdicaoPremissa} style={{ padding: "3px 8px", fontSize: 11 }}>
+                                  {salvandoEdicaoPremissa ? "Salvando…" : "Salvar"}
+                                </Button>{" "}
+                                <Button variant="secondary" onClick={() => setPremissaEditandoId(null)} style={{ padding: "3px 8px", fontSize: 11 }}>
+                                  Cancelar
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button requer="editar"
+                                  variant="secondary"
+                                  onClick={() => {
+                                    setPremissaEditandoId(p.id);
+                                    setUnidadesEdicaoPremissa(p.unidadesPrevistas);
+                                  }}
+                                  style={{ padding: "3px 8px", fontSize: 11 }}
+                                >
+                                  Editar
+                                </Button>{" "}
+                                <Button requer="excluir" variant="secondary" onClick={() => excluirPremissa(p)} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+                                  Excluir
+                                </Button>
+                              </>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -974,13 +1067,18 @@ function CartaoCenario({
                   <div style={{ width: 100 }}>
                     <TextField label="Unidades" type="number" min={1} value={unidadesPrevistas} onChange={(e) => setUnidadesPrevistas(e.target.value)} required />
                   </div>
-                  <Button type="submit" disabled={salvandoPremissa}>
+                  <Button requer="editar" type="submit" disabled={salvandoPremissa}>
                     {salvandoPremissa ? "Salvando…" : "Adicionar"}
                   </Button>
                 </form>
+                {detalhe.avisos.map((aviso) => (
+                  <div key={aviso} style={{ fontSize: 12, color: "var(--status-warning-text)" }}>
+                    Aviso: {aviso}
+                  </div>
+                ))}
 
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <Button onClick={executarGeracaoVendas} disabled={gerando || detalhe.premissasVelocidade.length === 0}>
+                  <Button requer="editar" onClick={executarGeracaoVendas} disabled={gerando || detalhe.premissasVelocidade.length === 0}>
                     {gerando ? "Gerando…" : "Gerar vendas"}
                   </Button>
                   {resultadoGeracao && (
@@ -1022,6 +1120,13 @@ function CartaoCenario({
               onAtualizado={recarregar}
               onErro={onErro}
             />
+            <div style={{ height: 12 }} />
+            <TaxaDescontoSecao
+              cenarioId={cenarioResumo.id}
+              taxaDescontoMensal={detalhe.taxaDescontoMensal}
+              onAtualizado={recarregar}
+              onErro={onErro}
+            />
           </div>
 
           <div style={{ paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
@@ -1029,6 +1134,7 @@ function CartaoCenario({
               Custos
             </div>
             <CustosSecao
+              empreendimentoId={empreendimentoId}
               cenarioId={cenarioResumo.id}
               custos={detalhe.custos}
               categoriasDisponiveis={detalhe.categoriasCustoDisponiveis}
@@ -1103,11 +1209,9 @@ function CronogramaSecao({
     try {
       // editar um cronograma existente e excluir + recriar (regra R6: soma=100%
       // precisa valer sempre, sem uma tela de diffing ponto a ponto).
-      if (cronograma.length > 0) await excluirCronograma(cenarioId);
-      await criarCronograma(
-        cenarioId,
-        pontos.map((p) => ({ mes: Number(p.mes), percentualExecucaoMensal: p.percentualExecucaoMensal })),
-      );
+      const pontosEnvio = pontos.map((p) => ({ mes: Number(p.mes), percentualExecucaoMensal: p.percentualExecucaoMensal }));
+      if (cronograma.length > 0) await substituirCronograma(cenarioId, pontosEnvio);
+      else await criarCronograma(cenarioId, pontosEnvio);
       setEditando(false);
       onAtualizado();
     } catch (e: any) {
@@ -1137,10 +1241,10 @@ function CronogramaSecao({
           </tbody>
         </table>
         <div style={{ display: "flex", gap: 8 }}>
-          <Button variant="secondary" onClick={editar} style={{ padding: "4px 8px", fontSize: 11 }}>
+          <Button requer="editar" variant="secondary" onClick={editar} style={{ padding: "4px 8px", fontSize: 11 }}>
             Editar
           </Button>
-          <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+          <Button requer="excluir" variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
             {excluindo ? "Excluindo…" : "Excluir cronograma"}
           </Button>
         </div>
@@ -1165,20 +1269,20 @@ function CronogramaSecao({
             />
           </div>
           {pontos.length > 1 && (
-            <Button type="button" variant="secondary" onClick={() => removerLinha(i)} style={{ padding: "8px 10px", fontSize: 12 }}>
+            <Button requer="editar" type="button" variant="secondary" onClick={() => removerLinha(i)} style={{ padding: "8px 10px", fontSize: 12 }}>
               Remover
             </Button>
           )}
         </div>
       ))}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <Button type="button" variant="secondary" onClick={adicionarLinha} style={{ padding: "6px 10px", fontSize: 12 }}>
+        <Button requer="editar" type="button" variant="secondary" onClick={adicionarLinha} style={{ padding: "6px 10px", fontSize: 12 }}>
           + Mês
         </Button>
         <span style={{ fontSize: 12, fontWeight: 600, color: somaFecha ? "var(--status-good-text)" : "var(--status-warning-text)" }}>
           Soma: {(soma * 100).toFixed(1)}% {somaFecha ? "" : "(precisa fechar em 100%)"}
         </span>
-        <Button type="submit" disabled={salvando || !somaFecha}>
+        <Button requer="editar" type="submit" disabled={salvando || !somaFecha}>
           {salvando ? "Salvando…" : "Salvar cronograma"}
         </Button>
         {editando && (
@@ -1268,7 +1372,7 @@ function IndiceCorrecaoSecao({
                     <td style={{ padding: "2px 0" }}>{p.mes}</td>
                     <td>{(Number(p.percentual) * 100).toFixed(2)}%</td>
                     <td style={{ textAlign: "right" }}>
-                      <button
+                      <PermitidoExcluir><button
                         type="button"
                         onClick={() => remover(g, p.mes)}
                         disabled={excluindo === `${g}|${p.mes}`}
@@ -1276,7 +1380,7 @@ function IndiceCorrecaoSecao({
                         style={{ border: "none", background: "transparent", color: "var(--status-critical-text)", cursor: "pointer", fontSize: 13, padding: 0 }}
                       >
                         ×
-                      </button>
+                      </button></PermitidoExcluir>
                     </td>
                   </tr>
                 ))}
@@ -1303,7 +1407,7 @@ function IndiceCorrecaoSecao({
         <div style={{ width: 150 }}>
           <TextField label="Variação (0–1)" value={percentual} onChange={(e) => setPercentual(e.target.value)} placeholder="0.005 = 0,5%" required />
         </div>
-        <Button type="submit" disabled={salvando}>
+        <Button requer="editar" type="submit" disabled={salvando}>
           {salvando ? "Salvando…" : "Definir"}
         </Button>
       </form>
@@ -1403,7 +1507,7 @@ function FinanciamentoSecao({
             <TextField label="Nº de parcelas" type="number" min={1} value={numeroParcelas} onChange={(e) => setNumeroParcelas(e.target.value)} required />
           </div>
         )}
-        <Button type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+        <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
           {salvando ? "Salvando…" : "Salvar"}
         </Button>
         {financiamento && (
@@ -1424,10 +1528,10 @@ function FinanciamentoSecao({
           : `${financiamento.tipoAmortizacao === "sac" ? "SAC" : "Price"}, ${financiamento.numeroParcelas} parcelas a partir do mês ${financiamento.mesAmortizacao}`}
       </div>
       <div style={{ display: "flex", gap: 6 }}>
-        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+        <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
           Editar
         </Button>
-        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+        <Button requer="excluir" variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
           {excluindo ? "Excluindo…" : "Excluir"}
         </Button>
       </div>
@@ -1489,7 +1593,7 @@ function AlertasConfigSecao({
         <div style={{ width: 200 }}>
           <TextField label="Limite (0–1, ex.: 0.3 = 30%)" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0.3" />
         </div>
-        <Button type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+        <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
           {salvando ? "Salvando…" : "Salvar"}
         </Button>
         <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "8px 12px", fontSize: 12.5 }}>
@@ -1509,11 +1613,82 @@ function AlertasConfigSecao({
         do VGV dispara alerta crítico.
       </div>
       <div style={{ display: "flex", gap: 6 }}>
-        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+        <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
           Editar
         </Button>
         {limiteNecessidadeMaximaCapital && (
-          <Button variant="secondary" onClick={restaurarPadrao} disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
+          <Button requer="editar" variant="secondary" onClick={restaurarPadrao} disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
+            Restaurar padrão
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Taxa de desconto mensal (TMA) do VPL deste cenario. Nulo = padrao do sistema
+ * (0,5% a.m.). Usada por fluxo de caixa, comparacao, sensibilidade e relatorios.
+ */
+function TaxaDescontoSecao({
+  cenarioId,
+  taxaDescontoMensal,
+  onAtualizado,
+  onErro,
+}: {
+  cenarioId: string;
+  taxaDescontoMensal: string | null;
+  onAtualizado: () => void;
+  onErro: (msg: string) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [valor, setValor] = useState(taxaDescontoMensal ?? "");
+  const [salvando, setSalvando] = useState(false);
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      await atualizarCenario(cenarioId, { taxaDescontoMensal: valor.trim() || null });
+      setEditando(false);
+      onAtualizado();
+    } catch (err: any) {
+      onErro(String(err.message ?? err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  if (editando) {
+    return (
+      <form onSubmit={salvar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div style={{ width: 240 }}>
+          <TextField label="Taxa de desconto mensal (0–1, ex.: 0.008 = 0,8%)" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0.005" />
+        </div>
+        <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+          {salvando ? "Salvando…" : "Salvar"}
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "8px 12px", fontSize: 12.5 }}>
+          Cancelar
+        </Button>
+      </form>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ fontSize: 13, color: "var(--ink-secondary)" }}>
+        Taxa de desconto (TMA) do VPL:{" "}
+        <strong style={{ color: "var(--ink-primary)" }}>
+          {taxaDescontoMensal ? `${(Number(taxaDescontoMensal) * 100).toFixed(2)}% a.m.` : "0,50% a.m. (padrão)"}
+        </strong>
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+          Editar
+        </Button>
+        {taxaDescontoMensal && (
+          <Button requer="editar" variant="secondary" onClick={() => atualizarCenario(cenarioId, { taxaDescontoMensal: null }).then(onAtualizado).catch((err: any) => onErro(String(err.message ?? err)))} style={{ padding: "6px 10px", fontSize: 12 }}>
             Restaurar padrão
           </Button>
         )}
@@ -1523,6 +1698,7 @@ function AlertasConfigSecao({
 }
 
 function CustosSecao({
+  empreendimentoId,
   cenarioId,
   custos,
   categoriasDisponiveis,
@@ -1531,6 +1707,7 @@ function CustosSecao({
   onAtualizado,
   onErro,
 }: {
+  empreendimentoId: string;
   cenarioId: string;
   custos: CenarioDetalhe["custos"];
   categoriasDisponiveis: CategoriaCustoResumo[];
@@ -1564,6 +1741,25 @@ function CustosSecao({
     categoriaSelecionada?.tipoIncidencia === "pct_recebido_no_mes" ||
     usaFaixas;
 
+  async function adicionarRet() {
+    setSalvando(true);
+    try {
+      let categoria = categoriasDisponiveis.find((c) => c.nome === NOME_CATEGORIA_RET && c.papel === "tributo");
+      if (custos.some((c) => c.categoriaNome === NOME_CATEGORIA_RET)) {
+        throw new Error("A RET já está cadastrada neste cenário. Edite a alíquota na linha dela.");
+      }
+      if (!categoria) {
+        categoria = await criarCategoriaCusto(empreendimentoId, { nome: NOME_CATEGORIA_RET, tipoIncidencia: "pct_recebido_no_mes", papel: "tributo" });
+      }
+      await criarCusto(cenarioId, { categoriaId: categoria.id, percentual: "0.04", grupoIndiceCorrecao: "padrao" });
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   async function submeter(e: React.FormEvent) {
     e.preventDefault();
     if (!categoriaId) return;
@@ -1592,6 +1788,12 @@ function CustosSecao({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12.5, color: "var(--ink-secondary)" }}>
+        <span>RET — Regime Especial de Tributação: 4% sobre o recebido no mês, cadastrado como tributo (aparece em "Tributos" nos relatórios).</span>
+        <Button requer="editar" type="button" variant="secondary" onClick={adicionarRet} disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
+          Adicionar RET (4%)
+        </Button>
+      </div>
       {custos.length > 0 && (
         <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
           <thead>
@@ -1688,7 +1890,7 @@ function CustosSecao({
             ))}
           </datalist>
         </div>
-        <Button type="submit" disabled={salvando}>
+        <Button requer="editar" type="submit" disabled={salvando}>
           {salvando ? "Salvando…" : "Adicionar"}
         </Button>
         {usaFaixas && (
@@ -1746,6 +1948,23 @@ function LinhaCusto({
       onErro(String(e.message ?? e));
     } finally {
       setSalvandoFaixa(false);
+    }
+  }
+
+  const [faixaEdicao, setFaixaEdicao] = useState<{ id: string; volumeAte: string; percentual: string } | null>(null);
+
+  async function salvarFaixa(e: React.FormEvent) {
+    e.preventDefault();
+    if (!faixaEdicao) return;
+    try {
+      await atualizarFaixaComissao(faixaEdicao.id, {
+        volumeAte: faixaEdicao.volumeAte.trim() === "" ? null : faixaEdicao.volumeAte.trim(),
+        percentual: faixaEdicao.percentual.trim(),
+      });
+      setFaixaEdicao(null);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
     }
   }
 
@@ -1852,7 +2071,7 @@ function LinhaCusto({
             <div style={{ width: 110 }}>
               <TextField label="Índice" value={grupoIndiceCorrecao} onChange={(e) => setGrupoIndiceCorrecao(e.target.value)} placeholder="padrao" />
             </div>
-            <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
+            <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12 }}>
               {salvando ? "Salvando…" : "Salvar"}
             </Button>
             <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
@@ -1883,18 +2102,18 @@ function LinhaCusto({
         <td style={{ textAlign: "right" }}>
           {usaFaixas && (
             <>
-              <Button variant="secondary" onClick={() => setMostrarFaixas((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
+              <Button requer="editar" variant="secondary" onClick={() => setMostrarFaixas((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
                 Faixas{custo.faixasComissao.length > 0 ? ` (${custo.faixasComissao.length})` : ""}
               </Button>{" "}
             </>
           )}
-          <Button variant="secondary" onClick={() => setMostrarSplit((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
+          <Button requer="editar" variant="secondary" onClick={() => setMostrarSplit((v) => !v)} style={{ padding: "3px 8px", fontSize: 11 }}>
             Split{custo.destinatariosComissao.length > 0 ? ` (${custo.destinatariosComissao.length})` : ""}
           </Button>{" "}
-          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
+          <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
             Editar
           </Button>{" "}
-          <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+          <Button requer="excluir" variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
             {excluindo ? "…" : "Excluir"}
           </Button>
         </td>
@@ -1912,14 +2131,14 @@ function LinhaCusto({
                     <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
                       <span style={{ flex: 1 }}>{d.nome}</span>
                       <span style={{ font: "var(--text-mono-body)", color: "var(--ink-muted)" }}>{(Number(d.percentualSplit) * 100).toFixed(1)}%</span>
-                      <button
+                      <PermitidoExcluir><button
                         type="button"
                         onClick={() => removerDestinatario(d.id, d.nome)}
                         title="Remover"
                         style={{ border: "none", background: "transparent", color: "var(--status-critical-text)", cursor: "pointer", fontSize: 13, padding: 0 }}
                       >
                         ×
-                      </button>
+                      </button></PermitidoExcluir>
                     </div>
                   ))}
                 </div>
@@ -1931,7 +2150,7 @@ function LinhaCusto({
                 <div style={{ width: 100 }}>
                   <TextField label="% (0–1)" value={splitDestinatario} onChange={(e) => setSplitDestinatario(e.target.value)} placeholder="0.5" required />
                 </div>
-                <Button type="submit" disabled={salvandoDestinatario} style={{ padding: "6px 10px", fontSize: 12 }}>
+                <Button requer="editar" type="submit" disabled={salvandoDestinatario} style={{ padding: "6px 10px", fontSize: 12 }}>
                   {salvandoDestinatario ? "Salvando…" : "Adicionar"}
                 </Button>
               </form>
@@ -1969,16 +2188,35 @@ function LinhaCusto({
                       }
                       return (
                         <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
-                          <span style={{ flex: 1 }}>{rotulo}</span>
-                          <span style={{ font: "var(--text-mono-body)", color: "var(--ink-muted)" }}>{(Number(f.percentual) * 100).toFixed(1)}%</span>
-                          <button
+                          {faixaEdicao?.id === f.id ? (
+                            <form onSubmit={salvarFaixa} style={{ display: "flex", gap: 6, alignItems: "flex-end", flex: 1 }}>
+                              <TextField label="Até (vazio = sem limite)" value={faixaEdicao.volumeAte} onChange={(e) => setFaixaEdicao({ ...faixaEdicao, volumeAte: e.target.value })} />
+                              <TextField label="%" value={faixaEdicao.percentual} onChange={(e) => setFaixaEdicao({ ...faixaEdicao, percentual: e.target.value })} required />
+                              <Button requer="editar" type="submit" style={{ padding: "4px 8px", fontSize: 11 }}>Salvar</Button>
+                              <Button type="button" variant="secondary" onClick={() => setFaixaEdicao(null)} style={{ padding: "4px 8px", fontSize: 11 }}>Cancelar</Button>
+                            </form>
+                          ) : (
+                            <>
+                              <span style={{ flex: 1 }}>{rotulo}</span>
+                              <span style={{ font: "var(--text-mono-body)", color: "var(--ink-muted)" }}>{(Number(f.percentual) * 100).toFixed(1)}%</span>
+                              <Button
+                                requer="editar"
+                                variant="secondary"
+                                onClick={() => setFaixaEdicao({ id: f.id, volumeAte: f.volumeAte ?? "", percentual: f.percentual })}
+                                style={{ padding: "2px 6px", fontSize: 11 }}
+                              >
+                                Editar
+                              </Button>
+                            </>
+                          )}
+                          <PermitidoExcluir><button
                             type="button"
                             onClick={() => removerFaixa(f.id)}
                             title="Remover"
                             style={{ border: "none", background: "transparent", color: "var(--status-critical-text)", cursor: "pointer", fontSize: 13, padding: 0 }}
                           >
                             ×
-                          </button>
+                          </button></PermitidoExcluir>
                         </div>
                       );
                     })}
@@ -1996,7 +2234,7 @@ function LinhaCusto({
                 <div style={{ width: 100 }}>
                   <TextField label="% (0–1)" value={percentualFaixa} onChange={(e) => setPercentualFaixa(e.target.value)} placeholder="0.05" required />
                 </div>
-                <Button type="submit" disabled={salvandoFaixa} style={{ padding: "6px 10px", fontSize: 12 }}>
+                <Button requer="editar" type="submit" disabled={salvandoFaixa} style={{ padding: "6px 10px", fontSize: 12 }}>
                   {salvandoFaixa ? "Salvando…" : "Adicionar faixa"}
                 </Button>
               </form>
@@ -2098,7 +2336,7 @@ function CartaoTipologia({
           <div style={{ width: 140 }}>
             <TextField label="Preço padrão" value={precoEdicao} onChange={(e) => setPrecoEdicao(e.target.value)} />
           </div>
-          <Button type="submit" disabled={salvandoEdicao || !nomeEdicao.trim()}>
+          <Button requer="editar" type="submit" disabled={salvandoEdicao || !nomeEdicao.trim()}>
             {salvandoEdicao ? "Salvando…" : "Salvar"}
           </Button>
           <Button type="button" variant="secondary" onClick={() => setEditando(false)}>
@@ -2139,13 +2377,13 @@ function CartaoTipologia({
           <Button variant="secondary" onClick={() => setExpandidoPermuta((v) => !v)} style={{ padding: "6px 10px", fontSize: 12 }}>
             {expandidoPermuta ? "Fechar" : "Permuta"}
           </Button>
-          <Button variant="secondary" onClick={() => setExpandido((v) => !v)} style={{ padding: "6px 10px", fontSize: 12 }}>
+          <Button requer="editar" variant="secondary" onClick={() => setExpandido((v) => !v)} style={{ padding: "6px 10px", fontSize: 12 }}>
             {expandido ? "Cancelar" : "Gerar unidades"}
           </Button>
-          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+          <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
             Editar
           </Button>
-          <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+          <Button requer="excluir" variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
             {excluindo ? "Excluindo…" : "Excluir"}
           </Button>
         </div>
@@ -2162,7 +2400,7 @@ function CartaoTipologia({
       {expandido && (
         <div style={{ marginTop: 12 }}>
           <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
-            <button
+            <PermitidoEditar><button
               type="button"
               onClick={() => setModoGeracao("unico")}
               style={{
@@ -2178,8 +2416,8 @@ function CartaoTipologia({
               }}
             >
               Preço único
-            </button>
-            <button
+            </button></PermitidoEditar>
+            <PermitidoEditar><button
               type="button"
               onClick={() => setModoGeracao("andar")}
               style={{
@@ -2195,7 +2433,7 @@ function CartaoTipologia({
               }}
             >
               Cascata por andar
-            </button>
+            </button></PermitidoEditar>
           </div>
 
           {modoGeracao === "unico" ? (
@@ -2212,7 +2450,7 @@ function CartaoTipologia({
               <div style={{ width: 90 }}>
                 <TextField label="Prefixo" value={prefixoNumero} onChange={(e) => setPrefixoNumero(e.target.value)} placeholder="ST" required />
               </div>
-              <Button type="submit" disabled={salvando}>
+              <Button requer="editar" type="submit" disabled={salvando}>
                 {salvando ? "Gerando…" : "Gerar"}
               </Button>
             </form>
@@ -2315,6 +2553,7 @@ function LinhaUnidadePermuta({
   const [valorAtribuido, setValorAtribuido] = useState("");
   const [distratando, setDistratando] = useState(false);
   const [percentualRetencao, setPercentualRetencao] = useState("0");
+  const [mesDistrato, setMesDistrato] = useState("");
   const [motivo, setMotivo] = useState("");
   const [renegociando, setRenegociando] = useState(false);
   const [novoValorVenda, setNovoValorVenda] = useState("");
@@ -2324,6 +2563,23 @@ function LinhaUnidadePermuta({
   const [nomeContraparteSplit, setNomeContraparteSplit] = useState("");
   const [percentualSplit, setPercentualSplit] = useState("");
   const [salvandoContraparte, setSalvandoContraparte] = useState(false);
+  const [editandoPreco, setEditandoPreco] = useState(false);
+  const [precoEdicao, setPrecoEdicao] = useState("");
+  const [salvandoPreco, setSalvandoPreco] = useState(false);
+
+  async function salvarPreco(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvandoPreco(true);
+    try {
+      await atualizarPrecoUnidade(unidade.id, { precoVenda: precoEdicao });
+      setEditandoPreco(false);
+      onRegistrado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvandoPreco(false);
+    }
+  }
 
   async function adicionarContraparte(e: React.FormEvent) {
     e.preventDefault();
@@ -2338,6 +2594,20 @@ function LinhaUnidadePermuta({
       onErro(String(e.message ?? e));
     } finally {
       setSalvandoContraparte(false);
+    }
+  }
+
+  const [contraparteEdicao, setContraparteEdicao] = useState<{ id: string; nome: string; percentual: string } | null>(null);
+
+  async function salvarContraparte(e: React.FormEvent) {
+    e.preventDefault();
+    if (!contraparteEdicao) return;
+    try {
+      await atualizarContrapartePermuta(contraparteEdicao.id, { nome: contraparteEdicao.nome.trim(), percentualSplit: contraparteEdicao.percentual.trim() });
+      setContraparteEdicao(null);
+      onRegistrado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
     }
   }
 
@@ -2398,7 +2668,7 @@ function LinhaUnidadePermuta({
     if (!unidade.venda) return;
     setSalvando(true);
     try {
-      await registrarDistrato(unidade.venda.id, { percentualRetencao: percentualRetencao || undefined, motivo: motivo || undefined });
+      await registrarDistrato(unidade.venda.id, { mesDistrato: Number(mesDistrato), percentualRetencao: percentualRetencao || undefined, motivo: motivo || undefined });
       setDistratando(false);
       onRegistrado();
     } catch (err: any) {
@@ -2450,7 +2720,7 @@ function LinhaUnidadePermuta({
             <div style={{ width: 120 }}>
               <TextField label="Valor atribuído" value={valorAtribuido} onChange={(e) => setValorAtribuido(e.target.value)} placeholder="310000" />
             </div>
-            <Button type="submit" disabled={salvando || !nomeContraparte.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
+            <Button requer="editar" type="submit" disabled={salvando || !nomeContraparte.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
               {salvando ? "Salvando…" : "Confirmar"}
             </Button>
             <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
@@ -2468,12 +2738,15 @@ function LinhaUnidadePermuta({
         <td colSpan={4} style={{ padding: "6px 0" }}>
           <form onSubmit={distratar} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div style={{ width: 140 }}>
+              <TextField label="Mês do distrato" type="number" min={1} value={mesDistrato} onChange={(e) => setMesDistrato(e.target.value)} placeholder="ex.: 12" required />
+            </div>
+            <div style={{ width: 140 }}>
               <TextField label="Retenção (0–1)" value={percentualRetencao} onChange={(e) => setPercentualRetencao(e.target.value)} placeholder="0.2 = 20%" />
             </div>
             <div style={{ width: 200 }}>
               <TextField label="Motivo" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="opcional" />
             </div>
-            <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+            <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
               {salvando ? "Salvando…" : "Confirmar distrato"}
             </Button>
             <Button type="button" variant="secondary" onClick={() => setDistratando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
@@ -2496,10 +2769,33 @@ function LinhaUnidadePermuta({
             <div style={{ width: 200 }}>
               <TextField label="Motivo" value={motivoRenegociacao} onChange={(e) => setMotivoRenegociacao(e.target.value)} placeholder="opcional" />
             </div>
-            <Button type="submit" disabled={salvando || !novoValorVenda.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
+            <Button requer="editar" type="submit" disabled={salvando || !novoValorVenda.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
               {salvando ? "Salvando…" : "Confirmar renegociação"}
             </Button>
             <Button type="button" variant="secondary" onClick={() => setRenegociando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
+              Cancelar
+            </Button>
+          </form>
+        </td>
+      </tr>
+    );
+  }
+
+  if (editandoPreco) {
+    return (
+      <tr>
+        <td colSpan={4} style={{ padding: "6px 0" }}>
+          <form onSubmit={salvarPreco} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div style={{ width: 160 }}>
+              <TextField label={`Preço da unidade ${unidade.numero}`} value={precoEdicao} onChange={(e) => setPrecoEdicao(e.target.value)} placeholder="310000" required />
+            </div>
+            <span style={{ fontSize: 11, color: "var(--ink-muted)", flexBasis: "100%" }}>
+              Vale só para vendas futuras. Vendas, projeções e resultados já existentes não mudam.
+            </span>
+            <Button requer="editar" type="submit" disabled={salvandoPreco || !precoEdicao.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
+              {salvandoPreco ? "Salvando…" : "Salvar preço"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setEditandoPreco(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
               Cancelar
             </Button>
           </form>
@@ -2516,7 +2812,10 @@ function LinhaUnidadePermuta({
     <>
       <tr>
         <td style={{ padding: "4px 0", color: "var(--ink-primary)", font: "var(--text-mono-body)" }}>{unidade.numero}</td>
-        <td style={{ color: "var(--ink-secondary)" }}>{unidade.status}</td>
+        <td style={{ color: "var(--ink-secondary)" }}>
+          {unidade.status}
+          {unidade.precoVenda ? ` · ${formatBRL(unidade.precoVenda)}` : ""}
+        </td>
         <td style={{ color: "var(--ink-secondary)" }}>
           {unidade.permuta?.nomeContraparte ??
             (distratoInfo ? `Reembolsar ${formatBRL(distratoInfo.valorReembolsar)} · retido ${formatBRL(distratoInfo.valorRetido)}` : null) ??
@@ -2524,35 +2823,48 @@ function LinhaUnidadePermuta({
         </td>
         <td style={{ textAlign: "right" }}>
           {unidade.status === "estoque" && (
-            <Button variant="secondary" onClick={abrirRegistro} style={{ padding: "4px 8px", fontSize: 11, marginRight: distratoInfo ? 6 : 0 }}>
-              Registrar permuta
-            </Button>
+            <>
+              <Button
+                requer="editar"
+                variant="secondary"
+                onClick={() => {
+                  setPrecoEdicao(unidade.precoVenda ?? "");
+                  setEditandoPreco(true);
+                }}
+                style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}
+              >
+                Editar preço
+              </Button>
+              <Button requer="editar" variant="secondary" onClick={abrirRegistro} style={{ padding: "4px 8px", fontSize: 11, marginRight: distratoInfo ? 6 : 0 }}>
+                Registrar permuta
+              </Button>
+            </>
           )}
           {unidade.status === "permutada" && (
             <>
-              <Button variant="secondary" onClick={() => setMostrarSplit((v) => !v)} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
+              <Button requer="editar" variant="secondary" onClick={() => setMostrarSplit((v) => !v)} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
                 Split{contrapartes.length > 0 ? ` (${contrapartes.length})` : ""}
               </Button>
-              <Button variant="secondary" onClick={abrirEdicaoPermuta} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
+              <Button requer="editar" variant="secondary" onClick={abrirEdicaoPermuta} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
                 Editar
               </Button>
-              <Button variant="secondary" onClick={desfazer} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+              <Button requer="excluir" variant="secondary" onClick={desfazer} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
                 Desfazer
               </Button>
             </>
           )}
           {unidade.status === "vendida" && unidade.venda?.status === "ativa" && (
             <>
-              <Button variant="secondary" onClick={() => setRenegociando(true)} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
+              <Button requer="editar" variant="secondary" onClick={() => setRenegociando(true)} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
                 Renegociar
               </Button>
-              <Button variant="secondary" onClick={() => setDistratando(true)} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+              <Button requer="editar" variant="secondary" onClick={() => setDistratando(true)} style={{ padding: "4px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
                 Distratar
               </Button>
             </>
           )}
           {distratoInfo && (
-            <Button variant="secondary" onClick={desfazerDistratoAcao} style={{ padding: "4px 8px", fontSize: 11 }}>
+            <Button requer="excluir" variant="secondary" onClick={desfazerDistratoAcao} style={{ padding: "4px 8px", fontSize: 11 }}>
               Desfazer distrato
             </Button>
           )}
@@ -2569,16 +2881,35 @@ function LinhaUnidadePermuta({
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {contrapartes.map((c) => (
                     <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
-                      <span style={{ flex: 1 }}>{c.nome}</span>
-                      <span style={{ font: "var(--text-mono-body)", color: "var(--ink-muted)" }}>{(Number(c.percentualSplit) * 100).toFixed(1)}%</span>
-                      <button
+                      {contraparteEdicao?.id === c.id ? (
+                        <form onSubmit={salvarContraparte} style={{ display: "flex", gap: 6, alignItems: "flex-end", flex: 1 }}>
+                          <TextField label="Nome" value={contraparteEdicao.nome} onChange={(e) => setContraparteEdicao({ ...contraparteEdicao, nome: e.target.value })} required />
+                          <TextField label="Split (0–1)" value={contraparteEdicao.percentual} onChange={(e) => setContraparteEdicao({ ...contraparteEdicao, percentual: e.target.value })} required />
+                          <Button requer="editar" type="submit" style={{ padding: "4px 8px", fontSize: 11 }}>Salvar</Button>
+                          <Button type="button" variant="secondary" onClick={() => setContraparteEdicao(null)} style={{ padding: "4px 8px", fontSize: 11 }}>Cancelar</Button>
+                        </form>
+                      ) : (
+                        <>
+                          <span style={{ flex: 1 }}>{c.nome}</span>
+                          <span style={{ font: "var(--text-mono-body)", color: "var(--ink-muted)" }}>{(Number(c.percentualSplit) * 100).toFixed(1)}%</span>
+                          <Button
+                            requer="editar"
+                            variant="secondary"
+                            onClick={() => setContraparteEdicao({ id: c.id, nome: c.nome, percentual: c.percentualSplit })}
+                            style={{ padding: "2px 6px", fontSize: 11 }}
+                          >
+                            Editar
+                          </Button>
+                        </>
+                      )}
+                      <PermitidoExcluir><button
                         type="button"
                         onClick={() => removerContraparte(c.id, c.nome)}
                         title="Remover"
                         style={{ border: "none", background: "transparent", color: "var(--status-critical-text)", cursor: "pointer", fontSize: 13, padding: 0 }}
                       >
                         ×
-                      </button>
+                      </button></PermitidoExcluir>
                     </div>
                   ))}
                 </div>
@@ -2590,7 +2921,7 @@ function LinhaUnidadePermuta({
                 <div style={{ width: 100 }}>
                   <TextField label="% (0–1)" value={percentualSplit} onChange={(e) => setPercentualSplit(e.target.value)} placeholder="0.5" required />
                 </div>
-                <Button type="submit" disabled={salvandoContraparte} style={{ padding: "6px 10px", fontSize: 12 }}>
+                <Button requer="editar" type="submit" disabled={salvandoContraparte} style={{ padding: "6px 10px", fontSize: 12 }}>
                   {salvandoContraparte ? "Salvando…" : "Adicionar"}
                 </Button>
               </form>
@@ -2699,7 +3030,7 @@ function GeracaoPorAndarForm({
               <TextField label="Unidades" type="number" min={1} value={a.quantidade} onChange={(e) => atualizarAndar(i, { quantidade: e.target.value })} required />
             </div>
             {andares.length > 1 && (
-              <Button type="button" variant="secondary" onClick={() => removerLinha(i)} style={{ padding: "8px 10px", fontSize: 12 }}>
+              <Button requer="editar" type="button" variant="secondary" onClick={() => removerLinha(i)} style={{ padding: "8px 10px", fontSize: 12 }}>
                 Remover
               </Button>
             )}
@@ -2708,17 +3039,25 @@ function GeracaoPorAndarForm({
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <Button type="button" variant="secondary" onClick={adicionarLinha} style={{ padding: "6px 10px", fontSize: 12 }}>
+        <Button requer="editar" type="button" variant="secondary" onClick={adicionarLinha} style={{ padding: "6px 10px", fontSize: 12 }}>
           + Andar
         </Button>
         <span style={{ fontSize: 12, color: "var(--ink-muted)" }}>{totalUnidades} unidade{totalUnidades === 1 ? "" : "s"} no total</span>
-        <Button type="submit" disabled={salvando || totalUnidades === 0}>
+        <Button requer="editar" type="submit" disabled={salvando || totalUnidades === 0}>
           {salvando ? "Gerando…" : "Gerar"}
         </Button>
       </div>
     </form>
   );
 }
+
+const NOME_CATEGORIA_RET = "RET — Regime Especial de Tributação";
+
+const ROTULO_PAPEL_CATEGORIA: Record<PapelCategoriaCusto, string> = {
+  custo: "Custo",
+  comissao_corretagem: "Comissão de corretagem",
+  tributo: "Tributo",
+};
 
 const ROTULO_INCIDENCIA: Record<TipoIncidenciaCusto, string> = {
   fixo: "Valor fixo",
@@ -2741,6 +3080,7 @@ function LinhaCategoriaCusto({
   const [editando, setEditando] = useState(false);
   const [nome, setNome] = useState(categoria.nome);
   const [tipoIncidencia, setTipoIncidencia] = useState<TipoIncidenciaCusto>(categoria.tipoIncidencia);
+  const [papel, setPapel] = useState<PapelCategoriaCusto>(categoria.papel);
   const [salvando, setSalvando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
 
@@ -2748,7 +3088,7 @@ function LinhaCategoriaCusto({
     e.preventDefault();
     setSalvando(true);
     try {
-      await atualizarCategoriaCusto(categoria.id, { nome, tipoIncidencia });
+      await atualizarCategoriaCusto(categoria.id, { nome, tipoIncidencia, papel });
       setEditando(false);
       onAtualizado();
     } catch (e: any) {
@@ -2777,6 +3117,7 @@ function LinhaCategoriaCusto({
         <div style={{ flex: 1, minWidth: 140 }}>
           <TextField label="Nome" value={nome} onChange={(e) => setNome(e.target.value)} required />
         </div>
+        <SeletorPapelCategoria value={papel} onChange={setPapel} largura={200} />
         <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 220 }}>
           <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Incidência</span>
           <select
@@ -2791,7 +3132,7 @@ function LinhaCategoriaCusto({
             ))}
           </select>
         </label>
-        <Button type="submit" disabled={salvando || !nome.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
+        <Button requer="editar" type="submit" disabled={salvando || !nome.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
           {salvando ? "Salvando…" : "Salvar"}
         </Button>
         <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
@@ -2807,16 +3148,36 @@ function LinhaCategoriaCusto({
         <span style={{ fontWeight: 700, color: "var(--ink-primary)" }}>{categoria.nome}</span>
         {" — "}
         {ROTULO_INCIDENCIA[categoria.tipoIncidencia]}
+        {categoria.papel !== "custo" && ` · ${ROTULO_PAPEL_CATEGORIA[categoria.papel]}`}
       </span>
       <div style={{ display: "flex", gap: 6 }}>
-        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
+        <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
           Editar
         </Button>
-        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+        <Button requer="excluir" variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
           {excluindo ? "…" : "Excluir"}
         </Button>
       </div>
     </div>
+  );
+}
+
+function SeletorPapelCategoria({ value, onChange, largura }: { value: PapelCategoriaCusto; onChange: (p: PapelCategoriaCusto) => void; largura: number }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 5, width: largura }}>
+      <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Papel</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as PapelCategoriaCusto)}
+        style={{ fontFamily: "var(--font-ui)", fontSize: 13, color: "var(--ink-primary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+      >
+        {(Object.keys(ROTULO_PAPEL_CATEGORIA) as PapelCategoriaCusto[]).map((p) => (
+          <option key={p} value={p}>
+            {ROTULO_PAPEL_CATEGORIA[p]}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -2831,13 +3192,14 @@ function NovaCategoriaCustoForm({
 }) {
   const [nome, setNome] = useState("");
   const [tipoIncidencia, setTipoIncidencia] = useState<TipoIncidenciaCusto>("fixo");
+  const [papel, setPapel] = useState<PapelCategoriaCusto>("custo");
   const [salvando, setSalvando] = useState(false);
 
   async function submeter(e: React.FormEvent) {
     e.preventDefault();
     setSalvando(true);
     try {
-      await criarCategoriaCusto(empreendimentoId, { nome, tipoIncidencia });
+      await criarCategoriaCusto(empreendimentoId, { nome, tipoIncidencia, papel });
       setNome("");
       onCriada();
     } catch (e: any) {
@@ -2866,7 +3228,8 @@ function NovaCategoriaCustoForm({
           ))}
         </select>
       </label>
-      <Button type="submit" disabled={salvando || !nome.trim()}>
+      <SeletorPapelCategoria value={papel} onChange={setPapel} largura={200} />
+      <Button requer="editar" type="submit" disabled={salvando || !nome.trim()}>
         {salvando ? "Salvando…" : "Adicionar"}
       </Button>
     </form>
@@ -2946,8 +3309,25 @@ function ModalidadesFields({ modalidades, onChange }: { modalidades: ModalidadeI
                 />
               </div>
             )}
+            {m.tipoDistribuicao === "nivelada" && (
+              <>
+                <div style={{ width: 150 }}>
+                  <TextField
+                    label="Até o mês (opcional)"
+                    type="number"
+                    min={1}
+                    placeholder="horizonte"
+                    value={m.mesFinal ?? ""}
+                    onChange={(e) => atualizarModalidade(i, { mesFinal: e.target.value === "" ? undefined : Number(e.target.value) })}
+                  />
+                </div>
+                <span style={{ fontSize: 11, color: "var(--ink-muted)", flexBasis: "100%" }}>
+                  Em branco, a parcela nivelada vai até o horizonte do cenário. Preencha para parar no mês informado (ex.: fim da obra).
+                </span>
+              </>
+            )}
             {modalidades.length > 1 && (
-              <Button type="button" variant="secondary" onClick={() => removerLinha(i)} style={{ padding: "8px 10px", fontSize: 12 }}>
+              <Button requer="editar" type="button" variant="secondary" onClick={() => removerLinha(i)} style={{ padding: "8px 10px", fontSize: 12 }}>
                 Remover
               </Button>
             )}
@@ -2956,7 +3336,7 @@ function ModalidadesFields({ modalidades, onChange }: { modalidades: ModalidadeI
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <Button type="button" variant="secondary" onClick={adicionarLinha} style={{ padding: "6px 10px", fontSize: 12 }}>
+        <Button requer="editar" type="button" variant="secondary" onClick={adicionarLinha} style={{ padding: "6px 10px", fontSize: 12 }}>
           + Modalidade
         </Button>
         <span style={{ fontSize: 12, fontWeight: 600, color: somaFecha ? "var(--status-good-text)" : "var(--status-warning-text)" }}>
@@ -2986,6 +3366,7 @@ function LinhaCondicaoPagamento({
       tipoDistribuicao: m.tipoDistribuicao,
       periodicidadeMeses: m.periodicidadeMeses ?? undefined,
       mesFixo: m.mesFixo ?? undefined,
+      mesFinal: m.mesFinal ?? undefined,
       repeticoesSobreTotal: m.repeticoesSobreTotal,
       geraEventoParcial: m.geraEventoParcial,
     })),
@@ -3043,7 +3424,7 @@ function LinhaCondicaoPagamento({
         <div style={{ width: 200 }}>
           <TextField label="Nome" value={nome} onChange={(e) => setNome(e.target.value)} required />
         </div>
-        <Button type="submit" disabled={salvando || !nome.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
+        <Button requer="editar" type="submit" disabled={salvando || !nome.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
           {salvando ? "Salvando…" : "Salvar"}
         </Button>
         <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
@@ -3058,7 +3439,7 @@ function LinhaCondicaoPagamento({
       <form onSubmit={salvarModalidades} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <ModalidadesFields modalidades={modalidades} onChange={setModalidades} />
         <div style={{ display: "flex", gap: 8 }}>
-          <Button type="submit" disabled={salvando || !somaFecha} style={{ padding: "6px 10px", fontSize: 12 }}>
+          <Button requer="editar" type="submit" disabled={salvando || !somaFecha} style={{ padding: "6px 10px", fontSize: 12 }}>
             {salvando ? "Salvando…" : "Salvar modalidades"}
           </Button>
           <Button type="button" variant="secondary" onClick={() => setEditandoModalidades(false)} style={{ padding: "6px 10px", fontSize: 12 }}>
@@ -3074,16 +3455,18 @@ function LinhaCondicaoPagamento({
       <span>
         <span style={{ fontWeight: 700, color: "var(--ink-primary)" }}>{condicao.nome}</span>
         {" — "}
-        {condicao.modalidades.map((m) => `${m.nome} ${(Number(m.percentual) * 100).toFixed(0)}%`).join(", ")}
+        {condicao.modalidades
+          .map((m) => `${m.nome} ${(Number(m.percentual) * 100).toFixed(0)}%${m.mesFinal ? ` (até o mês ${m.mesFinal})` : ""}`)
+          .join(", ")}
       </span>
       <div style={{ display: "flex", gap: 6 }}>
-        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
+        <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
           Editar nome
         </Button>
-        <Button variant="secondary" onClick={() => setEditandoModalidades(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
+        <Button requer="editar" variant="secondary" onClick={() => setEditandoModalidades(true)} style={{ padding: "3px 8px", fontSize: 11 }}>
           Editar modalidades
         </Button>
-        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
+        <Button requer="excluir" variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "3px 8px", fontSize: 11, color: "var(--status-critical-text)" }}>
           {excluindo ? "…" : "Excluir"}
         </Button>
       </div>
@@ -3131,7 +3514,7 @@ function CondicaoPagamentoForm({
       <ModalidadesFields modalidades={modalidades} onChange={setModalidades} />
 
       <div>
-        <Button type="submit" disabled={salvando || !somaFecha || !nome.trim()}>
+        <Button requer="editar" type="submit" disabled={salvando || !somaFecha || !nome.trim()}>
           {salvando ? "Salvando…" : "Salvar condição"}
         </Button>
       </div>
@@ -3184,7 +3567,7 @@ function NovaTipologiaForm({
       <div style={{ width: 140 }}>
         <TextField label="Preço padrão" value={precoUnitarioPadrao} onChange={(e) => setPrecoUnitarioPadrao(e.target.value)} placeholder="310000" />
       </div>
-      <Button type="submit" disabled={salvando || !nome.trim()}>
+      <Button requer="editar" type="submit" disabled={salvando || !nome.trim()}>
         {salvando ? "Salvando…" : "Adicionar"}
       </Button>
     </form>

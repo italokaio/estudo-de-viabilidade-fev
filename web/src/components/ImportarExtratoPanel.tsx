@@ -1,3 +1,4 @@
+import { PermitidoEditar } from "../permissoes";
 import { useEffect, useRef, useState } from "react";
 import {
   atualizarCenario,
@@ -107,7 +108,7 @@ export function ImportarExtratoPanel({ cenarioId, onAtualizado }: { cenarioId: s
   const totalSelecionados = Object.values(selecoes).filter((c) => c !== null && c !== undefined).length;
 
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", boxShadow: "var(--shadow-sm)" }}>
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", boxShadow: "var(--shadow-sm)" }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
       <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-primary)", marginBottom: 4 }}>Importar extrato bancário</div>
       <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginBottom: 14 }}>
         Envie um CSV (colunas Data, Descrição, Valor — positivo para entradas, negativo para saídas). O sistema sugere qual recebimento ou custo cada
@@ -123,17 +124,20 @@ export function ImportarExtratoPanel({ cenarioId, onAtualizado }: { cenarioId: s
             onChange={(e) => setDataMesUmInput(e.target.value)}
           />
         </div>
-        <Button type="submit" variant="secondary" disabled={salvandoData} style={{ padding: "8px 12px", fontSize: 12 }}>
+        <Button requer="editar" type="submit" variant="secondary" disabled={salvandoData} style={{ padding: "8px 12px", fontSize: 12 }}>
           {salvandoData ? "Salvando…" : "Salvar"}
         </Button>
-        <span style={{ fontSize: 11, color: "var(--ink-muted)", paddingBottom: 8 }}>
-          Sem essa data, as sugestões usam só o valor — com ela, também consideram a proximidade do mês.
-        </span>
       </form>
+
+      {!dataMesUmInput && (
+        <div style={{ fontSize: 12, color: "var(--status-warning-text)", background: "var(--status-warning-soft-bg)", borderRadius: 8, padding: "8px 10px", marginBottom: 14 }}>
+          Sem a data do mês 1, as sugestões casam só pelo valor e não consideram a proximidade da data. Preencha o campo acima para melhorar as sugestões.
+        </div>
+      )}
 
       {erro && <div style={{ fontSize: 12, color: "var(--status-critical-text)", marginBottom: 10 }}>{erro}</div>}
 
-      <input ref={fileInputRef} type="file" accept=".csv,text/csv" onChange={aoEscolherArquivo} disabled={carregando} style={{ fontSize: 12.5 }} />
+      <PermitidoEditar><input ref={fileInputRef} type="file" accept=".csv,text/csv" onChange={aoEscolherArquivo} disabled={carregando} style={{ fontSize: 12.5 }} /></PermitidoEditar>
       {carregando && <div style={{ fontSize: 12.5, color: "var(--ink-muted)", marginTop: 8 }}>Lendo arquivo…</div>}
 
       {sugestoes && (
@@ -194,7 +198,7 @@ export function ImportarExtratoPanel({ cenarioId, onAtualizado }: { cenarioId: s
                 </tbody>
               </table>
               <div style={{ marginTop: 12 }}>
-                <Button type="button" onClick={confirmar} disabled={confirmando || totalSelecionados === 0} style={{ padding: "8px 14px", fontSize: 12.5 }}>
+                <Button requer="editar" type="button" onClick={confirmar} disabled={confirmando || totalSelecionados === 0} style={{ padding: "8px 14px", fontSize: 12.5 }}>
                   {confirmando ? "Confirmando…" : `Confirmar ${totalSelecionados} conciliação${totalSelecionados === 1 ? "" : "ões"}`}
                 </Button>
               </div>

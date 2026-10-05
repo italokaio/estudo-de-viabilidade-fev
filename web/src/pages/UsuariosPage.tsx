@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  atualizarUsuario,
   criarUsuario,
   desvincularEmpreendimento,
   excluirUsuario,
@@ -47,7 +48,7 @@ export function UsuariosPage({ usuarioAtual }: { usuarioAtual: Usuario }) {
   }
 
   return (
-    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
+    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 12, color: "var(--ink-muted)", fontWeight: 600 }}>Admin</div>
@@ -90,6 +91,7 @@ export function UsuariosPage({ usuarioAtual }: { usuarioAtual: Usuario }) {
                     onToggleExpandir={() => setExpandidoId((v) => (v === u.id ? null : u.id))}
                     onExcluir={() => excluir(u.id)}
                     onErro={setErro}
+                    onAtualizado={recarregar}
                   />
                 ))}
               </tbody>
@@ -110,6 +112,7 @@ function LinhaUsuario({
   onToggleExpandir,
   onExcluir,
   onErro,
+  onAtualizado,
 }: {
   usuario: UsuarioResumo;
   ehVoceMesmo: boolean;
@@ -117,8 +120,27 @@ function LinhaUsuario({
   onToggleExpandir: () => void;
   onExcluir: () => void;
   onErro: (msg: string) => void;
+  onAtualizado: () => void;
 }) {
   const [mostrarSenha, setMostrarSenha] = useState(false);
+  const [editando, setEditando] = useState(false);
+  const [nomeEdicao, setNomeEdicao] = useState(usuario.nome);
+  const [papelEdicao, setPapelEdicao] = useState<Papel>(usuario.papel);
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false);
+
+  async function salvarEdicao(e: React.FormEvent) {
+    e.preventDefault();
+    setSalvandoEdicao(true);
+    try {
+      await atualizarUsuario(usuario.id, { nome: nomeEdicao, papel: papelEdicao });
+      setEditando(false);
+      onAtualizado();
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+    } finally {
+      setSalvandoEdicao(false);
+    }
+  }
 
   return (
     <>
@@ -145,6 +167,17 @@ function LinhaUsuario({
               {expandido ? "Fechar" : "Acesso"}
             </Button>
           )}
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setNomeEdicao(usuario.nome);
+              setPapelEdicao(usuario.papel);
+              setEditando((v) => !v);
+            }}
+            style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}
+          >
+            {editando ? "Fechar" : "Editar"}
+          </Button>
           <Button variant="secondary" onClick={() => setMostrarSenha((v) => !v)} style={{ padding: "4px 8px", fontSize: 11, marginRight: 6 }}>
             {mostrarSenha ? "Fechar" : "Senha"}
           </Button>
@@ -155,6 +188,35 @@ function LinhaUsuario({
           )}
         </td>
       </tr>
+      {editando && (
+        <tr>
+          <td colSpan={4} style={{ paddingBottom: 12 }}>
+            <form onSubmit={salvarEdicao} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ width: 220 }}>
+                <TextField label="Nome" value={nomeEdicao} onChange={(e) => setNomeEdicao(e.target.value)} required />
+              </div>
+              <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 160 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--ink-muted)" }}>Papel</span>
+                <select
+                  value={papelEdicao}
+                  onChange={(e) => setPapelEdicao(e.target.value as Papel)}
+                  style={{ fontFamily: "var(--font-ui)", fontSize: 13, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
+                >
+                  <option value="admin">Admin</option>
+                  <option value="usuario">Usuário</option>
+                  <option value="stakeholder">Stakeholder</option>
+                </select>
+              </label>
+              <span style={{ fontSize: 11, color: "var(--ink-muted)", flexBasis: "100%" }}>
+                O e-mail não é editável. Não é possível rebaixar o último administrador, nem tornar stakeholder quem ainda tem vínculo de edição.
+              </span>
+              <Button type="submit" disabled={salvandoEdicao || !nomeEdicao.trim()} style={{ padding: "6px 10px", fontSize: 12 }}>
+                {salvandoEdicao ? "Salvando…" : "Salvar"}
+              </Button>
+            </form>
+          </td>
+        </tr>
+      )}
       {expandido && (
         <tr>
           <td colSpan={4} style={{ paddingBottom: 12 }}>

@@ -1,4 +1,6 @@
+import { PermissoesProvider, nivelDoCenario } from "../permissoes";
 import { useEffect, useState } from "react";
+import { useCenarioAtivo } from "../useCenarioAtivo";
 import { fetchEmpreendimentos, fetchFluxoCaixa, type EmpreendimentoResumo, type FluxoCaixaResposta } from "../api/client.js";
 import { AlertasPanel } from "../components/AlertasPanel.js";
 import { CenarioSwitcher } from "../components/CenarioSwitcher.js";
@@ -6,10 +8,8 @@ import { ComparacaoVersoesPanel } from "../components/ComparacaoVersoesPanel.js"
 import { FinanciamentoFluxoPanel } from "../components/FinanciamentoFluxoPanel.js";
 import { FluxoChart } from "../components/FluxoChart.js";
 import { FluxoTable } from "../components/FluxoTable.js";
-import { ImportarExtratoPanel } from "../components/ImportarExtratoPanel.js";
 import { KpiCard } from "../components/KpiCard.js";
 import { RealizadoPanel } from "../components/RealizadoPanel.js";
-import { SensibilidadePanel } from "../components/SensibilidadePanel.js";
 import { ThemeToggle } from "../components/ThemeToggle.js";
 import { formatBRL } from "../format.js";
 
@@ -26,7 +26,7 @@ export function FluxoCaixaPage() {
       .then((emps) => {
         setEmpreendimentos(emps);
         const primeiro = emps[0]?.cenarios[0]?.id ?? null;
-        setCenarioId(primeiro);
+        setCenarioId((atual) => atual ?? primeiro);
         if (!primeiro) setCarregando(false);
       })
       .catch((e) => {
@@ -35,16 +35,24 @@ export function FluxoCaixaPage() {
       });
   }, []);
 
+  const ehCenarioAtual = useCenarioAtivo(cenarioId);
+
   function recarregarFluxo() {
     if (!cenarioId) return;
+    const alvo = cenarioId;
     setVersaoFluxo((v) => v + 1);
     fetchFluxoCaixa(cenarioId)
       .then((d) => {
+        if (!ehCenarioAtual(alvo)) return;
         setDados(d);
         setErro(null);
       })
-      .catch((e) => setErro(String(e.message ?? e)))
-      .finally(() => setCarregando(false));
+      .catch((e) => {
+        if (ehCenarioAtual(alvo)) setErro(String(e.message ?? e));
+      })
+      .finally(() => {
+        if (ehCenarioAtual(alvo)) setCarregando(false);
+      });
   }
 
   useEffect(() => {
@@ -53,8 +61,8 @@ export function FluxoCaixaPage() {
     recarregarFluxo();
   }, [cenarioId]);
 
-  return (
-    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
+  return <PermissoesProvider nivel={nivelDoCenario(empreendimentos, cenarioId)}>(
+    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 12, color: "var(--ink-muted)", fontWeight: 600 }}>
@@ -107,14 +115,12 @@ export function FluxoCaixaPage() {
           </div>
 
           {cenarioId && <RealizadoPanel cenarioId={cenarioId} onAtualizado={recarregarFluxo} versaoAtualizacao={versaoFluxo} />}
-          {cenarioId && <ImportarExtratoPanel cenarioId={cenarioId} onAtualizado={recarregarFluxo} />}
           <FinanciamentoFluxoPanel financiamento={dados.financiamento} />
           {cenarioId && <ComparacaoVersoesPanel cenarioId={cenarioId} />}
-          {cenarioId && <SensibilidadePanel cenarioId={cenarioId} />}
         </>
       )}
     </div>
-  );
+  )</PermissoesProvider>;
 }
 
 function Legenda({ cor, rotulo, linha }: { cor: string; rotulo: string; linha?: boolean }) {

@@ -1,3 +1,4 @@
+import { UsuarioContext } from "./permissoes";
 import { useEffect, useState } from "react";
 import { EVENTO_SESSAO_EXPIRADA, fetchUsuarioAtual, logout, type Usuario } from "./api/client.js";
 import { Sidebar, type Pagina } from "./components/Sidebar.js";
@@ -8,6 +9,8 @@ import { CustosPage } from "./pages/CustosPage.js";
 import { FluxoCaixaPage } from "./pages/FluxoCaixaPage.js";
 import { LoginPage } from "./pages/LoginPage.js";
 import { RelatoriosPage } from "./pages/RelatoriosPage.js";
+import { SensibilidadePage } from "./pages/SensibilidadePage.js";
+import { ConciliacaoPage } from "./pages/ConciliacaoPage.js";
 import { UsuariosPage } from "./pages/UsuariosPage.js";
 import { VendasPage } from "./pages/VendasPage.js";
 
@@ -58,7 +61,7 @@ export default function App() {
     );
   }
 
-  return (
+  return <UsuarioContext.Provider value={usuario}>(
     <div style={{ display: "flex", height: "100vh", background: "var(--bg)" }}>
       <Sidebar pagina={pagina} onNavegar={setPagina} usuario={usuario} onSair={sair} />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -68,9 +71,11 @@ export default function App() {
         {pagina === "custos" && <CustosPage />}
         {pagina === "cronograma" && <CronogramaPage />}
         {pagina === "cenarios" && <CenariosPage />}
+        {pagina === "sensibilidade" && <SensibilidadePage />}
+        {pagina === "conciliacao" && <ConciliacaoPage />}
         {pagina === "relatorios" && <RelatoriosPage />}
         {pagina === "usuarios" && usuario.papel === "admin" && <UsuariosPage usuarioAtual={usuario} />}
       </div>
     </div>
-  );
+  )</UsuarioContext.Provider>;
 }

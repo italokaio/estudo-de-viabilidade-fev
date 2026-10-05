@@ -1,3 +1,4 @@
+import { PermitidoEditar } from "../permissoes";
 import { useEffect, useState } from "react";
 import {
   estornarCustoRealizado,
@@ -59,7 +60,7 @@ export function RealizadoPanel({
   const pagosPercentuais = desembolsos.filter((d) => d.status === "realizado").length;
 
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", boxShadow: "var(--shadow-sm)" }}>
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", boxShadow: "var(--shadow-sm)" }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
       <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-primary)", marginBottom: 4 }}>Realizado × Projetado</div>
       <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginBottom: 14 }}>
         Registre o que já entrou ou saiu de verdade — o motor continua projetando com base no previsto; isto é só uma camada de conferência por cima.
@@ -149,7 +150,7 @@ function LinhaRecebimento({ recebimento, onRegistrado }: { recebimento: Recebime
         <div style={{ width: 110 }}>
           <TextField label="Valor recebido" value={valor} onChange={(e) => setValor(e.target.value)} required />
         </div>
-        <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 11.5 }}>
+        <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 11.5 }}>
           {salvando ? "…" : "Confirmar"}
         </Button>
         <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 11.5 }}>
@@ -168,15 +169,15 @@ function LinhaRecebimento({ recebimento, onRegistrado }: { recebimento: Recebime
       {jaRecebido ? (
         <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--status-good-text)" }}>✓ {formatBRL(recebimento.valorRealizado!)}</span>
-          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 7px", fontSize: 10.5 }}>
+          <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 7px", fontSize: 10.5 }}>
             Editar
           </Button>
-          <Button variant="secondary" onClick={estornar} style={{ padding: "3px 7px", fontSize: 10.5, color: "var(--status-critical-text)" }}>
+          <Button requer="editar" variant="secondary" onClick={estornar} style={{ padding: "3px 7px", fontSize: 10.5, color: "var(--status-critical-text)" }}>
             Estornar
           </Button>
         </span>
       ) : (
-        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "4px 8px", fontSize: 11 }}>
+        <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "4px 8px", fontSize: 11 }}>
           Marcar recebido
         </Button>
       )}
@@ -221,7 +222,7 @@ function LinhaCusto({ custo, onRegistrado }: { custo: CustoResumo; onRegistrado:
         <div style={{ width: 110 }}>
           <TextField label="Valor pago" value={valor} onChange={(e) => setValor(e.target.value)} required />
         </div>
-        <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 11.5 }}>
+        <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 11.5 }}>
           {salvando ? "…" : "Confirmar"}
         </Button>
         <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 11.5 }}>
@@ -240,15 +241,15 @@ function LinhaCusto({ custo, onRegistrado }: { custo: CustoResumo; onRegistrado:
       {jaPago ? (
         <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--status-good-text)" }}>✓ {formatBRL(custo.valorRealizado!)}</span>
-          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 7px", fontSize: 10.5 }}>
+          <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 7px", fontSize: 10.5 }}>
             Editar
           </Button>
-          <Button variant="secondary" onClick={estornar} style={{ padding: "3px 7px", fontSize: 10.5, color: "var(--status-critical-text)" }}>
+          <Button requer="editar" variant="secondary" onClick={estornar} style={{ padding: "3px 7px", fontSize: 10.5, color: "var(--status-critical-text)" }}>
             Estornar
           </Button>
         </span>
       ) : (
-        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "4px 8px", fontSize: 11 }}>
+        <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "4px 8px", fontSize: 11 }}>
           Marcar pago
         </Button>
       )}
@@ -278,7 +279,11 @@ function LinhaDesembolsoCusto({ desembolso, onRegistrado }: { desembolso: Desemb
   }
 
   async function estornar() {
-    if (!window.confirm("Estornar este desembolso? Ele volta a ficar como previsto, sem valor realizado.")) return;
+    const semBase = Number(desembolso.valorPrevisto) === 0;
+    const pergunta = semBase
+      ? "Estornar este desembolso? Ele não tem mais base de cálculo, então a linha será removida."
+      : "Estornar este desembolso? Ele volta a ficar como previsto, sem valor realizado.";
+    if (!window.confirm(pergunta)) return;
     try {
       await estornarDesembolsoCustoRealizado(desembolso.id);
       onRegistrado();
@@ -293,7 +298,7 @@ function LinhaDesembolsoCusto({ desembolso, onRegistrado }: { desembolso: Desemb
         <div style={{ width: 110 }}>
           <TextField label="Valor pago" value={valor} onChange={(e) => setValor(e.target.value)} required />
         </div>
-        <Button type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 11.5 }}>
+        <Button requer="editar" type="submit" disabled={salvando} style={{ padding: "6px 10px", fontSize: 11.5 }}>
           {salvando ? "…" : "Confirmar"}
         </Button>
         <Button type="button" variant="secondary" onClick={() => setEditando(false)} style={{ padding: "6px 10px", fontSize: 11.5 }}>
@@ -308,19 +313,20 @@ function LinhaDesembolsoCusto({ desembolso, onRegistrado }: { desembolso: Desemb
       <span style={{ color: "var(--ink-secondary)" }}>
         Mês {desembolso.mes} · {desembolso.categoriaNome}{" "}
         <span style={{ font: "var(--text-mono-body)", color: "var(--ink-primary)" }}>{formatBRL(desembolso.valorPrevisto)}</span>
+        {jaPago && Number(desembolso.valorPrevisto) === 0 && <span style={{ marginLeft: 6, fontSize: 11, color: "var(--ink-muted)" }}>sem base — previsto removido</span>}
       </span>
       {jaPago ? (
         <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--status-good-text)" }}>✓ {formatBRL(desembolso.valorRealizado!)}</span>
-          <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 7px", fontSize: 10.5 }}>
+          <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "3px 7px", fontSize: 10.5 }}>
             Editar
           </Button>
-          <Button variant="secondary" onClick={estornar} style={{ padding: "3px 7px", fontSize: 10.5, color: "var(--status-critical-text)" }}>
+          <Button requer="editar" variant="secondary" onClick={estornar} style={{ padding: "3px 7px", fontSize: 10.5, color: "var(--status-critical-text)" }}>
             Estornar
           </Button>
         </span>
       ) : (
-        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "4px 8px", fontSize: 11 }}>
+        <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "4px 8px", fontSize: 11 }}>
           Marcar pago
         </Button>
       )}

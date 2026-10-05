@@ -1,9 +1,12 @@
+import { PermissoesProvider, PermitidoEditar, PermitidoExcluir, nivelDoEmpreendimento } from "../permissoes";
+import { textoImpactoExclusao } from "../impactoExclusao";
 import { useEffect, useMemo, useState } from "react";
 import {
   atualizarCenario,
   criarCenario,
   duplicarCenario,
   excluirCenario,
+  fetchImpactoExclusaoCenario,
   fetchComparacaoCenariosMultiplos,
   fetchEmpreendimentoDetalhe,
   fetchEmpreendimentos,
@@ -112,8 +115,8 @@ export function CenariosPage() {
 
   const nomesPorId = useMemo(() => new Map((detalhe?.cenarios ?? []).map((c) => [c.id, c.nome])), [detalhe]);
 
-  return (
-    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
+  return <PermissoesProvider nivel={nivelDoEmpreendimento(empreendimentos, empreendimentoId)}>(
+    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 12, color: "var(--ink-muted)", fontWeight: 600 }}>{detalhe ? detalhe.nome : "Carregando…"}</div>
@@ -173,7 +176,7 @@ export function CenariosPage() {
 
       {comparacao && comparacao.length > 0 && <ComparacaoResultado cenarios={comparacao} nomesPorId={nomesPorId} />}
     </div>
-  );
+  )</PermissoesProvider>;
 }
 
 function CartaoCenarioComparavel({
@@ -227,7 +230,14 @@ function CartaoCenarioComparavel({
   }
 
   async function excluir() {
-    if (!window.confirm(`Excluir o cenário "${cenario.nome}"? As vendas geradas neste cenário serão apagadas e as unidades voltam para o estoque.`)) return;
+    let impacto;
+    try {
+      impacto = await fetchImpactoExclusaoCenario(cenario.id);
+    } catch (e: any) {
+      onErro(String(e.message ?? e));
+      return;
+    }
+    if (!window.confirm(`Excluir o cenário "${cenario.nome}"? As vendas geradas neste cenário serão apagadas e as unidades voltam para o estoque. ${textoImpactoExclusao(impacto)} Esta ação não pode ser desfeita.`)) return;
     setExcluindo(true);
     try {
       await excluirCenario(cenario.id);
@@ -248,7 +258,7 @@ function CartaoCenarioComparavel({
           <div style={{ width: 130 }}>
             <TextField label="Horizonte (meses)" type="number" min={1} value={horizonteEdicao} onChange={(e) => setHorizonteEdicao(e.target.value)} required />
           </div>
-          <Button type="submit" disabled={salvandoEdicao || !nomeEdicao.trim()}>
+          <Button requer="editar" type="submit" disabled={salvandoEdicao || !nomeEdicao.trim()}>
             {salvandoEdicao ? "Salvando…" : "Salvar"}
           </Button>
           <Button type="button" variant="secondary" onClick={() => setEditando(false)}>
@@ -269,7 +279,7 @@ function CartaoCenarioComparavel({
           <div style={{ flex: 1, minWidth: 140 }}>
             <TextField label="Nome do novo cenário" value={nomeDuplicacao} onChange={(e) => setNomeDuplicacao(e.target.value)} required />
           </div>
-          <Button type="submit" disabled={salvandoDuplicacao || !nomeDuplicacao.trim()}>
+          <Button requer="editar" type="submit" disabled={salvandoDuplicacao || !nomeDuplicacao.trim()}>
             {salvandoDuplicacao ? "Duplicando…" : "Confirmar"}
           </Button>
           <Button type="button" variant="secondary" onClick={() => setDuplicando(false)}>
@@ -311,13 +321,13 @@ function CartaoCenarioComparavel({
         </div>
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        <Button variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+        <Button requer="editar" variant="secondary" onClick={() => setEditando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
           Editar
         </Button>
-        <Button variant="secondary" onClick={() => setDuplicando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
+        <Button requer="editar" variant="secondary" onClick={() => setDuplicando(true)} style={{ padding: "6px 10px", fontSize: 12 }}>
           Duplicar
         </Button>
-        <Button variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
+        <Button requer="excluir" variant="secondary" onClick={excluir} disabled={excluindo} style={{ padding: "6px 10px", fontSize: 12, color: "var(--status-critical-text)" }}>
           {excluindo ? "Excluindo…" : "Excluir"}
         </Button>
       </div>
@@ -363,21 +373,31 @@ function NovoCenarioForm({ empreendimentoId, onCriado, onErro }: { empreendiment
       <div style={{ width: 130 }}>
         <TextField label="Horizonte (meses)" type="number" min={1} value={horizonteProjecaoMeses} onChange={(e) => setHorizonteProjecaoMeses(e.target.value)} placeholder="40" required />
       </div>
-      <Button type="submit" disabled={salvando || !nome.trim()}>
+      <Button requer="editar" type="submit" disabled={salvando || !nome.trim()}>
         {salvando ? "Salvando…" : "Adicionar"}
       </Button>
     </form>
   );
 }
 
+function paybackDescontadoAntesDoSimples(indicadores: ComparacaoCenario["indicadores"]): boolean {
+  return indicadores.mesRecuperacao !== null && indicadores.mesRecuperacaoDescontado !== null && indicadores.mesRecuperacaoDescontado < indicadores.mesRecuperacao;
+}
+
 const LINHAS_INDICADORES: { rotulo: string; acessor: (c: ComparacaoCenario) => string; formatar?: (v: string) => string }[] = [
-  { rotulo: "VGV", acessor: (c) => c.indicadores.vgv, formatar: formatBRL },
+  { rotulo: "VGV (inclui permuta)", acessor: (c) => c.indicadores.vgv, formatar: formatBRL },
+  { rotulo: "VGV líquido (bruto menos comissão e permuta)", acessor: (c) => c.indicadores.vgvLiquido, formatar: formatBRL },
   { rotulo: "Recebimentos previstos", acessor: (c) => c.indicadores.totalRecebimentosPrevisto, formatar: formatBRL },
-  { rotulo: "Custos previstos", acessor: (c) => c.indicadores.totalCustosPrevisto, formatar: formatBRL },
+  { rotulo: "Custos previstos (inclui terreno por permuta)", acessor: (c) => c.indicadores.totalCustosPrevisto, formatar: formatBRL },
   { rotulo: "Fluxo líquido (saldo final)", acessor: (c) => c.indicadores.saldoFinal, formatar: formatBRL },
   { rotulo: "Necessidade máxima de capital", acessor: (c) => c.indicadores.necessidadeMaximaCapital, formatar: formatBRL },
   { rotulo: "Mês do pico", acessor: (c) => (c.indicadores.mesPico !== null ? `Mês ${c.indicadores.mesPico}` : "—") },
+  { rotulo: "Mês de recuperação", acessor: (c) => (c.indicadores.mesRecuperacao !== null ? `Mês ${c.indicadores.mesRecuperacao}` : "não recupera no horizonte") },
+  { rotulo: "Mês de recuperação (descontado)", acessor: (c) => (c.indicadores.mesRecuperacaoDescontado !== null ? `Mês ${c.indicadores.mesRecuperacaoDescontado}` : "não recupera no horizonte") },
   { rotulo: "VPL", acessor: (c) => c.indicadores.vpl, formatar: formatBRL },
+  { rotulo: "Taxa de desconto (a.m.)", acessor: (c) => `${(Number(c.indicadores.taxaDescontoMensal) * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` },
+  { rotulo: "TIR (a.m.)", acessor: (c) => (c.indicadores.tir !== null ? `${(Number(c.indicadores.tir) * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` : "não aplicável") },
+  { rotulo: "Resultado (margem líquida)", acessor: (c) => (c.indicadores.margemLiquida !== null ? `${(Number(c.indicadores.margemLiquida) * 100).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%` : "não aplicável") },
 ];
 
 function ComparacaoResultado({ cenarios, nomesPorId }: { cenarios: ComparacaoCenario[]; nomesPorId: Map<string, string> }) {
@@ -422,9 +442,13 @@ function ComparacaoResultado({ cenarios, nomesPorId }: { cenarios: ComparacaoCen
           </table>
         </div>
         <div style={{ fontSize: 11, color: "var(--ink-muted)", marginTop: 12 }}>
-          TIR e "Resultado" não aparecem aqui porque o motor financeiro deste sistema não calcula esses indicadores hoje — só VPL, necessidade máxima de
-          capital, mês do pico, mês de recuperação e saldo final.
+          Resultado (margem líquida) = saldo final ÷ VGV. TIR é a taxa mensal que zera o VPL do fluxo; quando o fluxo não tem mudança de sinal, aparece como não aplicável.
         </div>
+        {cenarios.some((c) => paybackDescontadoAntesDoSimples(c.indicadores)) && (
+          <div style={{ fontSize: 11, color: "var(--ink-muted)", marginTop: 6 }}>
+            Payback descontado antes do simples: possível quando há saída de caixa depois do pico. O desconto reduz o peso dessas saídas futuras, então o saldo descontado pode voltar a zero antes do saldo nominal. Não indica erro de cálculo.
+          </div>
+        )}
       </div>
 
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", boxShadow: "var(--shadow-sm)" }}>
@@ -449,10 +473,16 @@ function ComparacaoResultado({ cenarios, nomesPorId }: { cenarios: ComparacaoCen
               <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-primary)", marginBottom: 8 }}>{c.nome}</div>
               <PremissaLinha rotulo="Horizonte" valor={`${c.premissas.horizonteProjecaoMeses} meses`} />
               <PremissaLinha rotulo="Limite de risco" valor={c.premissas.limiteNecessidadeMaximaCapital ? `${(Number(c.premissas.limiteNecessidadeMaximaCapital) * 100).toFixed(0)}%` : "padrão (30%)"} />
-              <PremissaLinha rotulo="Velocidade de vendas" valor={`${c.premissas.velocidadeVendas.totalUnidadesPrevistas} unidade(s) prevista(s)`} />
+              <PremissaLinha rotulo="Unidades vendidas (reais)" valor={String(c.premissas.vendas.reais)} />
+              <PremissaLinha rotulo="Unidades projetadas (premissa)" valor={String(c.premissas.vendas.projetadas)} />
               {c.premissas.velocidadeVendas.porTipologia.map((t) => (
                 <div key={t.tipologiaId} style={{ fontSize: 11, color: "var(--ink-muted)", paddingLeft: 8 }}>
-                  · {t.tipologiaNome}: {t.totalUnidadesPrevistas}
+                  · {t.tipologiaNome}: {t.totalUnidadesPrevistas} prevista(s)
+                </div>
+              ))}
+              {c.premissas.avisos.map((aviso) => (
+                <div key={aviso} style={{ fontSize: 11, color: "var(--status-warning-text)", paddingLeft: 8 }}>
+                  Aviso: {aviso}
                 </div>
               ))}
               {c.premissas.custos.length === 0 ? (
