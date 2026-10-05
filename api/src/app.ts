@@ -24,7 +24,13 @@ import {
   criarDestinatarioComissao,
   criarFaixaComissao,
   criarEmpreendimento,
+  atualizarPrecoUnidade,
+  excluirVenda,
+  impactoExclusaoVenda,
+  substituirCronograma,
+  atualizarPremissaVelocidade,
   criarPremissaVelocidade,
+  excluirPremissaVelocidade,
   criarTipologia,
   criarUnidadesEmLote,
   criarUnidadesPorAndar,
@@ -54,6 +60,7 @@ import {
   registrarPermuta,
   registrarRenegociacaoVenda,
   registrarVenda,
+  impactoExclusao,
   resumoEstoque,
   type ModalidadeInput,
 } from "../../src/db/cadastro.js";
@@ -70,16 +77,22 @@ import {
   nivelAcessoEmpreendimento,
   validarSessao,
   vincularUsuarioEmpreendimento,
-} from "../../src/db/auth.js";
+  atualizarUsuario,} from "../../src/db/auth.js";
 import { prisma } from "../../src/db/client.js";
 import { confirmarConciliacao, montarCandidatosConciliacao, type ConfirmacaoConciliacao } from "../../src/db/conciliacao.js";
 import { gerarVendasDePremissaVelocidade } from "../../src/db/gerarVendas.js";
 import {
+  formatarTir,
+  taxaDescontoEfetiva,
   calcularSensibilidadeCenario,
   montarComparacaoCenarios,
   montarCurvaCronogramaDoCenario,
   montarCustosResumoDoCenario,
+  calcularAvisosPremissas,
+  ehVendaDaPremissa,
+  mensagemParcelasPagasSemBase,
   montarPremissasResumoCenario,
+  parcelasPagasQuePerderiamBase,
   rodarMotorParaCenario,
 } from "../../src/db/servicoMotor.js";
 import { montarDadosRelatorioComparativo, montarDadosRelatorioViabilidade } from "../../src/relatorios/dados.js";
@@ -152,6 +165,36 @@ const ORIGENS_PERMITIDAS = (process.env.CORS_ORIGINS ?? "http://localhost:5173,h
   .split(",")
   .map((o) => o.trim())
   .filter(Boolean);
+
+// Valores monetários/percentuais chegam como texto (decimal-as-string). Um espaço
+// ou vírgula sobrando gravava lixo no banco e o motor quebrava com 500 depois.
+function lerDecimal(valor: string | undefined, rotulo: string, exemplo: string, maximo?: number, aceitaNegativo = false): { valor?: string; erro?: string } {
+  if (valor === undefined) return {};
+  const limpo = valor.trim();
+  const formato = aceitaNegativo ? /^-?\d+(\.\d+)?$/ : /^\d+(\.\d+)?$/;
+  if (!formato.test(limpo)) return { erro: `${rotulo} deve ser um número com ponto decimal (ex.: ${exemplo})` };
+  if (maximo !== undefined && Number(limpo) > maximo) return { erro: `${rotulo} deve ficar entre 0 e ${maximo}` };
+  return { valor: limpo };
+}
+
+function lerValorAtribuido(valor: string | null | undefined): { valor?: string | null; erro?: string } {
+  if (valor === null) return { valor: null };
+  return lerDecimal(valor, "Valor atribuído", "100000.00");
+}
+
+function lerModalidades(modalidades: ModalidadeInput[]): { modalidades?: ModalidadeInput[]; erro?: string } {
+  const lidas: ModalidadeInput[] = [];
+  for (const m of modalidades) {
+    if (m.mesFinal !== undefined && m.mesFinal !== null && (m.tipoDistribuicao !== "nivelada" || !Number.isInteger(m.mesFinal) || m.mesFinal < 1)) {
+      return { erro: `Mês final da modalidade "${m.nome}" só vale para nivelada e deve ser um inteiro maior ou igual a 1` };
+    }
+    const percentual = lerDecimal(m.percentual, `Percentual da modalidade "${m.nome}"`, "0.2", 1);
+    if (percentual.erro) return { erro: percentual.erro };
+    if (percentual.valor === undefined) return { erro: `Percentual da modalidade "${m.nome}" é obrigatório` };
+    lidas.push({ ...m, nome: m.nome.trim(), percentual: percentual.valor });
+  }
+  return { modalidades: lidas };
+}
 
 export async function buildApp() {
   const app = Fastify({ logger: false });
@@ -254,6 +297,32 @@ export async function buildApp() {
       return { erro: "Apenas administradores podem listar usuários" };
     }
     return listarUsuarios();
+  });
+
+  app.patch<{ Params: { id: string }; Body: { nome?: string; papel?: string } }>("/api/usuarios/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem editar usuários" };
+    }
+    const { nome, papel } = req.body ?? {};
+    const papeisValidos = ["admin", "usuario", "stakeholder"];
+    if (papel !== undefined && !papeisValidos.includes(papel)) {
+      reply.code(400);
+      return { erro: `Papel deve ser um de: ${papeisValidos.join(", ")}` };
+    }
+    if (nome !== undefined && !nome.trim()) {
+      reply.code(400);
+      return { erro: "Nome não pode ficar vazio" };
+    }
+    const resultado = await atualizarUsuario(req.params.id, {
+      nome: nome?.trim(),
+      papel: papel as "admin" | "usuario" | "stakeholder" | undefined,
+    });
+    if ("erro" in resultado) {
+      reply.code(resultado.erro === "Usuário não encontrado" ? 404 : 400);
+      return { erro: resultado.erro };
+    }
+    return resultado.usuario;
   });
 
   app.delete<{ Params: { id: string } }>("/api/usuarios/:id", async (req, reply) => {
@@ -374,7 +443,8 @@ export async function buildApp() {
       include: { cenarios: { select: { id: true, nome: true, tipo: true, horizonteProjecaoMeses: true } } },
       orderBy: { nome: "asc" },
     });
-    return empreendimentos;
+    const niveis = req.usuario!.papel === "admin" ? null : new Map((await prisma.empreendimentoUsuario.findMany({ where: { usuarioId: req.usuario!.id } })).map((v) => [v.empreendimentoId, v.papel]));
+    return empreendimentos.map((e) => ({ ...e, nivelAcesso: niveis ? niveis.get(e.id) ?? "leitura" : "admin" }));
   });
 
   app.post<{ Body: { nome?: string; incorporador?: string; endereco?: string } }>("/api/empreendimentos", async (req, reply) => {
@@ -424,6 +494,7 @@ export async function buildApp() {
     return {
       id: empreendimento.id,
       nome: empreendimento.nome,
+      nivelAcesso: await nivelAcessoEmpreendimento(req.usuario!, empreendimento.id),
       incorporador: empreendimento.incorporador,
       endereco: empreendimento.endereco,
       terrenos: empreendimento.terrenos.map((t) => ({
@@ -442,7 +513,7 @@ export async function buildApp() {
         horizonteProjecaoMeses: c.horizonteProjecaoMeses,
         derivadoDeNome: c.derivadoDe?.nome ?? null,
       })),
-      categoriasCusto: empreendimento.categoriasCusto.map((cc) => ({ id: cc.id, nome: cc.nome, tipoIncidencia: cc.tipoIncidencia })),
+      categoriasCusto: empreendimento.categoriasCusto.map((cc) => ({ id: cc.id, nome: cc.nome, tipoIncidencia: cc.tipoIncidencia, papel: cc.papel })),
       tipologias: empreendimento.tipologias.map((t) => ({
         id: t.id,
         nome: t.nome,
@@ -458,6 +529,7 @@ export async function buildApp() {
             tipoDistribuicao: m.tipoDistribuicao,
             periodicidadeMeses: m.periodicidadeMeses,
             mesFixo: m.mesFixo,
+            mesFinal: m.mesFinal,
             repeticoesSobreTotal: m.repeticoesSobreTotal,
             geraEventoParcial: m.geraEventoParcial,
           })),
@@ -548,6 +620,17 @@ export async function buildApp() {
       return atualizarEmpreendimento(req.params.id, { nome: nome?.trim(), incorporador, endereco });
     },
   );
+
+  app.get<{ Params: { id: string } }>("/api/empreendimentos/:id/impacto-exclusao", async (req, reply) => {
+    const empreendimento = await prisma.empreendimento.findUnique({ where: { id: req.params.id } });
+    if (!empreendimento) {
+      reply.code(404);
+      return { erro: "Empreendimento não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, empreendimento.id))) return;
+    const cenarioIds = (await prisma.cenario.findMany({ where: { empreendimentoId: empreendimento.id }, select: { id: true } })).map((c) => c.id);
+    return { cenarios: cenarioIds.length, ...(await impactoExclusao(cenarioIds)) };
+  });
 
   app.delete<{ Params: { id: string } }>("/api/empreendimentos/:id", async (req, reply) => {
     if (req.usuario!.papel !== "admin") {
@@ -759,11 +842,16 @@ export async function buildApp() {
       return { erro: "Unidade não encontrada" };
     }
     if (!(await garantirAcesso(req, reply, unidade.empreendimentoId))) return;
+    const valorLido = lerValorAtribuido(valorAtribuido);
+    if (valorLido.erro) {
+      reply.code(400);
+      return { erro: valorLido.erro };
+    }
     const resultado = await registrarPermuta({
       unidadeId: req.params.id,
       nomeContraparte: nomeContraparte.trim(),
       documento,
-      valorAtribuido,
+      valorAtribuido: valorLido.valor ?? undefined,
       dataAcordo: dataAcordo ? new Date(dataAcordo) : undefined,
       observacao,
     });
@@ -790,10 +878,15 @@ export async function buildApp() {
       return { erro: "Unidade não encontrada" };
     }
     if (!(await garantirAcesso(req, reply, unidade.empreendimentoId))) return;
+    const valorLido = lerValorAtribuido(valorAtribuido);
+    if (valorLido.erro) {
+      reply.code(400);
+      return { erro: valorLido.erro };
+    }
     const resultado = await atualizarPermuta(req.params.id, {
       nomeContraparte: nomeContraparte?.trim(),
       documento,
-      valorAtribuido,
+      valorAtribuido: valorLido.valor,
       dataAcordo: dataAcordo === undefined ? undefined : dataAcordo === null ? null : new Date(dataAcordo),
       observacao,
     });
@@ -841,11 +934,21 @@ export async function buildApp() {
       return { erro: "Permuta não encontrada" };
     }
     if (!(await garantirAcesso(req, reply, permuta.empreendimentoId))) return;
+    const splitLido = lerDecimal(percentualSplit, "Percentual de split", "0.5", 1);
+    if (splitLido.erro) {
+      reply.code(400);
+      return { erro: splitLido.erro };
+    }
+    const valorLido = lerValorAtribuido(valorAtribuido);
+    if (valorLido.erro) {
+      reply.code(400);
+      return { erro: valorLido.erro };
+    }
     const resultado = await criarContrapartePermuta(permuta.id, {
       nome: nome.trim(),
       documento: documento?.trim() || undefined,
-      percentualSplit: percentualSplit.trim(),
-      valorAtribuido,
+      percentualSplit: splitLido.valor!,
+      valorAtribuido: valorLido.valor ?? undefined,
     });
     if ("erro" in resultado) {
       reply.code(400);
@@ -866,11 +969,21 @@ export async function buildApp() {
     }
     if (!(await garantirAcesso(req, reply, contraparte.permuta.empreendimentoId))) return;
     const { nome, documento, percentualSplit, valorAtribuido } = req.body ?? {};
+    const splitLido = lerDecimal(percentualSplit ?? undefined, "Percentual de split", "0.5", 1);
+    if (splitLido.erro) {
+      reply.code(400);
+      return { erro: splitLido.erro };
+    }
+    const valorLido = lerValorAtribuido(valorAtribuido);
+    if (valorLido.erro) {
+      reply.code(400);
+      return { erro: valorLido.erro };
+    }
     const resultado = await atualizarContrapartePermuta(req.params.id, {
       nome: nome?.trim() || undefined,
       documento,
-      percentualSplit: percentualSplit?.trim() || undefined,
-      valorAtribuido,
+      percentualSplit: splitLido.valor,
+      valorAtribuido: valorLido.valor,
     });
     if ("erro" in resultado) {
       reply.code(400);
@@ -983,6 +1096,17 @@ export async function buildApp() {
       return { erro: "Venda não encontrada" };
     }
     if (!(await garantirAcesso(req, reply, venda.empreendimentoId))) return;
+    if (req.body?.mesOrigem !== undefined && req.body.mesOrigem !== venda.mesOrigem) {
+      const novoMes = req.body.mesOrigem;
+      const parcelasPerdidas = await parcelasPagasQuePerderiamBase(venda.cenarioId, (e) => ({
+        ...e,
+        vendas: e.vendas.map((v) => (v.id === venda.id ? { ...v, mesOrigem: novoMes } : v)),
+      }));
+      if (parcelasPerdidas.length > 0) {
+        reply.code(400);
+        return { erro: mensagemParcelasPagasSemBase("Mudar o mês desta venda", parcelasPerdidas) };
+      }
+    }
     const resultado = await atualizarVenda(req.params.id, req.body ?? {});
     if ("erro" in resultado) {
       reply.code(400);
@@ -1011,17 +1135,26 @@ export async function buildApp() {
   // filtra vendas por status="ativa" (src/db/servicoMotor.ts), entao marcar
   // a venda como "distratada" e suficiente -- nenhuma rota de fluxo de
   // caixa precisou mudar.
-  app.post<{ Params: { id: string }; Body: { percentualRetencao?: string; motivo?: string } }>(
+  app.post<{ Params: { id: string }; Body: { percentualRetencao?: string; motivo?: string; mesDistrato?: number } }>(
     "/api/vendas/:id/distrato",
     async (req, reply) => {
-      const { percentualRetencao, motivo } = req.body ?? {};
-      const venda = await prisma.venda.findUnique({ where: { id: req.params.id } });
+      const { percentualRetencao, motivo, mesDistrato } = req.body ?? {};
+      const venda = await prisma.venda.findUnique({ where: { id: req.params.id }, include: { cenario: { select: { horizonteProjecaoMeses: true } } } });
       if (!venda) {
         reply.code(404);
         return { erro: "Venda não encontrada" };
       }
       if (!(await garantirAcesso(req, reply, venda.empreendimentoId))) return;
-      const resultado = await registrarDistrato({ vendaId: req.params.id, percentualRetencao, motivo });
+      if (mesDistrato === undefined || !Number.isInteger(mesDistrato) || mesDistrato < 1 || mesDistrato > venda.cenario.horizonteProjecaoMeses) {
+        reply.code(400);
+        return { erro: `Mês do distrato deve ser um inteiro entre 1 e ${venda.cenario.horizonteProjecaoMeses} (horizonte do cenário)` };
+      }
+      const taxaLida = percentualRetencao === undefined ? { valor: undefined } : lerDecimal(percentualRetencao, "Percentual de retenção", "0.1", 1);
+      if (taxaLida.erro) {
+        reply.code(400);
+        return { erro: taxaLida.erro };
+      }
+      const resultado = await registrarDistrato({ vendaId: req.params.id, percentualRetencao: taxaLida.valor, motivo, mesDistrato });
       if ("erro" in resultado) {
         reply.code(400);
         return { erro: resultado.erro };
@@ -1117,10 +1250,15 @@ export async function buildApp() {
     return null;
   });
 
-  app.post<{ Params: { id: string }; Body: { nome?: string; tipoIncidencia?: string } }>(
+  app.post<{ Params: { id: string }; Body: { nome?: string; tipoIncidencia?: string; papel?: string } }>(
     "/api/empreendimentos/:id/categorias-custo",
     async (req, reply) => {
-      const { nome, tipoIncidencia } = req.body ?? {};
+      const { nome, tipoIncidencia, papel } = req.body ?? {};
+      const papeisValidos = ["custo", "comissao_corretagem", "tributo"];
+      if (papel !== undefined && !papeisValidos.includes(papel)) {
+        reply.code(400);
+        return { erro: `Papel da categoria deve ser um de: ${papeisValidos.join(", ")}` };
+      }
       const tiposValidos = ["fixo", "pct_vgv_vendido_no_mes", "pct_recebido_mes_anterior", "pct_execucao", "pct_recebido_no_mes", "faixas_vgv_acumulado"];
       if (!nome || !nome.trim()) {
         reply.code(400);
@@ -1140,16 +1278,22 @@ export async function buildApp() {
         empreendimentoId: req.params.id,
         nome: nome.trim(),
         tipoIncidencia: tipoIncidencia as TipoIncidenciaCusto,
+        papel: (papel as "custo" | "comissao_corretagem" | "tributo" | undefined) ?? "custo",
       });
       reply.code(201);
       return categoria;
     },
   );
 
-  app.patch<{ Params: { id: string }; Body: { nome?: string; tipoIncidencia?: string } }>(
+  app.patch<{ Params: { id: string }; Body: { nome?: string; tipoIncidencia?: string; papel?: string } }>(
     "/api/categorias-custo/:id",
     async (req, reply) => {
-      const { nome, tipoIncidencia } = req.body ?? {};
+      const { nome, tipoIncidencia, papel } = req.body ?? {};
+      const papeisValidos = ["custo", "comissao_corretagem", "tributo"];
+      if (papel !== undefined && !papeisValidos.includes(papel)) {
+        reply.code(400);
+        return { erro: `Papel da categoria deve ser um de: ${papeisValidos.join(", ")}` };
+      }
       const tiposValidos = ["fixo", "pct_vgv_vendido_no_mes", "pct_recebido_mes_anterior", "pct_execucao", "pct_recebido_no_mes", "faixas_vgv_acumulado"];
       if (nome !== undefined && !nome.trim()) {
         reply.code(400);
@@ -1168,6 +1312,7 @@ export async function buildApp() {
       const resultado = await atualizarCategoriaCusto(req.params.id, {
         nome: nome?.trim(),
         tipoIncidencia: tipoIncidencia as TipoIncidenciaCusto | undefined,
+        papel: papel as "custo" | "comissao_corretagem" | "tributo" | undefined,
       });
       if ("erro" in resultado) {
         reply.code(400);
@@ -1248,12 +1393,17 @@ export async function buildApp() {
         return { erro: "Tipologia não encontrada" };
       }
       if (!(await garantirAcesso(req, reply, tipologia.empreendimentoId))) return;
+      const modalidadesLidas = lerModalidades(modalidades);
+      if (modalidadesLidas.erro) {
+        reply.code(400);
+        return { erro: modalidadesLidas.erro };
+      }
       try {
         const condicao = await criarCondicaoPagamento({
           empreendimentoId: tipologia.empreendimentoId,
           tipologiaId: tipologia.id,
           nome: nome.trim(),
-          modalidades,
+          modalidades: modalidadesLidas.modalidades!,
         });
         reply.code(201);
         return condicao;
@@ -1282,7 +1432,12 @@ export async function buildApp() {
         return { erro: "Condição de pagamento não encontrada" };
       }
       if (!(await garantirAcesso(req, reply, condicao.empreendimentoId))) return;
-      const resultado = await atualizarCondicaoPagamento(req.params.id, { nome: nome?.trim(), modalidades });
+      const modalidadesLidas = modalidades === undefined ? undefined : lerModalidades(modalidades);
+      if (modalidadesLidas?.erro) {
+        reply.code(400);
+        return { erro: modalidadesLidas.erro };
+      }
+      const resultado = await atualizarCondicaoPagamento(req.params.id, { nome: nome?.trim(), modalidades: modalidadesLidas?.modalidades });
       if ("erro" in resultado) {
         reply.code(400);
         return { erro: resultado.erro };
@@ -1319,7 +1474,7 @@ export async function buildApp() {
             id: true,
             nome: true,
             tipologias: { select: { id: true, nome: true } },
-            categoriasCusto: { select: { id: true, nome: true, tipoIncidencia: true } },
+            categoriasCusto: { select: { id: true, nome: true, tipoIncidencia: true, papel: true } },
           },
         },
         premissasVelocidade: { include: { tipologia: { select: { nome: true } } }, orderBy: { mes: "asc" } },
@@ -1349,6 +1504,7 @@ export async function buildApp() {
       tipo: cenario.tipo,
       horizonteProjecaoMeses: cenario.horizonteProjecaoMeses,
       limiteNecessidadeMaximaCapital: cenario.limiteNecessidadeMaximaCapital,
+      taxaDescontoMensal: cenario.taxaDescontoMensal,
       dataMesUm: cenario.dataMesUm ? cenario.dataMesUm.toISOString().slice(0, 10) : null,
       empreendimento: { id: cenario.empreendimento.id, nome: cenario.empreendimento.nome },
       tipologiasDisponiveis: cenario.empreendimento.tipologias,
@@ -1360,6 +1516,7 @@ export async function buildApp() {
         mes: p.mes,
         unidadesPrevistas: p.unidadesPrevistas,
       })),
+      avisos: await calcularAvisosPremissas(cenario.id),
       custos: cenario.custos.map((c) => ({
         id: c.id,
         categoriaNome: c.categoria.nome,
@@ -1393,9 +1550,14 @@ export async function buildApp() {
 
   app.patch<{
     Params: { id: string };
-    Body: { nome?: string; horizonteProjecaoMeses?: number; limiteNecessidadeMaximaCapital?: string | null; dataMesUm?: string | null };
+    Body: { nome?: string; horizonteProjecaoMeses?: number; limiteNecessidadeMaximaCapital?: string | null; dataMesUm?: string | null; taxaDescontoMensal?: string | null };
   }>("/api/cenarios/:id", async (req, reply) => {
-    const { nome, horizonteProjecaoMeses, limiteNecessidadeMaximaCapital, dataMesUm } = req.body ?? {};
+    const { nome, horizonteProjecaoMeses, limiteNecessidadeMaximaCapital, dataMesUm, taxaDescontoMensal } = req.body ?? {};
+    const taxaLida: { valor?: string | null; erro?: string } = taxaDescontoMensal === undefined || taxaDescontoMensal === null ? { valor: taxaDescontoMensal } : lerDecimal(taxaDescontoMensal.trim() === "" ? undefined : taxaDescontoMensal, "Taxa de desconto (TMA)", "0.008", 1);
+    if (taxaLida.erro) {
+      reply.code(400);
+      return { erro: taxaLida.erro };
+    }
     if (nome !== undefined && !nome.trim()) {
       reply.code(400);
       return { erro: "Nome do cenário não pode ficar vazio" };
@@ -1431,6 +1593,7 @@ export async function buildApp() {
       horizonteProjecaoMeses,
       limiteNecessidadeMaximaCapital: limiteNecessidadeMaximaCapital === undefined ? undefined : limiteNecessidadeMaximaCapital?.trim() || null,
       dataMesUm: dataMesUm === undefined ? undefined : dataMesUm === null ? null : new Date(dataMesUm),
+      taxaDescontoMensal: taxaDescontoMensal === undefined ? undefined : taxaLida.valor ?? null,
     });
   });
 
@@ -1489,6 +1652,16 @@ export async function buildApp() {
       return resultado;
     },
   );
+
+  app.get<{ Params: { id: string } }>("/api/cenarios/:id/impacto-exclusao", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+    return impactoExclusao([cenario.id]);
+  });
 
   app.delete<{ Params: { id: string } }>("/api/cenarios/:id", async (req, reply) => {
     if (req.usuario!.papel !== "admin") {
@@ -1564,6 +1737,12 @@ export async function buildApp() {
       reply.code(400);
       return { erro: "Mês de competência é obrigatório para custo fixo" };
     }
+    const valorLido = lerDecimal(valorPrevisto, "Valor previsto", "500000");
+    const percentualLido = lerDecimal(percentual, "Percentual", "0.04");
+    if (valorLido.erro || percentualLido.erro) {
+      reply.code(400);
+      return { erro: valorLido.erro ?? percentualLido.erro };
+    }
     // Escopo por tipologia (achado F11, docs/DECISOES.md — "estrutura de
     // comissao") so faz sentido para pct_vgv_vendido_no_mes,
     // pct_recebido_no_mes (achado F25) ou faixas_vgv_acumulado (achado F28)
@@ -1587,8 +1766,8 @@ export async function buildApp() {
       cenarioId: cenario.id,
       categoriaId,
       tipologiaId: tipologiaId || undefined,
-      valorPrevisto: incidenciaPorValor ? valorPrevisto : undefined,
-      percentual: incidenciaPorValor || usaFaixas ? undefined : percentual,
+      valorPrevisto: incidenciaPorValor ? valorLido.valor : undefined,
+      percentual: incidenciaPorValor || usaFaixas ? undefined : percentualLido.valor,
       competenciaMes: categoria.tipoIncidencia === "fixo" ? competenciaMes : undefined,
       recorrencia: (recorrencia as "unico" | "mensal") ?? "unico",
       grupoIndiceCorrecao: grupoIndiceCorrecao?.trim() || undefined,
@@ -1617,6 +1796,18 @@ export async function buildApp() {
     // ja checar papel==="admin" (sem risco pratico hoje, ja que admin tem
     // acesso universal, mas inconsistente com o resto das rotas de custo).
     if (!(await garantirAcesso(req, reply, custo.empreendimentoId))) return;
+    const categoriaDoCusto = await prisma.categoriaCusto.findUniqueOrThrow({ where: { id: custo.categoriaId } });
+    const parcelasPerdidas = await parcelasPagasQuePerderiamBase(custo.cenarioId, (e) => ({
+      ...e,
+      custos: e.custos.filter((c) => c.id !== custo.id),
+    }));
+    if (custo.status === "realizado" && categoriaDoCusto.tipoIncidencia === "fixo") {
+      parcelasPerdidas.push({ categoriaNome: categoriaDoCusto.nome, mes: custo.competenciaMes ?? 0, valorRealizado: custo.valorRealizado ?? "0" });
+    }
+    if (parcelasPerdidas.length > 0) {
+      reply.code(400);
+      return { erro: mensagemParcelasPagasSemBase("Excluir este custo", parcelasPerdidas) };
+    }
     await excluirCusto(req.params.id);
     reply.code(204);
     return null;
@@ -1644,7 +1835,12 @@ export async function buildApp() {
         return { erro: "Custo não encontrado" };
       }
       if (!(await garantirAcesso(req, reply, custo.empreendimentoId))) return;
-      const resultado = await criarDestinatarioComissao(custo.id, nome.trim(), percentualSplit.trim());
+      const splitLido = lerDecimal(percentualSplit, "Percentual de split", "0.5", 1);
+      if (splitLido.erro) {
+        reply.code(400);
+        return { erro: splitLido.erro };
+      }
+      const resultado = await criarDestinatarioComissao(custo.id, nome.trim(), splitLido.valor!);
       if ("erro" in resultado) {
         reply.code(400);
         return resultado;
@@ -1664,9 +1860,14 @@ export async function buildApp() {
       }
       if (!(await garantirAcesso(req, reply, destinatario.custo.empreendimentoId))) return;
       const { nome, percentualSplit } = req.body ?? {};
+      const splitLido = lerDecimal(percentualSplit ?? undefined, "Percentual de split", "0.5", 1);
+      if (splitLido.erro) {
+        reply.code(400);
+        return { erro: splitLido.erro };
+      }
       const resultado = await atualizarDestinatarioComissao(req.params.id, {
         nome: nome?.trim() || undefined,
-        percentualSplit: percentualSplit?.trim() || undefined,
+        percentualSplit: splitLido.valor,
       });
       if ("erro" in resultado) {
         reply.code(400);
@@ -1711,7 +1912,13 @@ export async function buildApp() {
         return { erro: "Custo não encontrado" };
       }
       if (!(await garantirAcesso(req, reply, custo.empreendimentoId))) return;
-      const resultado = await criarFaixaComissao(custo.id, volumeAte?.trim() || null, percentual.trim());
+      const percentualLido = lerDecimal(percentual, "Percentual da faixa", "0.04", 1);
+      const volumeLido = volumeAte?.trim() ? lerDecimal(volumeAte, "Volume até", "1000000") : { valor: undefined };
+      if (percentualLido.erro || volumeLido.erro) {
+        reply.code(400);
+        return { erro: percentualLido.erro ?? volumeLido.erro };
+      }
+      const resultado = await criarFaixaComissao(custo.id, volumeLido.valor ?? null, percentualLido.valor!);
       if ("erro" in resultado) {
         reply.code(400);
         return resultado;
@@ -1731,9 +1938,15 @@ export async function buildApp() {
       }
       if (!(await garantirAcesso(req, reply, faixa.custo.empreendimentoId))) return;
       const { volumeAte, percentual } = req.body ?? {};
+      const percentualLido = lerDecimal(percentual ?? undefined, "Percentual da faixa", "0.04", 1);
+      const volumeLido = volumeAte?.trim() ? lerDecimal(volumeAte, "Volume até", "1000000") : { valor: undefined };
+      if (percentualLido.erro || volumeLido.erro) {
+        reply.code(400);
+        return { erro: percentualLido.erro ?? volumeLido.erro };
+      }
       const resultado = await atualizarFaixaComissao(req.params.id, {
-        volumeAte: volumeAte === undefined ? undefined : volumeAte?.trim() || null,
-        percentual: percentual?.trim() || undefined,
+        volumeAte: volumeAte === undefined ? undefined : volumeLido.valor ?? null,
+        percentual: percentualLido.valor,
       });
       if ("erro" in resultado) {
         reply.code(400);
@@ -1774,6 +1987,38 @@ export async function buildApp() {
     return null;
   });
 
+  app.patch<{ Params: { id: string }; Body: { pontos?: { mes: number; percentualExecucaoMensal: string }[] } }>(
+    "/api/cenarios/:id/cronograma",
+    async (req, reply) => {
+      const { pontos } = req.body ?? {};
+      if (!pontos || pontos.length === 0) {
+        reply.code(400);
+        return { erro: "É preciso ao menos um ponto de cronograma" };
+      }
+      const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
+      if (!cenario) {
+        reply.code(404);
+        return { erro: "Cenário não encontrado" };
+      }
+      if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+      const lidos = pontos.map((p) => ({ mes: Number(p.mes), percentual: lerDecimal(p.percentualExecucaoMensal, `Percentual do mês ${p.mes}`, "0.1", 1) }));
+      const primeiroErro = lidos.find((l) => l.percentual.erro);
+      if (primeiroErro) {
+        reply.code(400);
+        return { erro: primeiroErro.percentual.erro };
+      }
+      const erro = await substituirCronograma(
+        cenario.id,
+        lidos.map((l) => ({ mes: l.mes, percentualExecucaoMensal: l.percentual.valor! })),
+      );
+      if (erro) {
+        reply.code(400);
+        return { erro };
+      }
+      return { pontos: pontos.length };
+    },
+  );
+
   app.post<{ Params: { id: string }; Body: { pontos?: { mes: number; percentualExecucaoMensal: string }[] } }>(
     "/api/cenarios/:id/cronograma",
     async (req, reply) => {
@@ -1793,8 +2038,15 @@ export async function buildApp() {
         reply.code(400);
         return { erro: "Este cenário já tem um cronograma cadastrado" };
       }
+      const pontosLidos = pontos.map((p) => lerDecimal(p.percentualExecucaoMensal, `Percentual do mês ${p.mes}`, "0.05", 1));
+      const primeiroErro = pontosLidos.find((p) => p.erro);
+      if (primeiroErro) {
+        reply.code(400);
+        return { erro: primeiroErro.erro };
+      }
+      const pontosNormalizados = pontos.map((p, i) => ({ mes: p.mes, percentualExecucaoMensal: pontosLidos[i]!.valor! }));
       try {
-        await criarCronograma({ empreendimentoId: cenario.empreendimentoId, cenarioId: cenario.id, pontos });
+        await criarCronograma({ empreendimentoId: cenario.empreendimentoId, cenarioId: cenario.id, pontos: pontosNormalizados });
         reply.code(201);
         return { criados: pontos.length };
       } catch (e: any) {
@@ -1842,9 +2094,14 @@ export async function buildApp() {
         reply.code(400);
         return { erro: "mês deve ser um número inteiro maior ou igual a 1" };
       }
-      if (percentual === undefined || !percentual.trim() || Number.isNaN(Number(percentual))) {
+      if (percentual === undefined || !percentual.trim()) {
         reply.code(400);
         return { erro: "percentual é obrigatório e deve ser numérico" };
+      }
+      const percentualLido = lerDecimal(percentual, "Variação", "0.005", undefined, true);
+      if (percentualLido.erro) {
+        reply.code(400);
+        return { erro: percentualLido.erro };
       }
       const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
       if (!cenario) {
@@ -1857,7 +2114,7 @@ export async function buildApp() {
         cenarioId: cenario.id,
         grupo: grupo?.trim() || undefined,
         mes,
-        percentual: percentual.trim(),
+        percentual: percentualLido.valor!,
       });
       reply.code(201);
       return ponto;
@@ -1890,13 +2147,19 @@ export async function buildApp() {
   }>("/api/cenarios/:id/financiamento", async (req, reply) => {
     const { valorContratado, taxaJurosMensal, mesAmortizacao, numeroParcelas } = req.body ?? {};
     const tipoAmortizacao = (req.body?.tipoAmortizacao as "unico" | "sac" | "price" | undefined) ?? "unico";
-    if (!valorContratado || !valorContratado.trim() || Number.isNaN(Number(valorContratado))) {
+    if (!valorContratado || !valorContratado.trim()) {
       reply.code(400);
       return { erro: "valorContratado é obrigatório e deve ser numérico" };
     }
-    if (!taxaJurosMensal || !taxaJurosMensal.trim() || Number.isNaN(Number(taxaJurosMensal))) {
+    if (!taxaJurosMensal || !taxaJurosMensal.trim()) {
       reply.code(400);
       return { erro: "taxaJurosMensal é obrigatório e deve ser numérico" };
+    }
+    const valorContratadoLido = lerDecimal(valorContratado, "Valor contratado", "1000000");
+    const taxaLida = lerDecimal(taxaJurosMensal, "Juros mensal", "0.01", 1);
+    if (valorContratadoLido.erro || taxaLida.erro) {
+      reply.code(400);
+      return { erro: valorContratadoLido.erro ?? taxaLida.erro };
     }
     if (mesAmortizacao === undefined || !Number.isInteger(mesAmortizacao) || mesAmortizacao < 1) {
       reply.code(400);
@@ -1922,8 +2185,8 @@ export async function buildApp() {
     const financiamento = await definirFinanciamento({
       empreendimentoId: cenario.empreendimentoId,
       cenarioId: cenario.id,
-      valorContratado: valorContratado.trim(),
-      taxaJurosMensal: taxaJurosMensal.trim(),
+      valorContratado: valorContratadoLido.valor!,
+      taxaJurosMensal: taxaLida.valor!,
       mesAmortizacao,
       tipoAmortizacao,
       numeroParcelas: tipoAmortizacao === "unico" ? null : numeroParcelas,
@@ -1991,9 +2254,33 @@ export async function buildApp() {
       return prisma.custo.update({ where: { id: req.params.id }, data: { valorRealizado: valorRealizado.trim(), status: "realizado" } });
     }
 
+    const valorLido = lerDecimal(valorPrevisto ?? undefined, "Valor previsto", "500000");
+    const percentualLido = lerDecimal(percentual ?? undefined, "Percentual", "0.04");
+    if (valorLido.erro || percentualLido.erro) {
+      reply.code(400);
+      return { erro: valorLido.erro ?? percentualLido.erro };
+    }
+    const parcelasPerdidas = await parcelasPagasQuePerderiamBase(custo.cenarioId, (e) => ({
+      ...e,
+      custos: e.custos.map((c) =>
+        c.id !== custo.id
+          ? c
+          : {
+              ...c,
+              valorPrevisto: valorPrevisto === undefined ? c.valorPrevisto : valorPrevisto === null ? undefined : new Decimal(valorPrevisto),
+              percentual: percentual === undefined ? c.percentual : percentual === null ? undefined : new Decimal(percentual),
+              competenciaMes: competenciaMes === undefined ? c.competenciaMes : competenciaMes ?? undefined,
+              recorrencia: recorrencia ?? c.recorrencia,
+            },
+      ),
+    }));
+    if (parcelasPerdidas.length > 0) {
+      reply.code(400);
+      return { erro: mensagemParcelasPagasSemBase("Editar este custo", parcelasPerdidas) };
+    }
     const atualizado = await atualizarCusto(req.params.id, {
-      valorPrevisto,
-      percentual,
+      valorPrevisto: valorPrevisto === null ? null : valorLido.valor,
+      percentual: percentual === null ? null : percentualLido.valor,
       competenciaMes,
       recorrencia,
       grupoIndiceCorrecao: grupoIndiceCorrecao?.trim() || undefined,
@@ -2109,6 +2396,10 @@ export async function buildApp() {
       }
       if (!(await garantirAcesso(req, reply, desembolso.custo.empreendimentoId))) return;
       if (estornar) {
+        if (new Decimal(desembolso.valorPrevisto).isZero()) {
+          await prisma.desembolsoCusto.delete({ where: { id: req.params.id } });
+          return { id: req.params.id, removido: true };
+        }
         return prisma.desembolsoCusto.update({ where: { id: req.params.id }, data: { valorRealizado: null, status: "previsto" } });
       }
       return prisma.desembolsoCusto.update({
@@ -2152,11 +2443,6 @@ export async function buildApp() {
     if (!(await garantirAcesso(req, reply, custo.empreendimentoId))) return;
 
     const resultado = await rodarMotorParaCenario(custo.cenarioId);
-    const meses = resultado.desembolsos
-      .filter((d) => d.custoId === custo.id)
-      .map((d) => ({ mes: d.mes, valorPrevisto: d.valor.toString() }))
-      .sort((a, b) => a.mes - b.mes);
-
     const granular = custo.categoria.tipoIncidencia !== "fixo";
     const realizadoPorMes = granular
       ? (await prisma.desembolsoCusto.findMany({ where: { custoId: custo.id }, orderBy: { mes: "asc" } })).map((d) => ({
@@ -2166,6 +2452,11 @@ export async function buildApp() {
           desembolsoId: d.id,
         }))
       : [];
+    const mesesComBase = resultado.desembolsos.filter((d) => d.custoId === custo.id).map((d) => ({ mes: d.mes, valorPrevisto: d.valor.toString(), semBase: false }));
+    const mesesSemBase = realizadoPorMes
+      .filter((r) => r.status === "realizado" && !mesesComBase.some((m) => m.mes === r.mes))
+      .map((r) => ({ mes: r.mes, valorPrevisto: "0", semBase: true }));
+    const meses = [...mesesComBase, ...mesesSemBase].sort((a, b) => a.mes - b.mes);
 
     return {
       custoId: custo.id,
@@ -2191,19 +2482,133 @@ export async function buildApp() {
         return { erro: "Cenário não encontrado" };
       }
       if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+      const unidadesLidas = itens.map((item) => lerDecimal(item.unidadesPrevistas, `Unidades previstas (mês ${item.mes})`, "10"));
+      const primeiroErro = unidadesLidas.find((u) => u.erro);
+      if (primeiroErro) {
+        reply.code(400);
+        return { erro: primeiroErro.erro };
+      }
       await criarPremissaVelocidade(
-        itens.map((item) => ({
+        itens.map((item, i) => ({
           empreendimentoId: cenario.empreendimentoId,
           cenarioId: cenario.id,
           tipologiaId: item.tipologiaId,
           mes: item.mes,
-          unidadesPrevistas: item.unidadesPrevistas,
+          unidadesPrevistas: unidadesLidas[i]!.valor!,
         })),
       );
       reply.code(201);
-      return { criadas: itens.length };
+      return { criadas: itens.length, avisos: await calcularAvisosPremissas(cenario.id) };
     },
   );
+
+  app.get<{ Params: { id: string } }>("/api/vendas/:id/impacto-exclusao", async (req, reply) => {
+    const venda = await prisma.venda.findUnique({ where: { id: req.params.id }, select: { empreendimentoId: true } });
+    if (!venda) {
+      reply.code(404);
+      return { erro: "Venda não encontrada" };
+    }
+    if (!(await garantirAcesso(req, reply, venda.empreendimentoId))) return;
+    const impacto = await impactoExclusaoVenda(req.params.id);
+    if ("erro" in impacto) {
+      reply.code(404);
+      return impacto;
+    }
+    return impacto;
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/vendas/:id", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const vendaAlvo = await prisma.venda.findUnique({ where: { id: req.params.id }, select: { cenarioId: true, status: true } });
+    if (vendaAlvo?.status === "ativa") {
+      const parcelasPerdidas = await parcelasPagasQuePerderiamBase(vendaAlvo.cenarioId, (e) => ({
+        ...e,
+        vendas: e.vendas.filter((v) => v.id !== req.params.id),
+      }));
+      if (parcelasPerdidas.length > 0) {
+        reply.code(400);
+        return { erro: mensagemParcelasPagasSemBase("Excluir esta venda", parcelasPerdidas) };
+      }
+    }
+    const erro = await excluirVenda(req.params.id);
+    if (erro) {
+      reply.code(erro === "Venda não encontrada" ? 404 : 400);
+      return { erro };
+    }
+    reply.code(204);
+    return null;
+  });
+
+  app.patch<{ Params: { id: string }; Body: { precoVenda?: string } }>("/api/unidades/:id", async (req, reply) => {
+    const unidade = await prisma.unidade.findUnique({ where: { id: req.params.id } });
+    if (!unidade) {
+      reply.code(404);
+      return { erro: "Unidade não encontrada" };
+    }
+    if (!(await garantirAcesso(req, reply, unidade.empreendimentoId))) return;
+    const lido = lerDecimal(req.body?.precoVenda, "Preço de venda", "510000.00");
+    if (lido.erro || lido.valor === undefined) {
+      reply.code(400);
+      return { erro: lido.erro ?? "Preço de venda é obrigatório" };
+    }
+    if (Number(lido.valor) <= 0) {
+      reply.code(400);
+      return { erro: "Preço de venda deve ser maior que zero" };
+    }
+    const resultado = await atualizarPrecoUnidade(unidade.id, lido.valor);
+    if ("erro" in resultado) {
+      reply.code(400);
+      return { erro: resultado.erro };
+    }
+    return { id: resultado.unidade.id, precoVenda: resultado.unidade.precoVenda };
+  });
+
+  // Editar e excluir uma linha da premissa. O POST continua somando linhas iguais;
+  // cada linha segue sendo um registro separado, e aqui só se mexe na linha pedida.
+  app.patch<{ Params: { id: string; premissaId: string }; Body: { unidadesPrevistas?: string } }>(
+    "/api/cenarios/:id/premissas-velocidade/:premissaId",
+    async (req, reply) => {
+      const lida = lerDecimal(req.body?.unidadesPrevistas, "Unidades previstas", "10");
+      if (lida.erro || lida.valor === undefined) {
+        reply.code(400);
+        return { erro: lida.erro ?? "Unidades previstas é obrigatório" };
+      }
+      const premissa = await prisma.premissaVelocidadeVendas.findUnique({ where: { id: req.params.premissaId } });
+      if (!premissa || premissa.cenarioId !== req.params.id) {
+        reply.code(404);
+        return { erro: "Premissa de velocidade não encontrada neste cenário" };
+      }
+      if (!(await garantirAcesso(req, reply, premissa.empreendimentoId))) return;
+      await atualizarPremissaVelocidade(premissa.id, lida.valor);
+      return { id: premissa.id, avisos: await calcularAvisosPremissas(req.params.id) };
+    },
+  );
+
+  app.delete<{ Params: { id: string; premissaId: string } }>("/api/cenarios/:id/premissas-velocidade/:premissaId", async (req, reply) => {
+    if (req.usuario!.papel !== "admin") {
+      reply.code(403);
+      return { erro: "Apenas administradores podem excluir" };
+    }
+    const premissa = await prisma.premissaVelocidadeVendas.findUnique({ where: { id: req.params.premissaId } });
+    if (!premissa || premissa.cenarioId !== req.params.id) {
+      reply.code(404);
+      return { erro: "Premissa de velocidade não encontrada neste cenário" };
+    }
+    const parcelasPerdidas = await parcelasPagasQuePerderiamBase(req.params.id, (e) => ({
+      ...e,
+      vendas: e.vendas.filter((v) => !ehVendaDaPremissa(v.id, premissa.id)),
+    }));
+    if (parcelasPerdidas.length > 0) {
+      reply.code(400);
+      return { erro: mensagemParcelasPagasSemBase("Excluir esta linha de premissa de velocidade", parcelasPerdidas) };
+    }
+    await excluirPremissaVelocidade(premissa.id);
+    reply.code(204);
+    return null;
+  });
 
   app.post<{ Params: { id: string } }>("/api/cenarios/:id/gerar-vendas", async (req, reply) => {
     const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id } });
@@ -2234,7 +2639,7 @@ export async function buildApp() {
     }
     if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
 
-    const resultado = await rodarMotorParaCenario(cenarioId, { taxaDescontoMensal: "0.005" });
+    const resultado = await rodarMotorParaCenario(cenarioId);
 
     // "Realizado" nunca passa pelo motor (que so conhece "previsto") -- e uma
     // camada de leitura por cima, somando RecebimentoProjetado.valorRealizado
@@ -2292,8 +2697,12 @@ export async function buildApp() {
         necessidadeMaximaCapital: resultado.indicadores.necessidadeMaximaCapital.toFixed(2),
         mesPico: resultado.indicadores.mesPico,
         mesRecuperacao: resultado.indicadores.mesRecuperacao,
+        mesRecuperacaoDescontado: resultado.indicadores.mesRecuperacaoDescontado,
         saldoFinal: resultado.indicadores.saldoFinal.toFixed(2),
         vpl: resultado.indicadores.vpl.toFixed(2),
+        taxaDescontoMensal: taxaDescontoEfetiva(cenario),
+        tir: formatarTir(resultado.indicadores.tir),
+        margemLiquida: resultado.indicadores.margemLiquida?.toFixed(10) ?? null,
       },
       financiamento: resultado.financiamento.map((f) => ({
         mes: f.mes,
@@ -2341,7 +2750,7 @@ export async function buildApp() {
         return { erro: "variacoes deve ser uma lista de números separados por vírgula" };
       }
 
-      const pontos = await calcularSensibilidadeCenario(cenarioId, eixo as EixoSensibilidade, variacoes, { taxaDescontoMensal: "0.005" });
+      const pontos = await calcularSensibilidadeCenario(cenarioId, eixo as EixoSensibilidade, variacoes);
       return pontos.map((p) => ({
         variacao: p.variacao.toString(),
         vpl: p.vpl.toFixed(2),
@@ -2379,7 +2788,7 @@ export async function buildApp() {
 
     const versoes = await Promise.all(
       familia.map(async (f) => {
-        const resultado = await rodarMotorParaCenario(f.id, { taxaDescontoMensal: "0.005" });
+        const resultado = await rodarMotorParaCenario(f.id);
         return {
           id: f.id,
           nome: f.nome,
@@ -2475,6 +2884,36 @@ export async function buildApp() {
     const dados = await montarDadosRelatorioViabilidade(cenario.id);
     const excel = await gerarExcelViabilidade(dados);
     reply.header("Content-Disposition", `attachment; filename="relatorio-viabilidade-${nomeArquivoBase(cenario.empreendimento.nome, cenario.nome)}.xlsx"`);
+    reply.type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    return excel;
+  });
+
+  app.get<{ Params: { id: string } }>("/api/cenarios/:id/relatorios/viabilidade-resumido.pdf", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id }, include: { empreendimento: { select: { nome: true } } } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+
+    const dados = await montarDadosRelatorioViabilidade(cenario.id);
+    const pdf = await gerarPdfViabilidade(dados, { resumido: true });
+    reply.header("Content-Disposition", `attachment; filename="relatorio-viabilidade-resumido-${nomeArquivoBase(cenario.empreendimento.nome, cenario.nome)}.pdf"`);
+    reply.type("application/pdf");
+    return pdf;
+  });
+
+  app.get<{ Params: { id: string } }>("/api/cenarios/:id/relatorios/viabilidade-resumido.xlsx", async (req, reply) => {
+    const cenario = await prisma.cenario.findUnique({ where: { id: req.params.id }, include: { empreendimento: { select: { nome: true } } } });
+    if (!cenario) {
+      reply.code(404);
+      return { erro: "Cenário não encontrado" };
+    }
+    if (!(await garantirAcesso(req, reply, cenario.empreendimentoId))) return;
+
+    const dados = await montarDadosRelatorioViabilidade(cenario.id);
+    const excel = await gerarExcelViabilidade(dados, { resumido: true });
+    reply.header("Content-Disposition", `attachment; filename="relatorio-viabilidade-resumido-${nomeArquivoBase(cenario.empreendimento.nome, cenario.nome)}.xlsx"`);
     reply.type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     return excel;
   });

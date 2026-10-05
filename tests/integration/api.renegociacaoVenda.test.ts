@@ -97,7 +97,7 @@ describe("API — distrato parcial (renegociação de venda)", () => {
 
   it("rejeita renegociar uma venda já distratada", async () => {
     const { vendaId } = await cadastrarVendaAVista();
-    await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato` });
+    await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato`, payload: { mesDistrato: 1 } });
     const res = await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/renegociacoes`, payload: { novoValorVenda: "50000" } });
     expect(res.statusCode).toBe(400);
   });

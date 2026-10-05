@@ -87,6 +87,43 @@ describe("API — edição e exclusão de cadastros", () => {
     expect(liberado.statusCode).toBe(204);
   });
 
+  it("DELETE /api/tipologias/:id exclui quando as vendas das unidades foram distratadas", async () => {
+    const emp = await app.inject({ method: "POST", url: "/api/empreendimentos", payload: { nome: "Vila Distrato" } });
+    const empreendimentoId = emp.json().id as string;
+    const tip = await app.inject({
+      method: "POST",
+      url: `/api/empreendimentos/${empreendimentoId}/tipologias`,
+      payload: { nome: "Studio", precoUnitarioPadrao: "300000" },
+    });
+    const tipologiaId = tip.json().id as string;
+    await app.inject({ method: "POST", url: `/api/tipologias/${tipologiaId}/unidades`, payload: { quantidade: 2, precoVenda: "300000", prefixoNumero: "ST" } });
+    await app.inject({
+      method: "POST",
+      url: `/api/tipologias/${tipologiaId}/condicoes-pagamento`,
+      payload: { nome: "À vista", modalidades: [{ nome: "Ato", percentual: "1", tipoDistribuicao: "unica_na_venda" }] },
+    });
+    const cenarioRes = await app.inject({
+      method: "POST",
+      url: `/api/empreendimentos/${empreendimentoId}/cenarios`,
+      payload: { tipo: "base", nome: "Base", horizonteProjecaoMeses: 12 },
+    });
+    const cenarioId = cenarioRes.json().id as string;
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/premissas-velocidade`, payload: { itens: [{ tipologiaId, mes: 1, unidadesPrevistas: "2" }] } });
+    await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/gerar-vendas` });
+
+    const vendas = await prisma.venda.findMany({ where: { cenarioId } });
+    expect(vendas.length).toBeGreaterThan(0);
+    for (const venda of vendas) {
+      const distrato = await app.inject({ method: "POST", url: `/api/vendas/${venda.id}/distrato`, payload: { mesDistrato: 1, percentualRetencao: "0" } });
+      expect(distrato.statusCode).toBe(201);
+    }
+
+    const res = await app.inject({ method: "DELETE", url: `/api/tipologias/${tipologiaId}` });
+    expect(res.statusCode).toBe(204);
+    expect(await prisma.unidade.count({ where: { tipologiaId } })).toBe(0);
+    expect(await prisma.venda.count({ where: { cenarioId } })).toBe(0);
+  });
+
   it("DELETE /api/cenarios/:id devolve as unidades vendidas ao estoque e some com as vendas do cenário no fluxo de caixa", async () => {
     const emp = await app.inject({ method: "POST", url: "/api/empreendimentos", payload: { nome: "Vila Cenário" } });
     const empreendimentoId = emp.json().id as string;

@@ -83,6 +83,39 @@ export async function autenticar(input: AutenticarInput) {
 }
 
 /** Devolve o usuario da sessao valida, ou null se o token nao existir/estiver expirado. */
+/**
+ * Edita nome e papel. E-mail não muda. Não rebaixa o último admin, e não torna
+ * stakeholder quem ainda tem vínculo de edição (a regra do stakeholder é só leitura),
+ * para que a mudança não aconteça em silêncio: o vínculo tem que ser alterado antes.
+ */
+export async function atualizarUsuario(
+  id: string,
+  input: { nome?: string; papel?: "admin" | "usuario" | "stakeholder" },
+): Promise<{ erro: string } | { usuario: { id: string; nome: string; papel: string } }> {
+  const atual = await prisma.usuario.findUnique({ where: { id } });
+  if (!atual) return { erro: "Usuário não encontrado" };
+  if (input.papel !== undefined && input.papel !== atual.papel) {
+    if (atual.papel === "admin" && input.papel !== "admin") {
+      const admins = await prisma.usuario.count({ where: { papel: "admin" } });
+      if (admins <= 1) return { erro: "Não é possível rebaixar o último administrador do sistema." };
+    }
+    if (input.papel === "stakeholder") {
+      const edicao = await prisma.empreendimentoUsuario.count({ where: { usuarioId: id, papel: "edicao" } });
+      if (edicao > 0) {
+        return {
+          erro: `Este usuário tem vínculo de edição em ${edicao} empreendimento(s). Stakeholder só tem acesso de leitura: altere esses vínculos para leitura antes de torná-lo stakeholder.`,
+        };
+      }
+    }
+  }
+  const usuario = await prisma.usuario.update({
+    where: { id },
+    data: { nome: input.nome, papel: input.papel },
+    select: { id: true, nome: true, papel: true },
+  });
+  return { usuario };
+}
+
 export async function validarSessao(token: string) {
   const sessao = await prisma.sessao.findUnique({ where: { token }, include: { usuario: true } });
   if (!sessao) return null;

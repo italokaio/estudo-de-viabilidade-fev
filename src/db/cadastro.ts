@@ -3,6 +3,7 @@ import { calcularPrecoPorAndar, validarCondicaoPagamento, validarCronograma } fr
 import type { RegraPrecificacaoAndar } from "../core/precificacaoAndar.js";
 import type { CondicaoPagamento as CondicaoPagamentoCore, TipoIncidenciaCusto } from "../core/types.js";
 import { prisma } from "./client.js";
+import { rodarMotorParaCenario } from "./servicoMotor.js";
 
 /**
  * Funcoes de cadastro — traduzem DTOs simples em linhas das tabelas
@@ -90,6 +91,8 @@ export interface AtualizarCenarioInput {
   limiteNecessidadeMaximaCapital?: string | null;
   /** Âncora de calendário para o mês 1 (achado F27) — null explícito remove a âncora. */
   dataMesUm?: Date | null;
+  /** Taxa de desconto mensal (TMA) — null explícito volta ao padrão do sistema (0,5% a.m.). */
+  taxaDescontoMensal?: string | null;
 }
 
 export async function atualizarCenario(id: string, input: AtualizarCenarioInput) {
@@ -158,6 +161,7 @@ export async function duplicarCenario(cenarioId: string, novoNome: string) {
       horizonteProjecaoMeses: original.horizonteProjecaoMeses,
       derivadoDeCenarioId: original.id,
       limiteNecessidadeMaximaCapital: original.limiteNecessidadeMaximaCapital,
+      taxaDescontoMensal: original.taxaDescontoMensal,
     },
   });
 
@@ -309,11 +313,25 @@ export async function excluirTipologia(id: string): Promise<string | null> {
   if (custoEscopado > 0) {
     return `Esta tipologia tem ${custoEscopado} custo(s) escopado(s) a ela — não é possível excluí-la sem antes remover o escopo desses custos (ou excluí-los).`;
   }
-  await prisma.modalidadePagamento.deleteMany({ where: { condicaoPagamento: { tipologiaId: id } } });
-  await prisma.condicaoPagamento.deleteMany({ where: { tipologiaId: id } });
-  await prisma.premissaVelocidadeVendas.deleteMany({ where: { tipologiaId: id } });
-  await prisma.unidade.deleteMany({ where: { tipologiaId: id } });
-  await prisma.tipologia.delete({ where: { id } });
+  const vendasDasUnidades = await prisma.venda.findMany({
+    where: { unidade: { tipologiaId: id } },
+    select: { id: true, status: true },
+  });
+  if (vendasDasUnidades.some((v) => v.status !== "distratada")) {
+    return "Esta tipologia tem venda ativa vinculada às suas unidades — não é possível excluí-la.";
+  }
+  const vendaIds = vendasDasUnidades.map((v) => v.id);
+  await prisma.$transaction([
+    prisma.recebimentoProjetado.deleteMany({ where: { vendaId: { in: vendaIds } } }),
+    prisma.distrato.deleteMany({ where: { vendaId: { in: vendaIds } } }),
+    prisma.renegociacaoVenda.deleteMany({ where: { vendaId: { in: vendaIds } } }),
+    prisma.venda.deleteMany({ where: { id: { in: vendaIds } } }),
+    prisma.modalidadePagamento.deleteMany({ where: { condicaoPagamento: { tipologiaId: id } } }),
+    prisma.condicaoPagamento.deleteMany({ where: { tipologiaId: id } }),
+    prisma.premissaVelocidadeVendas.deleteMany({ where: { tipologiaId: id } }),
+    prisma.unidade.deleteMany({ where: { tipologiaId: id } }),
+    prisma.tipologia.delete({ where: { id } }),
+  ]);
   return null;
 }
 
@@ -679,6 +697,8 @@ export async function resumoEstoque(empreendimentoId: string) {
 
 export interface RegistrarDistratoInput {
   vendaId: string;
+  /** Mes relativo (1..horizonte) em que o distrato acontece -- mes da saida do reembolso no fluxo. */
+  mesDistrato: number;
   /** 0..1 — fração do valor já recebido que a incorporadora retém. Sem informar, assume 0 (reembolso integral). */
   percentualRetencao?: string;
   motivo?: string;
@@ -691,16 +711,19 @@ export interface RegistrarDistratoInput {
  * proximo fluxo de caixa recalculado, sem nenhuma mudanca necessaria no
  * motor. A unidade volta ao estoque, disponivel para uma nova venda. O
  * valor retido/a reembolsar e calculado sobre o que ja foi efetivamente
- * recebido (RecebimentoProjetado.valorRealizado, nao o previsto) ate o
- * momento do distrato -- e um registro historico, nunca recalculado depois.
+ * previsto das parcelas com competencia anterior ao mes do distrato -- o mesmo
+ * valor que o fluxo de caixa ja contabilizou como entrada nesses meses. Nao
+ * depende de nenhum recebimento ter sido marcado como recebido. E um registro
+ * historico, nunca recalculado depois.
  */
 export async function registrarDistrato(input: RegistrarDistratoInput): Promise<{ erro: string } | { distrato: Awaited<ReturnType<typeof prisma.distrato.create>> }> {
   const venda = await prisma.venda.findUnique({ where: { id: input.vendaId } });
   if (!venda) return { erro: "Venda não encontrada" };
   if (venda.status === "distratada") return { erro: "Esta venda já foi distratada" };
 
-  const recebidos = await prisma.recebimentoProjetado.findMany({ where: { vendaId: venda.id, status: "recebido" } });
-  const valorRecebido = recebidos.reduce((acc, r) => acc.plus(new Decimal(r.valorRealizado ?? "0")), new Decimal(0));
+  await rodarMotorParaCenario(venda.cenarioId);
+  const anteriores = await prisma.recebimentoProjetado.findMany({ where: { vendaId: venda.id, mesCompetencia: { lt: input.mesDistrato } } });
+  const valorRecebido = anteriores.reduce((acc, r) => acc.plus(new Decimal(r.valorPrevisto)), new Decimal(0));
   const percentualRetencao = input.percentualRetencao ?? "0";
   const valorRetido = valorRecebido.times(new Decimal(percentualRetencao));
   const valorReembolsar = valorRecebido.minus(valorRetido);
@@ -709,6 +732,7 @@ export async function registrarDistrato(input: RegistrarDistratoInput): Promise<
     data: {
       empreendimentoId: venda.empreendimentoId,
       vendaId: venda.id,
+      mesDistrato: input.mesDistrato,
       valorRecebidoAteDistrato: valorRecebido.toFixed(2),
       percentualRetencao,
       valorRetido: valorRetido.toFixed(2),
@@ -801,6 +825,7 @@ export interface ModalidadeInput {
   tipoDistribuicao: "unica_na_venda" | "nivelada" | "periodica" | "mes_fixo";
   periodicidadeMeses?: number;
   mesFixo?: number;
+  mesFinal?: number;
   repeticoesSobreTotal?: number;
   geraEventoParcial?: boolean;
   ordem?: number;
@@ -825,6 +850,7 @@ export async function criarCondicaoPagamento(input: CriarCondicaoPagamentoInput)
       tipoDistribuicao: m.tipoDistribuicao,
       periodicidadeMeses: m.periodicidadeMeses,
       mesFixo: m.mesFixo,
+      mesFinal: m.mesFinal,
       repeticoesSobreTotal: m.repeticoesSobreTotal ?? 1,
       geraEventoParcial: m.geraEventoParcial ?? false,
       ordem: m.ordem ?? i,
@@ -848,6 +874,7 @@ export async function criarCondicaoPagamento(input: CriarCondicaoPagamentoInput)
           tipoDistribuicao: m.tipoDistribuicao,
           periodicidadeMeses: m.periodicidadeMeses,
           mesFixo: m.mesFixo,
+          mesFinal: m.mesFinal,
           repeticoesSobreTotal: m.repeticoesSobreTotal ?? 1,
           geraEventoParcial: m.geraEventoParcial ?? false,
           ordem: m.ordem ?? i,
@@ -889,6 +916,7 @@ export async function atualizarCondicaoPagamento(id: string, input: AtualizarCon
         tipoDistribuicao: m.tipoDistribuicao,
         periodicidadeMeses: m.periodicidadeMeses,
         mesFixo: m.mesFixo,
+        mesFinal: m.mesFinal,
         repeticoesSobreTotal: m.repeticoesSobreTotal ?? 1,
         geraEventoParcial: m.geraEventoParcial ?? false,
         ordem: m.ordem ?? i,
@@ -907,6 +935,7 @@ export async function atualizarCondicaoPagamento(id: string, input: AtualizarCon
         tipoDistribuicao: m.tipoDistribuicao,
         periodicidadeMeses: m.periodicidadeMeses,
         mesFixo: m.mesFixo,
+        mesFinal: m.mesFinal,
         repeticoesSobreTotal: m.repeticoesSobreTotal ?? 1,
         geraEventoParcial: m.geraEventoParcial ?? false,
         ordem: m.ordem ?? i,
@@ -941,10 +970,38 @@ export async function criarPremissaVelocidade(inputs: CriarPremissaVelocidadeInp
   await prisma.premissaVelocidadeVendas.createMany({ data: inputs });
 }
 
+/**
+ * Só o preço de venda de unidade em estoque: vendas, reservas e permutas já usam
+ * o preço registrado no momento da operação, então não podem mudar por aqui.
+ */
+export async function atualizarPrecoUnidade(
+  id: string,
+  precoVenda: string,
+): Promise<{ erro: string } | { unidade: Awaited<ReturnType<typeof prisma.unidade.update>> }> {
+  const atual = await prisma.unidade.findUnique({ where: { id }, select: { status: true } });
+  if (!atual) return { erro: "Unidade não encontrada" };
+  if (atual.status !== "estoque") {
+    return {
+      erro: `Esta unidade está com status "${atual.status}" — só é possível editar o preço de unidade em estoque. O preço já registrado nas vendas, reservas e permutas não muda.`,
+    };
+  }
+  const unidade = await prisma.unidade.update({ where: { id }, data: { precoVenda } });
+  return { unidade };
+}
+
+export async function atualizarPremissaVelocidade(id: string, unidadesPrevistas: string) {
+  return prisma.premissaVelocidadeVendas.update({ where: { id }, data: { unidadesPrevistas } });
+}
+
+export async function excluirPremissaVelocidade(id: string) {
+  await prisma.premissaVelocidadeVendas.delete({ where: { id } });
+}
+
 export interface CriarCategoriaCustoInput {
   empreendimentoId?: string;
   nome: string;
   tipoIncidencia: TipoIncidenciaCusto;
+  papel?: "custo" | "comissao_corretagem" | "tributo";
 }
 
 export async function criarCategoriaCusto(input: CriarCategoriaCustoInput) {
@@ -954,6 +1011,7 @@ export async function criarCategoriaCusto(input: CriarCategoriaCustoInput) {
 export interface AtualizarCategoriaCustoInput {
   nome?: string;
   tipoIncidencia?: TipoIncidenciaCusto;
+  papel?: "custo" | "comissao_corretagem" | "tributo";
 }
 
 /**
@@ -1186,6 +1244,84 @@ export interface CriarCronogramaInput {
 }
 
 /** Cria o cronograma fisico-financeiro, validando que a soma dos percentuais fecha em 100% (regra R6). */
+/**
+ * Troca o cronograma inteiro numa única transação: nenhum estado intermediário
+ * sem cronograma. Recusa soma diferente de 100%, meses fora do horizonte ou
+ * repetidos, e qualquer parcela de custo de obra (pct_execucao) já paga, porque
+ * a regeneração do motor apagaria a linha de desembolso do mês que sair do cronograma.
+ */
+export async function substituirCronograma(
+  cenarioId: string,
+  pontos: { mes: number; percentualExecucaoMensal: string }[],
+): Promise<string | null> {
+  const cenario = await prisma.cenario.findUnique({ where: { id: cenarioId }, select: { empreendimentoId: true, horizonteProjecaoMeses: true } });
+  if (!cenario) return "Cenário não encontrado";
+  const meses = pontos.map((p) => p.mes);
+  if (new Set(meses).size !== meses.length) return "Há meses repetidos no cronograma";
+  if (pontos.some((p) => !Number.isInteger(p.mes) || p.mes < 1 || p.mes > cenario.horizonteProjecaoMeses)) {
+    return `Meses do cronograma devem ser inteiros entre 1 e ${cenario.horizonteProjecaoMeses} (horizonte do cenário)`;
+  }
+  const validacao = validarCronograma(pontos.map((p) => ({ mes: p.mes, percentualExecucaoMensal: new Decimal(p.percentualExecucaoMensal) })));
+  if (!validacao.valido) return `Cronograma inválido: soma dos percentuais = ${validacao.soma.toString()}, esperado 1 (100%)`;
+
+  const pagas = await prisma.desembolsoCusto.count({
+    where: {
+      custo: { cenarioId, categoria: { tipoIncidencia: "pct_execucao" } },
+      OR: [{ status: "realizado" }, { valorRealizado: { not: null } }],
+    },
+  });
+  if (pagas > 0) {
+    return `Há ${pagas} parcela(s) de custo de obra ligada(s) ao cronograma marcada(s) como paga(s). Para editar o cronograma, estorne esses pagamentos de obra (Estornar na tela de custos ou de fluxo de caixa), edite o cronograma e marque-os de novo. Assim o valor realizado não se perde em silêncio.`;
+  }
+
+  await prisma.$transaction([
+    prisma.cronogramaFisicoFinanceiro.deleteMany({ where: { cenarioId } }),
+    prisma.cronogramaFisicoFinanceiro.createMany({
+      data: pontos.map((p) => ({ empreendimentoId: cenario.empreendimentoId, cenarioId, mes: p.mes, percentualExecucaoMensal: p.percentualExecucaoMensal })),
+    }),
+  ]);
+  return null;
+}
+
+/**
+ * Excluir a única venda da tipologia no cenário, com premissa para essa tipologia, faz a
+ * projeção por premissa passar a valer ali: o VGV muda. Só informa; não bloqueia nada.
+ */
+export async function impactoExclusaoVenda(id: string): Promise<{ premissaPassaraValer: boolean } | { erro: string }> {
+  const venda = await prisma.venda.findUnique({ where: { id }, select: { cenarioId: true, unidade: { select: { tipologiaId: true } } } });
+  if (!venda) return { erro: "Venda não encontrada" };
+  const tipologiaId = venda.unidade.tipologiaId;
+  const vendasNaTipologia = await prisma.venda.count({ where: { cenarioId: venda.cenarioId, unidade: { tipologiaId } } });
+  const premissas = await prisma.premissaVelocidadeVendas.count({ where: { cenarioId: venda.cenarioId, tipologiaId } });
+  return { premissaPassaraValer: vendasNaTipologia === 1 && premissas > 0 };
+}
+
+/**
+ * Exclui uma venda lançada por engano: a unidade volta ao estoque e os recebimentos
+ * previstos da venda saem junto. Venda distratada tem histórico financeiro (distrato
+ * e reembolso) e não é excluída; venda com recebimento já marcado como recebido também não.
+ */
+export async function excluirVenda(id: string): Promise<string | null> {
+  const venda = await prisma.venda.findUnique({ where: { id }, select: { status: true, unidadeId: true } });
+  if (!venda) return "Venda não encontrada";
+  if (venda.status === "distratada") {
+    return "Esta venda foi distratada e tem histórico financeiro (distrato e reembolso). Desfaça o distrato antes, se for o caso.";
+  }
+  const recebidos = await prisma.recebimentoProjetado.count({
+    where: { vendaId: id, OR: [{ status: { not: "previsto" } }, { valorRealizado: { not: null } }] },
+  });
+  if (recebidos > 0) {
+    return `Há ${recebidos} recebimento(s) desta venda marcado(s) como recebido(s). Estorne-os antes de excluir a venda, para não perder o valor realizado.`;
+  }
+  await prisma.$transaction([
+    prisma.recebimentoProjetado.deleteMany({ where: { vendaId: id } }),
+    prisma.renegociacaoVenda.deleteMany({ where: { vendaId: id } }),
+    prisma.venda.delete({ where: { id } }),
+    prisma.unidade.update({ where: { id: venda.unidadeId }, data: { status: "estoque" } }),
+  ]);
+  return null;
+}
+
 export async function criarCronograma(input: CriarCronogramaInput) {
   const validacao = validarCronograma(
     input.pontos.map((p) => ({ mes: p.mes, percentualExecucaoMensal: new Decimal(p.percentualExecucaoMensal) })),
@@ -1277,4 +1413,21 @@ export async function definirFinanciamento(input: DefinirFinanciamentoInput) {
 /** Remove o financiamento do cenario -- o cenario volta a nao ter financiamento (comportamento identico a antes desta fatia). */
 export async function excluirFinanciamento(cenarioId: string) {
   await prisma.financiamentoProducao.deleteMany({ where: { cenarioId } });
+}
+
+export interface ImpactoExclusao {
+  vendas: number;
+  recebimentosRecebidos: number;
+  parcelasCustoPagas: number;
+  custosFixosRealizados: number;
+}
+
+export async function impactoExclusao(cenarioIds: string[]): Promise<ImpactoExclusao> {
+  const [vendas, recebimentosRecebidos, parcelasCustoPagas, custosFixosRealizados] = await Promise.all([
+    prisma.venda.count({ where: { cenarioId: { in: cenarioIds } } }),
+    prisma.recebimentoProjetado.count({ where: { status: "recebido", venda: { cenarioId: { in: cenarioIds } } } }),
+    prisma.desembolsoCusto.count({ where: { status: "realizado", custo: { cenarioId: { in: cenarioIds } } } }),
+    prisma.custo.count({ where: { cenarioId: { in: cenarioIds }, status: "realizado", categoria: { tipoIncidencia: "fixo" } } }),
+  ]);
+  return { vendas, recebimentosRecebidos, parcelasCustoPagas, custosFixosRealizados };
 }

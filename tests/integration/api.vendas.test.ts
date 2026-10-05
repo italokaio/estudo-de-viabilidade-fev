@@ -141,7 +141,7 @@ describe("API — vendas (Fase 2.1)", () => {
   it("bloqueia edição de uma venda distratada", async () => {
     const { cenarioId, unidadeId, condicaoPagamentoId } = await cadastrarEmpreendimentoComEstoque();
     const venda = await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/vendas`, payload: { unidadeId, condicaoPagamentoId, mesOrigem: 1 } });
-    await app.inject({ method: "POST", url: `/api/vendas/${venda.json().id}/distrato`, payload: {} });
+    await app.inject({ method: "POST", url: `/api/vendas/${venda.json().id}/distrato`, payload: { mesDistrato: 1 } });
 
     const editada = await app.inject({ method: "PATCH", url: `/api/vendas/${venda.json().id}`, payload: { comprador: "Novo Nome" } });
     expect(editada.statusCode).toBe(400);
@@ -151,7 +151,7 @@ describe("API — vendas (Fase 2.1)", () => {
     const { cenarioId, unidadeId, condicaoPagamentoId } = await cadastrarEmpreendimentoComEstoque();
     const venda = await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/vendas`, payload: { unidadeId, condicaoPagamentoId, mesOrigem: 1 } });
 
-    const distrato = await app.inject({ method: "POST", url: `/api/vendas/${venda.json().id}/distrato`, payload: {} });
+    const distrato = await app.inject({ method: "POST", url: `/api/vendas/${venda.json().id}/distrato`, payload: { mesDistrato: 1 } });
     expect(distrato.statusCode).toBe(201);
 
     const unidade = await prisma.unidade.findUnique({ where: { id: unidadeId } });

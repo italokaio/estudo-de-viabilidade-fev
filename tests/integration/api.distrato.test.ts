@@ -53,7 +53,7 @@ describe("API — distrato", () => {
 
   it("registra distrato sem nada recebido ainda: valor retido e a reembolsar são zero", async () => {
     const { tipologiaId, vendaId } = await cadastrarVendaAVista();
-    const res = await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato` });
+    const res = await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato`, payload: { mesDistrato: 1 } });
     expect(res.statusCode).toBe(201);
     expect(res.json().valorRecebidoAteDistrato).toBe("0.00");
     expect(res.json().valorRetido).toBe("0.00");
@@ -64,30 +64,30 @@ describe("API — distrato", () => {
     expect(unidades[0].venda.status).toBe("distratada");
   });
 
-  it("calcula retenção sobre o valor efetivamente recebido, não sobre o previsto", async () => {
+  it("calcula retenção sobre o previsto das parcelas anteriores ao mês do distrato, sem exigir recebimento marcado", async () => {
     const { cenarioId, vendaId } = await cadastrarVendaAVista();
     // RecebimentoProjetado so e persistido no primeiro recalculo do fluxo (achado F1) -- forca esse recalculo antes de listar.
     await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
     const recebimentos = (await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/recebimentos` })).json();
     expect(recebimentos).toHaveLength(1);
-    await app.inject({ method: "PATCH", url: `/api/recebimentos/${recebimentos[0].id}`, payload: { valorRealizado: "100000" } });
+    const previsto = Number(recebimentos[0].valorPrevisto);
 
-    const res = await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato`, payload: { percentualRetencao: "0.2" } });
+    const res = await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato`, payload: { mesDistrato: 2, percentualRetencao: "0.2" } });
     expect(res.statusCode).toBe(201);
-    expect(res.json().valorRecebidoAteDistrato).toBe("100000.00");
-    expect(res.json().valorRetido).toBe("20000.00");
-    expect(res.json().valorReembolsar).toBe("80000.00");
+    expect(Number(res.json().valorRecebidoAteDistrato)).toBeCloseTo(previsto, 2);
+    expect(Number(res.json().valorRetido)).toBeCloseTo(previsto * 0.2, 2);
+    expect(Number(res.json().valorReembolsar)).toBeCloseTo(previsto * 0.8, 2);
   });
 
   it("rejeita distrato de venda já distratada", async () => {
     const { vendaId } = await cadastrarVendaAVista();
-    await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato` });
-    const segunda = await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato` });
+    await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato`, payload: { mesDistrato: 1 } });
+    const segunda = await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato`, payload: { mesDistrato: 1 } });
     expect(segunda.statusCode).toBe(400);
   });
 
   it("404 para venda inexistente", async () => {
-    const res = await app.inject({ method: "POST", url: "/api/vendas/id-inexistente/distrato" });
+    const res = await app.inject({ method: "POST", url: "/api/vendas/id-inexistente/distrato", payload: { mesDistrato: 1 } });
     expect(res.statusCode).toBe(404);
   });
 
@@ -96,7 +96,7 @@ describe("API — distrato", () => {
     const antes = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
     expect(antes.json().fluxo[0].entradas).toBe("100000.00");
 
-    await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato` });
+    await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato`, payload: { mesDistrato: 1 } });
 
     const depois = await app.inject({ method: "GET", url: `/api/cenarios/${cenarioId}/fluxo-caixa` });
     expect(depois.json().fluxo[0].entradas).toBe("0.00");
@@ -104,7 +104,7 @@ describe("API — distrato", () => {
 
   it("desfaz o distrato: venda volta ativa, unidade volta vendida", async () => {
     const { tipologiaId, vendaId } = await cadastrarVendaAVista();
-    await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato` });
+    await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato`, payload: { mesDistrato: 1 } });
 
     const del = await app.inject({ method: "DELETE", url: `/api/vendas/${vendaId}/distrato` });
     expect(del.statusCode).toBe(204);
@@ -116,7 +116,7 @@ describe("API — distrato", () => {
 
   it("bloqueia desfazer distrato se a unidade já foi revendida", async () => {
     const { tipologiaId, cenarioId, unidadeId, vendaId } = await cadastrarVendaAVista();
-    await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato` });
+    await app.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato`, payload: { mesDistrato: 1 } });
 
     // revende a mesma unidade (agora em estoque) gerando uma nova venda
     await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/premissas-velocidade`, payload: { itens: [{ tipologiaId, mes: 2, unidadesPrevistas: "1" }] } });
@@ -147,7 +147,7 @@ describe("API — distrato", () => {
     await appAdmin.inject({ method: "POST", url: `/api/cenarios/${cenarioRes.json().id}/gerar-vendas` });
     const unidades = (await appAdmin.inject({ method: "GET", url: `/api/tipologias/${tip.json().id}/unidades` })).json();
     const vendaId = unidades[0].venda.id as string;
-    await appAdmin.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato` });
+    await appAdmin.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato`, payload: { mesDistrato: 1 } });
 
     const appUsuario = await buildAuthenticatedApp("usuario");
     const res = await appUsuario.inject({ method: "DELETE", url: `/api/vendas/${vendaId}/distrato` });
@@ -187,7 +187,7 @@ describe("API — distrato", () => {
     const loginUsuario = await rawApp.inject({ method: "POST", url: "/api/auth/login", payload: { email: "usuario.distrato@local.test", senha: "senha123" } });
     const cookieUsuario = loginUsuario.headers["set-cookie"] as string;
 
-    const res = await rawApp.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato`, headers: { cookie: cookieUsuario } });
+    const res = await rawApp.inject({ method: "POST", url: `/api/vendas/${vendaId}/distrato`, headers: { cookie: cookieUsuario }, payload: { mesDistrato: 1 } });
     expect(res.statusCode).toBe(404);
 
     await rawApp.close();

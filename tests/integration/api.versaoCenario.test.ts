@@ -175,7 +175,7 @@ describe("API — versão de cenário (duplicar)", () => {
     expect(versoes.find((v: any) => v.id === cenarioId).nome).toBe("Base");
   });
 
-  it("os indicadores de cada versão refletem os dados daquele cenário especificamente (o derivado, sem vendas, tem VPL diferente do original)", async () => {
+  it("no fixture deste teste (premissa igual às vendas reais do original), o derivado projeta a mesma receita e o mesmo VPL", async () => {
     const { cenarioId } = await cadastrarCenarioCompleto();
     const dup = await app.inject({ method: "POST", url: `/api/cenarios/${cenarioId}/duplicar`, payload: { nome: "Base v2" } });
     const novoId = dup.json().id as string;
@@ -184,10 +184,10 @@ describe("API — versão de cenário (duplicar)", () => {
     const versoes = res.json().versoes;
     const original = versoes.find((v: any) => v.id === cenarioId);
     const derivado = versoes.find((v: any) => v.id === novoId);
-    // o original tem vendas geradas (VPL positivo pela receita); o
-    // derivado nao copia vendas (achado F10) -- so tem o custo de 50000,
-    // sem nenhuma receita -- VPL do derivado deve ser mais negativo.
-    expect(Number(derivado.vpl)).toBeLessThan(Number(original.vpl));
+    // Igualdade vale SO neste fixture: a premissa reproduz exatamente as vendas
+    // reais do original (mesma quantidade, mesmo mes, mesmo preco). Em geral o
+    // derivado so iguala o original quando a premissa copiada bate com as vendas.
+    expect(Number(derivado.vpl)).toBeCloseTo(Number(original.vpl), 2);
   });
 
   it("404 para cenário inexistente na comparação", async () => {
