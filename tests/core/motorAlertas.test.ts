@@ -9,8 +9,11 @@ describe("motor de alertas de risco", () => {
     necessidadeMaximaCapital: new Decimal(0),
     mesPico: 1,
     mesRecuperacao: 1,
+    mesRecuperacaoDescontado: 1,
     saldoFinal: new Decimal(0),
     vpl: new Decimal(0),
+    tir: null,
+    margemLiquida: null,
   };
 
   function entradaVazia(): EntradaAlertas {

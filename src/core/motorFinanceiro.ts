@@ -3,7 +3,7 @@ import { calcularAlertas, type Alerta } from "./motorAlertas.js";
 import { corrigirDesembolsos, corrigirRecebimentos } from "./motorCorrecao.js";
 import { gerarDesembolsosMensais, type ContextoCustos } from "./motorCustos.js";
 import { calcularFinanciamento, type FinanciamentoInput, type PontoFinanciamento } from "./motorFinanciamento.js";
-import { calcularIndicadores, consolidarFluxoCaixa } from "./motorFluxoCaixa.js";
+import { calcularIndicadores, calcularMargemLiquida, consolidarFluxoCaixa } from "./motorFluxoCaixa.js";
 import { gerarRecebimentos } from "./motorRecebimentos.js";
 import type { CustoInput, DesembolsoMensal, FluxoMensal, IndicadoresFluxo, PontoCronograma, PontoIndiceCorrecao, RecebimentoGerado, VendaInput } from "./types.js";
 
@@ -19,10 +19,20 @@ export interface EntradaMotorFinanceiro {
   financiamento?: FinanciamentoInput;
   /** limite de necessidade maxima de capital sobre o VGV, para o alerta "necessidade_maxima_alta" (achado F15) -- omitido = usa o padrao de 30% do motorAlertas */
   limiteNecessidadeMaximaCapital?: Decimal;
+  /** VGV que nao e caixa (permutas, ja somado ao valor atribuido) -- entra so no denominador da margem liquida, nunca no fluxo */
+  vgvNaoCaixa?: Decimal;
+  /** recebimentos de vendas distratadas ate o mes anterior ao distrato -- entram no fluxo como entrada real */
+  recebimentosPreDistrato?: RecebimentoGerado[];
+  /** reembolso devido em cada distrato, saida real no mes do distrato */
+  reembolsos?: { mes: number; valor: Decimal }[];
 }
 
 export interface SaidaMotorFinanceiro {
   recebimentos: RecebimentoGerado[];
+  /** total de recebimentos de vendas (ativas + parcelas de vendas distratadas anteriores ao distrato), sem liberacoes de financiamento -- mesma base das entradas de venda do fluxo */
+  totalRecebimentosPrevisto: Decimal;
+  /** parcelas de vendas distratadas anteriores ao mes do distrato (entram no fluxo e no total de recebimentos) */
+  recebimentosPreDistrato: RecebimentoGerado[];
   /** desembolsos de custo, nominais (sem correcao monetaria) -- ver src/db/servicoMotor.ts, persistirDesembolsosCusto (achado F21) */
   desembolsos: DesembolsoMensal[];
   fluxo: FluxoMensal[];
@@ -83,8 +93,15 @@ export function executarMotorFinanceiro(entrada: EntradaMotorFinanceiro): SaidaM
     .filter((f) => !f.amortizacao.isZero())
     .map((f) => ({ custoId: "financiamento", mes: f.mes, valor: f.amortizacao }));
 
-  const fluxo = consolidarFluxoCaixa([...recebimentos, ...liberacoesComoRecebimentos], [...desembolsos, ...amortizacoesComoDesembolsos], entrada.horizonteMeses);
-  const indicadores = calcularIndicadores(fluxo, entrada.taxaDescontoMensal);
+  const reembolsosComoDesembolsos: DesembolsoMensal[] = (entrada.reembolsos ?? []).filter((r) => !r.valor.isZero()).map((r) => ({ custoId: "distrato", mes: r.mes, valor: r.valor }));
+  const fluxo = consolidarFluxoCaixa(
+    [...recebimentos, ...(entrada.recebimentosPreDistrato ?? []), ...liberacoesComoRecebimentos],
+    [...desembolsos, ...amortizacoesComoDesembolsos, ...reembolsosComoDesembolsos],
+    entrada.horizonteMeses,
+  );
+  const vgv = entrada.vendas.reduce((acc, v) => acc.plus(v.valorVenda), new Decimal(0)).plus(entrada.vgvNaoCaixa ?? 0);
+  const indicadoresBase = calcularIndicadores(fluxo, entrada.taxaDescontoMensal);
+  const indicadores = { ...indicadoresBase, margemLiquida: calcularMargemLiquida(indicadoresBase.saldoFinal, vgv) };
 
   const mesOrigemPorVenda = new Map(entrada.vendas.map((v) => [v.id, v.mesOrigem]));
   const corrigidos = corrigirRecebimentos(recebimentos, mesOrigemPorVenda, entrada.indiceCorrecao ?? []);
@@ -124,6 +141,11 @@ export function executarMotorFinanceiro(entrada: EntradaMotorFinanceiro): SaidaM
     const atual = saidasCorrigidasPorMes.get(f.mes) ?? new Decimal(0);
     saidasCorrigidasPorMes.set(f.mes, atual.plus(f.amortizacao));
   }
+  for (const r of entrada.reembolsos ?? []) {
+    if (r.valor.isZero()) continue;
+    const atual = saidasCorrigidasPorMes.get(r.mes) ?? new Decimal(0);
+    saidasCorrigidasPorMes.set(r.mes, atual.plus(r.valor));
+  }
   const saidasCorrigidas = Array.from({ length: entrada.horizonteMeses }, (_, i) => {
     const mes = i + 1;
     return { mes, valor: saidasCorrigidasPorMes.get(mes) ?? new Decimal(0) };
@@ -141,5 +163,7 @@ export function executarMotorFinanceiro(entrada: EntradaMotorFinanceiro): SaidaM
     entrada.limiteNecessidadeMaximaCapital,
   );
 
-  return { recebimentos, desembolsos, fluxo, indicadores, entradasCorrigidas, saidasCorrigidas, financiamento, alertas };
+  const totalRecebimentosPrevisto = [...recebimentos, ...(entrada.recebimentosPreDistrato ?? [])].reduce((acc, r) => acc.plus(r.valorPrevisto), new Decimal(0));
+
+  return { recebimentos, recebimentosPreDistrato: entrada.recebimentosPreDistrato ?? [], totalRecebimentosPrevisto, desembolsos, fluxo, indicadores, entradasCorrigidas, saidasCorrigidas, financiamento, alertas };
 }

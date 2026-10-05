@@ -35,6 +35,9 @@ export function validarCondicaoPagamento(condicao: CondicaoPagamento): Resultado
     if (m.tipoDistribuicao === "mes_fixo" && m.mesFixo === undefined) {
       erros.push(`modalidade "${m.nome}" e mes_fixo mas nao tem mesFixo`);
     }
+    if (m.mesFinal !== undefined && m.mesFinal !== null && (m.tipoDistribuicao !== "nivelada" || !Number.isInteger(m.mesFinal) || m.mesFinal < 1)) {
+      erros.push(`modalidade "${m.nome}" tem mesFinal invalido: so vale para nivelada, como inteiro >= 1`);
+    }
     if (m.percentual.lessThan(0) || m.percentual.greaterThan(1)) {
       erros.push(`modalidade "${m.nome}" tem percentual fora do intervalo 0..1: ${m.percentual.toString()}`);
     }

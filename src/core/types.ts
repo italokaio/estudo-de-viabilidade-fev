@@ -21,6 +21,8 @@ export interface ModalidadePagamento {
   periodicidadeMeses?: number;
   /** obrigatorio para tipoDistribuicao = "mes_fixo" */
   mesFixo?: number;
+  /** para "nivelada": ultimo mes (inclusive) em que o valor e distribuido; ausente = ate o horizonte */
+  mesFinal?: number;
   /** para "mes_fixo": em quantas parcelas iguais o valor e dividido, a partir de mesFixo */
   repeticoesSobreTotal: number;
   /** para "periodica": gerar evento com valor proporcional mesmo sem ciclo completo restante */
@@ -134,8 +136,14 @@ export interface IndicadoresFluxo {
   necessidadeMaximaCapital: Decimal;
   mesPico: number | null;
   mesRecuperacao: number | null;
+  /** payback descontado: mesmo criterio de mesRecuperacao, sobre o acumulado descontado pela TMA */
+  mesRecuperacaoDescontado: number | null;
   saldoFinal: Decimal;
   vpl: Decimal;
+  /** TIR mensal (a.m.), ou null quando o fluxo nao tem entradas e saidas de sinais opostos -- ver calcularTIRMensal */
+  tir: Decimal | null;
+  /** Margem liquida = saldo final / VGV, ou null quando nao ha VGV -- ver calcularMargemLiquida */
+  margemLiquida: Decimal | null;
 }
 
 /**

@@ -132,6 +132,9 @@ model Cenario {
   // motor (LIMITE_NECESSIDADE_MAXIMA_SOBRE_VGV_PADRAO); preenchido, o
   // alerta "necessidade_maxima_alta" passa a disparar acima deste valor.
   limiteNecessidadeMaximaCapital String? // decimal-as-string, 0..1
+  // Taxa de desconto mensal (TMA) usada no VPL deste cenario. Nulo = padrao do
+  // sistema (0,5% a.m., ver TAXA_DESCONTO_MENSAL_PADRAO em src/core).
+  taxaDescontoMensal             String? // decimal-as-string, 0..1
   // Ancora de calendario para a importacao de extrato bancario (achado
   // F27, docs/DECISOES.md): o "mes" em todo o sistema sempre foi um
   // inteiro relativo (mes 1, mes 2...), nunca uma data real -- nulo =
@@ -302,6 +305,7 @@ model ModalidadePagamento {
   tipoDistribuicao     String // unica | nivelada | periodica | sobre_total
   periodicidadeMeses   Int?
   mesFixo              Int?
+  mesFinal             Int?
   repeticoesSobreTotal Int      @default(1)
   geraEventoParcial    Boolean  @default(false)
   ordem                Int      @default(0)
@@ -405,6 +409,8 @@ model CategoriaCusto {
   empreendimentoId String? // nulo = categoria padrao do sistema, reutilizavel entre empreendimentos
   nome             String
   tipoIncidencia   String // fixo | pct_vgv | pct_execucao | pct_recebido
+  // Papel economico da categoria: "custo" (padrao), "comissao_corretagem" (deduzida do VGV liquido) ou "tributo" (destacada no relatorio).
+  papel            String @default("custo")
 
   empreendimento Empreendimento? @relation(fields: [empreendimentoId], references: [id])
   custos         Custo[]
@@ -595,6 +601,8 @@ model Distrato {
   empreendimentoId         String
   vendaId                  String   @unique
   dataDistrato             DateTime @default(now())
+  // Mes relativo (1..horizonte) em que o distrato acontece: a saida do reembolso e os recebimentos ate o mes anterior entram no fluxo. Nulo = distrato antigo, sem efeito no fluxo.
+  mesDistrato              Int?
   valorRecebidoAteDistrato String // decimal-as-string, soma dos RecebimentoProjetado.valorRealizado ja marcados "recebido" no momento do distrato
   percentualRetencao       String // decimal-as-string, 0..1 -- fracao do valor recebido que a incorporadora retem
   valorRetido              String // decimal-as-string = valorRecebidoAteDistrato * percentualRetencao

@@ -48,15 +48,16 @@ function gerarEventosDaModalidade(
       return [evento(venda, modalidade, venda.mesOrigem, valorTotalModalidade)];
 
     case "nivelada": {
-      const mesesRestantes = horizonteMeses - venda.mesOrigem;
+      const mesLimite = modalidade.mesFinal !== undefined ? Math.min(modalidade.mesFinal, horizonteMeses) : horizonteMeses;
+      const mesesRestantes = mesLimite - venda.mesOrigem;
       if (mesesRestantes <= 0) {
-        // venda ocorre no ultimo mes do horizonte ou depois: nao ha janela
+        // venda ocorre no ultimo mes do horizonte (ou do mesFinal) ou depois: nao ha janela
         // para parcelar — todo o valor cai no proprio mes da venda.
         return [evento(venda, modalidade, venda.mesOrigem, valorTotalModalidade)];
       }
       const valorParcela = valorTotalModalidade.dividedBy(mesesRestantes);
       const eventos: RecebimentoGerado[] = [];
-      for (let mes = venda.mesOrigem + 1; mes <= horizonteMeses; mes++) {
+      for (let mes = venda.mesOrigem + 1; mes <= mesLimite; mes++) {
         eventos.push(evento(venda, modalidade, mes, valorParcela));
       }
       return eventos;
