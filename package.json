@@ -17,7 +17,9 @@
     "seed:admin": "tsx src/import/seedAdmin.ts",
     "seed:aguas-claras": "tsx src/import/seedAguasClaras.ts",
     "verificar:aguas-claras": "tsx src/import/seedAguasClaras.ts --limpar",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "npm install --include=dev --prefix api && npm install --include=dev --prefix web && npx prisma generate && npm run build --prefix web",
+    "start": "npx prisma db push --skip-generate && npm run start --prefix api"
   },
   "license": "UNLICENSED",
   "devDependencies": {

@@ -1,5 +1,9 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
+import staticFiles from "@fastify/static";
 import rateLimit from "@fastify/rate-limit";
 import { Decimal } from "decimal.js";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
@@ -110,6 +114,11 @@ declare module "fastify" {
 
 const NOME_COOKIE_SESSAO = "sessao";
 const DURACAO_COOKIE_SEGUNDOS = 60 * 60 * 24 * 7;
+// RAILWAY_ENVIRONMENT (nao NODE_ENV): o Railway injeta essa variavel sozinho em
+// todo deploy, sem nenhuma configuracao manual. NODE_ENV=production faria o
+// "npm install" pular as devDependencies (prisma, tsx, typescript estao lá),
+// quebrando o build -- por isso o cookie seguro nao depende dela.
+const EM_PRODUCAO = process.env.NODE_ENV === "production" || Boolean(process.env.RAILWAY_ENVIRONMENT);
 
 /**
  * Permissão por empreendimento (achado F5, docs/DECISOES.md): checa acesso
@@ -215,6 +224,23 @@ export async function buildApp() {
   // real errar a senha algumas vezes, mas barra um script automatizado.
   await app.register(rateLimit, { global: false });
 
+  // Em producao a propria API serve o build do web (um unico servico, sem
+  // CORS entre dominios). Em dev o web roda por conta propria no Vite
+  // (porta 5173, com proxy para /api) e web/dist nao existe -- por isso o
+  // registro so acontece se a pasta de build estiver presente, senao a
+  // suite de testes (que chama buildApp() centenas de vezes) quebraria.
+  const distWeb = join(dirname(fileURLToPath(import.meta.url)), "../../web/dist");
+  if (existsSync(distWeb)) {
+    await app.register(staticFiles, { root: distWeb });
+    app.setNotFoundHandler((req, reply) => {
+      if (req.url.startsWith("/api/")) {
+        reply.code(404);
+        return reply.send({ erro: "Rota não encontrada" });
+      }
+      return reply.sendFile("index.html");
+    });
+  }
+
   // Toda rota /api/* exige sessao valida, exceto login (senao ninguem
   // consegue entrar) e logout (um cookie invalido ainda precisa poder ser
   // limpo). Permissao e propositalmente grossa nesta fase (achado, ver
@@ -249,6 +275,7 @@ export async function buildApp() {
       reply.setCookie(NOME_COOKIE_SESSAO, resultado.token, {
         httpOnly: true,
         sameSite: "lax",
+        secure: EM_PRODUCAO,
         path: "/",
         maxAge: DURACAO_COOKIE_SEGUNDOS,
       });
@@ -259,7 +286,7 @@ export async function buildApp() {
   app.post("/api/auth/logout", async (req, reply) => {
     const token = req.cookies[NOME_COOKIE_SESSAO];
     if (token) await encerrarSessao(token);
-    reply.clearCookie(NOME_COOKIE_SESSAO, { path: "/" });
+    reply.clearCookie(NOME_COOKIE_SESSAO, { path: "/", secure: EM_PRODUCAO });
     return { ok: true };
   });
 

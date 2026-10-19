@@ -52,6 +52,43 @@ tests/integration/      testes de ponta a ponta (golden numbers, isolamento, API
 docs/                   documentação viva do projeto
 ```
 
+## Deploy (Railway)
+
+Um serviço só: a própria API (Fastify) serve o build do `web` (a tela não usa rotas de
+URL, então não precisa de configuração de SPA além do fallback para `index.html`, já
+feito em `api/src/app.ts`). Sem segundo serviço, sem CORS entre domínios.
+
+1. No painel do Railway, crie um projeto a partir deste repositório (GitHub).
+2. Adicione um **volume** ao serviço (ex.: montado em `/data`) — é onde o SQLite mora;
+   sem volume, o banco se perde a cada deploy.
+3. Variáveis de ambiente do serviço:
+   - `DATABASE_URL=file:/data/prod.db` (o caminho precisa estar dentro do volume).
+   - **Não defina `NODE_ENV=production`**: isso faz o `npm install` pular as
+     devDependencies (`prisma`, `tsx`, `typescript` estão lá) e quebra o build. O cookie
+     de sessão já fica seguro em produção sozinho, via `RAILWAY_ENVIRONMENT`, que o
+     próprio Railway injeta sem configuração nenhuma.
+   - `CORS_ORIGINS` não é necessário (mesma origem); só é relevante se a tela algum dia
+     for servida por outro domínio.
+4. Build e start já estão em `railway.json` (instala as três pastas com devDependencies,
+   gera o client do Prisma, builda o `web`; no start, `prisma db push` — idempotente,
+   seguro de rodar a cada deploy — e sobe a API). Pode testar localmente antes:
+   ```bash
+   npm run build
+   npm start
+   ```
+5. Gere o domínio público na aba "Settings" do serviço (o `*.up.railway.app` grátis
+   já serve, sem precisar comprar domínio).
+6. Depois do primeiro deploy, crie o primeiro admin uma vez, pela aba de comando do
+   próprio Railway (ou um shell conectado ao serviço), com as mesmas variáveis de
+   ambiente do serviço:
+   ```bash
+   npm run seed:admin -- <email> <nome> <senha>
+   ```
+
+`prisma db push` nunca roda com `--accept-data-loss`: se uma mudança de schema algum dia
+exigir isso, o deploy falha em vez de arriscar apagar dado de produção silenciosamente —
+nesse caso a decisão é manual.
+
 ## Seed do Residencial Águas Claras (banco de teste)
 
 Recria o empreendimento Residencial Águas Claras (cenários Base, Otimista e Pessimista) pela API, no banco de teste `prisma/test.db`, e confere os indicadores contra os valores esperados. Fica fora da suíte principal.
