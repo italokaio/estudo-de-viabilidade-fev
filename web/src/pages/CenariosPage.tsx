@@ -116,7 +116,7 @@ export function CenariosPage() {
   const nomesPorId = useMemo(() => new Map((detalhe?.cenarios ?? []).map((c) => [c.id, c.nome])), [detalhe]);
 
   return <PermissoesProvider nivel={nivelDoEmpreendimento(empreendimentos, empreendimentoId)}>(
-    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
+    <div className="pagina" style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 12, color: "var(--ink-muted)", fontWeight: 600 }}>{detalhe ? detalhe.nome : "Carregando…"}</div>

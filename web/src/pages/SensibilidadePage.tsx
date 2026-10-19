@@ -85,7 +85,7 @@ export function SensibilidadePage() {
   const selecionado = empreendimentos.flatMap((e) => e.cenarios.map((c) => ({ emp: e.nome, cen: c }))).find((x) => x.cen.id === cenarioId);
 
   return (
-    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
+    <div className="pagina" style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 12, color: "var(--ink-muted)", fontWeight: 600 }}>

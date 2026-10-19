@@ -123,7 +123,7 @@ export function CadastroPage() {
   }
 
   return <PermissoesProvider nivel={nivelDoEmpreendimento(empreendimentos, selecionadoId)}>(
-    <div style={{ flex: 1, padding: "26px 32px", overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
+    <div className="pagina" style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }} onClickCapture={() => setErro(null)} onSubmitCapture={() => setErro(null)}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 12, color: "var(--ink-muted)", fontWeight: 600 }}>Empreendimento · Tipologia · Unidade</div>
@@ -138,7 +138,7 @@ export function CadastroPage() {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16, alignItems: "start" }}>
+      <div className="cadastro-grid" style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16, alignItems: "start" }}>
         <ListaEmpreendimentos
           empreendimentos={empreendimentos}
           carregando={carregandoLista}

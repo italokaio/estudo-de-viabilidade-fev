@@ -44,3 +44,82 @@ button {
 :root[data-theme="dark"] .brand-logo-dark {
   display: block;
 }
+
+/* Responsivo — casca do app (barra lateral + containers de página) */
+
+.pagina {
+  padding: 26px 32px;
+}
+
+.sidebar {
+  width: 216px;
+  flex: none;
+  height: 100%;
+}
+
+.sidebar-backdrop,
+.topo-mobile {
+  display: none;
+}
+
+/* Abaixo de 720px: a barra lateral vira uma gaveta sobreposta, fechada por
+   padrão — fica no ar o espaço inteiro pra tela de uma tabela, que já é
+   estreita sem a barra fixa de 216px tirando mais espaço ainda. */
+@media (max-width: 720px) {
+  .pagina {
+    padding: 14px 16px;
+  }
+
+  .cadastro-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* As telas são densas, com muita linha "nome + valor + botões" num só
+     flex row — por padrão nenhum desses elementos encolhe abaixo do
+     próprio conteúdo, então uma linha larga estoura a tela inteira sem
+     aviso (o scroll fica escondido dentro de .pagina, não aparece como
+     barra na borda). Isso não deixa o conteúdo bonito no celular — só
+     garante que ele quebra/rola de forma contida, em vez de vazar.
+     Reorganizar cada linha fica pra uma rodada própria de mobile. */
+  .pagina,
+  .pagina * {
+    min-width: 0;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  }
+  .sidebar.aberta {
+    transform: translateX(0);
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 19;
+  }
+
+  .topo-mobile {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    flex: none;
+  }
+
+  /* Tabela não estoura a largura da tela — rola por dentro dela mesma, sem
+     empurrar o resto da página. Redesenho das colunas fica pra outra rodada. */
+  table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+}

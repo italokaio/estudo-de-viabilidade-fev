@@ -52,23 +52,23 @@ export function Sidebar({
   onNavegar,
   usuario,
   onSair,
+  aberta,
 }: {
   pagina: Pagina;
   onNavegar: (p: Pagina) => void;
   usuario: Usuario;
   onSair: () => void;
+  aberta?: boolean;
 }) {
   return (
     <div
+      className={aberta ? "sidebar aberta" : "sidebar"}
       style={{
-        width: 216,
-        flex: "none",
         background: "var(--surface)",
         borderRight: "1px solid var(--border)",
         padding: "20px 14px",
         display: "flex",
         flexDirection: "column",
-        height: "100%",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", padding: "4px 8px 22px" }}>

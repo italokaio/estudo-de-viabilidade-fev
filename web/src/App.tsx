@@ -18,6 +18,7 @@ export default function App() {
   const [usuario, setUsuario] = useState<Usuario | null | undefined>(undefined);
   const [pagina, setPagina] = useState<Pagina>("fluxo");
   const [sessaoExpirada, setSessaoExpirada] = useState(false);
+  const [menuAberto, setMenuAberto] = useState(false);
 
   useEffect(() => {
     fetchUsuarioAtual()
@@ -63,8 +64,30 @@ export default function App() {
 
   return <UsuarioContext.Provider value={usuario}>(
     <div style={{ display: "flex", height: "100vh", background: "var(--bg)" }}>
-      <Sidebar pagina={pagina} onNavegar={setPagina} usuario={usuario} onSair={sair} />
+      {menuAberto && <div className="sidebar-backdrop" onClick={() => setMenuAberto(false)} />}
+      <Sidebar
+        pagina={pagina}
+        onNavegar={(p) => {
+          setPagina(p);
+          setMenuAberto(false);
+        }}
+        usuario={usuario}
+        onSair={sair}
+        aberta={menuAberto}
+      />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <div className="topo-mobile">
+          <button
+            type="button"
+            onClick={() => setMenuAberto(true)}
+            aria-label="Abrir menu"
+            style={{ background: "transparent", border: "none", padding: 8, cursor: "pointer", color: "var(--ink-primary)" }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h18M3 12h18M3 18h18" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
         {pagina === "fluxo" && <FluxoCaixaPage />}
         {pagina === "cadastro" && <CadastroPage />}
         {pagina === "vendas" && <VendasPage />}
