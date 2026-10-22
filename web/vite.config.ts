@@ -14,3 +14,4 @@ export default defineConfig({
     },
   },
 });
+// forca invalidar cache de build apos troca de icones
